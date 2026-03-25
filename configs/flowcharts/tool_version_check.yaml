@@ -1,0 +1,57 @@
+# Example flowchart with tool calling nodes
+# Demonstrates tool execution and result aggregation
+# Compatible with both state-based and message-based routing
+
+nodes:
+  CheckPython:
+    type: toolcall
+    command: "python --version"
+    save_to: "python_version"
+    error_handling: "continue"
+    extraction: {}
+    set: {}
+    inputs: [default]
+    outputs: [default]
+  
+  CheckGit:
+    type: toolcall
+    command: "git --version"
+    save_to: "git_version"
+    error_handling: "continue"
+    extraction: {}
+    set: {}
+    inputs: [default]
+    outputs: [default]
+  
+  SummarizeVersions:
+    type: prompt
+    prompt: |
+      Summarize the installed versions:
+      
+      Python: {python_version[stdout]}
+      Git: {git_version[stdout]}
+      
+      Provide a brief compatibility assessment.
+    extraction: {}
+    set: {}
+    inputs: [default]
+    outputs: [default]
+
+edges:
+  - from: CheckPython
+    to: CheckGit
+    condition:
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+  
+  - from: CheckGit
+    to: SummarizeVersions
+    condition:
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+
+start_node: CheckPython

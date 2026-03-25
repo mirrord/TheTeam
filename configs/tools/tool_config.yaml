@@ -1,0 +1,81 @@
+# Tool Configuration for pithos Agent Tool Calling
+
+# Enable or disable tool calling system
+enabled: true
+
+# Maximum execution time for any tool (seconds)
+timeout: 30
+
+# Maximum size of captured output (bytes)
+max_output_size: 10000
+
+# Filtering mode: 'include', 'exclude', or 'all'
+# - 'include': Only tools in the include list are allowed
+# - 'exclude': All tools except those in exclude list are allowed
+# - 'all': All discovered tools are allowed (apply exclude list only)
+mode: include
+
+# List of tools to include (used when mode is 'include')
+include:
+  - python
+  - python3
+  - pip
+  - pip3
+  - git
+  - curl
+  - wget
+  - node
+  - npm
+  - npx
+  - echo
+  - cat
+  - ls
+  - dir
+  - pwd
+  - cd
+  - grep
+  - find
+  - which
+  - where
+
+# List of tools to exclude (used when mode is 'exclude' or 'all')
+# These are dangerous commands that should never be allowed
+exclude:
+  - rm
+  - rmdir
+  - del
+  - erase
+  - format
+  - shutdown
+  - reboot
+  - poweroff
+  - init
+  - kill
+  - killall
+  - pkill
+  - dd
+  - mkfs
+  - fdisk
+
+# Manual tool descriptions (override auto-discovered descriptions)
+descriptions:
+  python: "Python interpreter for running scripts and commands"
+  python3: "Python 3 interpreter"
+  pip: "Python package installer"
+  pip3: "Python 3 package installer"
+  git: "Distributed version control system"
+  curl: "Transfer data from or to a server using various protocols"
+  wget: "Download files from the web"
+  node: "JavaScript runtime built on Chrome's V8 engine"
+  npm: "Node.js package manager"
+  npx: "Execute Node.js packages"
+  echo: "Display a line of text"
+  cat: "Concatenate and display file contents"
+  ls: "List directory contents"
+  dir: "List directory contents (Windows)"
+  pwd: "Print working directory"
+  cd: "Change directory"
+  grep: "Search text using patterns"
+  find: "Search for files in directory hierarchy"
+  which: "Locate a command"
+  where: "Locate a command (Windows)"

@@ -154,3 +154,8 @@ results/
 *.jpg
 *.jpeg
 *.gif
+uv.lock
+.github/copilot-instructions.md
+frontend/package-lock.json
+data/conversations
+package-lock.json

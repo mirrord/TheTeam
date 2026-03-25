@@ -1,0 +1,64 @@
+# Memory Tool Configuration for pithos Vector Database
+
+# Enable or disable memory tool
+enabled: true
+
+# Directory for persistent vector database storage
+persist_directory: "./data/memory"
+
+# Embedding function to use
+# Options: 'default' (ChromaDB's default), 'sentence-transformers', 'openai'
+embedding_function: default
+
+# Maximum number of results to return in a single query
+max_results: 10
+
+# Similarity threshold for filtering results (0.0 to 1.0)
+# Higher values mean stricter matching (more relevant results)
+# Results with relevance_score below this threshold are filtered out
+similarity_threshold: 0.5
+
+# Default metadata to attach to all entries
+# This can be overridden per entry
+default_metadata:
+  source: "pithos"
+  version: "1.0"
+
+# Categories configuration (optional)
+# Define preset categories with specific settings
+categories:
+  # Example: technical documentation
+  docs:
+    description: "Technical documentation and guides"
+    max_entries: 1000
+  
+  # Example: code snippets
+  code:
+    description: "Code examples and snippets"
+    max_entries: 500
+  
+  # Example: conversations
+  conversations:
+    description: "Agent conversation history"
+    max_entries: 100
+
+# Collection cache settings
+# The in-process cache avoids redundant round-trips to ChromaDB for recently
+# used collections.  Both strategies can be used together or independently.
+collection_cache:
+  # TTL in seconds before an idle cache entry is considered stale and
+  # re-fetched on the next access.  Set to 0 to disable TTL eviction.
+  ttl_seconds: 300  # 5 minutes
+
+  # Maximum number of collections to keep in cache at once.  When the limit
+  # is reached the least-recently-used entry is evicted.  Set to 0 for an
+  # unlimited cache (memory-bound only).
+  max_size: 50
+
+# Export/Import settings
+export:
+  # Include embeddings in exports (makes files larger)
+  include_embeddings: false
+  
+  # Pretty print JSON exports
+  pretty_print: true
