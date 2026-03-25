@@ -25,7 +25,7 @@ TODO:
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/Dane Howard/theteam.git
+   git clone https://github.com/mirrord/theteam.git
    cd theteam
    ```
 

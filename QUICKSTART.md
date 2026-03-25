@@ -13,7 +13,7 @@ Get up and running with TheTeam's web interface in minutes!
 
 ```bash
 # Clone the repository
-git clone https://github.com/Dane Howard/theteam.git
+git clone https://github.com/mirrord/theteam.git
 cd theteam
 
 # Create and activate virtual environment
@@ -194,7 +194,7 @@ pytest --cov                     # With coverage
 ## Getting Help
 
 - Check the [documentation](docs/)
-- Report issues on [GitHub](https://github.com/Dane Howard/theteam/issues)
+- Report issues on [GitHub](https://github.com/mirrord/theteam/issues)
 - Read the troubleshooting section above
 
 Happy coordinating! 🚀

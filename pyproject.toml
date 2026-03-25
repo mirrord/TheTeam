@@ -63,9 +63,9 @@ pithos-benchmark = "benchmarks.easy_problems.main:main"
 theteam = "theteam.server:main"
 
 [project.urls]
-Documentation = "https://github.com/Dane Howard/theteam#readme"
-Issues = "https://github.com/Dane Howard/theteam/issues"
-Source = "https://github.com/Dane Howard/theteam"
+Documentation = "https://github.com/mirrord/theteam#readme"
+Issues = "https://github.com/mirrord/theteam/issues"
+Source = "https://github.com/mirrord/theteam"
 
 [tool.hatch.version]
 path = "src/theteam/__about__.py"
