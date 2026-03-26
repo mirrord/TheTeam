@@ -103,7 +103,7 @@ Open your browser to `http://localhost:3000`
 3. Configure:
    - ID: `my-agent`
    - Name: `My First Agent`
-   - Model: `llama3.2:latest`
+   - Model: `glm-4.7-flash:latest`
    - (Optional) Add a system prompt
 4. Click "Save"
 5. Test with a sample prompt
