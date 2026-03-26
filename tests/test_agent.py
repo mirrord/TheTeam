@@ -189,80 +189,80 @@ class TestOllamaAgent:
     """Test OllamaAgent class."""
 
     def test_agent_creation(self):
-        agent = OllamaAgent("llama3.2")
-        assert agent.default_model == "llama3.2"
-        assert agent.agent_name == "llama3.2"
+        agent = OllamaAgent("glm-4.7-flash")
+        assert agent.default_model == "glm-4.7-flash"
+        assert agent.agent_name == "glm-4.7-flash"
         assert agent.default_system_prompt == ""
         assert "default" in agent.contexts
         assert agent.current_context == "default"
 
     def test_agent_creation_with_name(self):
-        agent = OllamaAgent("llama3.2", agent_name="my_agent")
+        agent = OllamaAgent("glm-4.7-flash", agent_name="my_agent")
         assert agent.agent_name == "my_agent"
 
     def test_agent_creation_with_system_prompt(self):
-        agent = OllamaAgent("llama3.2", system_prompt="You are helpful")
+        agent = OllamaAgent("glm-4.7-flash", system_prompt="You are helpful")
         assert agent.default_system_prompt == "You are helpful"
         assert agent.contexts["default"].get_system_prompt() == "You are helpful"
 
     def test_agent_creation_default_temperature(self):
         """Test that agent has default temperature of 0.7."""
-        agent = OllamaAgent("llama3.2")
+        agent = OllamaAgent("glm-4.7-flash")
         assert agent.temperature == 0.7
 
     def test_agent_creation_with_custom_temperature(self):
         """Test creating agent with custom temperature."""
-        agent = OllamaAgent("llama3.2", temperature=0.3)
+        agent = OllamaAgent("glm-4.7-flash", temperature=0.3)
         assert agent.temperature == 0.3
 
     def test_agent_creation_with_zero_temperature(self):
         """Test creating agent with temperature 0 (deterministic)."""
-        agent = OllamaAgent("llama3.2", temperature=0)
+        agent = OllamaAgent("glm-4.7-flash", temperature=0)
         assert agent.temperature == 0
 
     def test_agent_creation_default_max_tokens(self):
         """Test that agent has default max_tokens of -1 (unlimited)."""
-        agent = OllamaAgent("llama3.2")
+        agent = OllamaAgent("glm-4.7-flash")
         assert agent.max_tokens == -1
 
     def test_agent_creation_with_custom_max_tokens(self):
         """Test creating agent with custom max_tokens."""
-        agent = OllamaAgent("llama3.2", max_tokens=1024)
+        agent = OllamaAgent("glm-4.7-flash", max_tokens=1024)
         assert agent.max_tokens == 1024
 
     def test_agent_creation_with_both_temperature_and_max_tokens(self):
         """Test creating agent with both custom temperature and max_tokens."""
-        agent = OllamaAgent("llama3.2", temperature=0.5, max_tokens=512)
+        agent = OllamaAgent("glm-4.7-flash", temperature=0.5, max_tokens=512)
         assert agent.temperature == 0.5
         assert agent.max_tokens == 512
 
     def test_create_context(self):
-        agent = OllamaAgent("llama3.2")
+        agent = OllamaAgent("glm-4.7-flash")
         agent.create_context("test_ctx", "Test prompt")
         assert "test_ctx" in agent.contexts
         assert agent.current_context == "test_ctx"
         assert agent.contexts["test_ctx"].get_system_prompt() == "Test prompt"
 
     def test_create_context_uses_default_prompt(self):
-        agent = OllamaAgent("llama3.2", system_prompt="Default")
+        agent = OllamaAgent("glm-4.7-flash", system_prompt="Default")
         agent.create_context("test")
         assert agent.contexts["test"].get_system_prompt() == "Default"
 
     def test_switch_context(self):
-        agent = OllamaAgent("llama3.2")
+        agent = OllamaAgent("glm-4.7-flash")
         agent.create_context("ctx1")
         agent.create_context("ctx2")
         agent.switch_context("ctx1")
         assert agent.current_context == "ctx1"
 
     def test_switch_context_nonexistent_raises(self):
-        agent = OllamaAgent("llama3.2")
+        agent = OllamaAgent("glm-4.7-flash")
         with pytest.raises(ValueError, match="does not exist"):
             agent.switch_context("nonexistent")
 
     def test_copy_context(self):
         """Test context copying creates independent history."""
-        agent = OllamaAgent("llama3.2")
+        agent = OllamaAgent("glm-4.7-flash")
         agent.contexts["default"].add_message(UserMsg("Original message"))
 
         agent.copy_context("default", "copied")
@@ -276,18 +276,18 @@ class TestOllamaAgent:
         assert len(agent.contexts["copied"].message_history) == 1
 
     def test_copy_context_with_new_prompt(self):
-        agent = OllamaAgent("llama3.2")
+        agent = OllamaAgent("glm-4.7-flash")
         agent.copy_context("default", "copied", new_system_prompt="New prompt")
         assert agent.contexts["copied"].get_system_prompt() == "New prompt"
 
     def test_copy_context_nonexistent_raises(self):
-        agent = OllamaAgent("llama3.2")
+        agent = OllamaAgent("glm-4.7-flash")
         with pytest.raises(ValueError, match="does not exist"):
             agent.copy_context("nonexistent", "new")
 
     def test_share_context(self):
         """Test that shared context returns reference."""
-        agent1 = OllamaAgent("llama3.2")
+        agent1 = OllamaAgent("glm-4.7-flash")
         agent1.contexts["default"].add_message(UserMsg("Shared message"))
 
         shared_ctx = agent1.share_context("default")
@@ -295,8 +295,8 @@ class TestOllamaAgent:
 
     def test_use_shared_context(self):
         """Test that agents can share the same context."""
-        agent1 = OllamaAgent("llama3.2")
-        agent2 = OllamaAgent("llama3.2")
+        agent1 = OllamaAgent("glm-4.7-flash")
+        agent2 = OllamaAgent("glm-4.7-flash")
 
         agent1.contexts["default"].add_message(UserMsg("From agent1"))
         shared_ctx = agent1.share_context("default")
@@ -310,7 +310,7 @@ class TestOllamaAgent:
         assert len(agent1.contexts["default"].message_history) == 2
 
     def test_list_contexts(self):
-        agent = OllamaAgent("llama3.2")
+        agent = OllamaAgent("glm-4.7-flash")
         agent.create_context("ctx1")
         agent.create_context("ctx2")
         contexts = agent.list_contexts()
@@ -319,50 +319,50 @@ class TestOllamaAgent:
         assert "ctx2" in contexts
 
     def test_get_current_context_name(self):
-        agent = OllamaAgent("llama3.2")
+        agent = OllamaAgent("glm-4.7-flash")
         assert agent.get_current_context_name() == "default"
         agent.create_context("test")
         assert agent.get_current_context_name() == "test"
 
     def test_set_system_prompt(self):
-        agent = OllamaAgent("llama3.2")
+        agent = OllamaAgent("glm-4.7-flash")
         agent.set_system_prompt("New prompt")
         assert agent.contexts["default"].get_system_prompt() == "New prompt"
 
     def test_set_system_prompt_no_context_raises(self):
-        agent = OllamaAgent("llama3.2")
+        agent = OllamaAgent("glm-4.7-flash")
         agent.current_context = None
         with pytest.raises(ValueError, match="No context selected"):
             agent.set_system_prompt("Test")
 
     def test_clear_context(self):
-        agent = OllamaAgent("llama3.2")
+        agent = OllamaAgent("glm-4.7-flash")
         agent.contexts["default"].add_message(UserMsg("Test"))
         agent.clear_context()
         assert len(agent.contexts["default"].message_history) == 0
 
     def test_clear_specific_context(self):
-        agent = OllamaAgent("llama3.2")
+        agent = OllamaAgent("glm-4.7-flash")
         agent.create_context("test")
         agent.contexts["test"].add_message(UserMsg("Test"))
         agent.clear_context("test")
         assert len(agent.contexts["test"].message_history) == 0
 
     def test_delete_context(self):
-        agent = OllamaAgent("llama3.2")
+        agent = OllamaAgent("glm-4.7-flash")
         agent.create_context("test")
         agent.delete_context("test")
         assert "test" not in agent.contexts
 
     def test_delete_current_context_switches_to_default(self):
-        agent = OllamaAgent("llama3.2")
+        agent = OllamaAgent("glm-4.7-flash")
         agent.create_context("test")
         assert agent.current_context == "test"
         agent.delete_context("test")
         assert agent.current_context == "default"
 
     def test_delete_context_nonexistent_raises(self):
-        agent = OllamaAgent("llama3.2")
+        agent = OllamaAgent("glm-4.7-flash")
         with pytest.raises(ValueError, match="does not exist"):
             agent.delete_context("nonexistent")
 
@@ -373,7 +373,7 @@ class TestOllamaAgent:
         mock_response.message.content = "Response from LLM"
         mock_chat.return_value = mock_response
 
-        agent = OllamaAgent("llama3.2")
+        agent = OllamaAgent("glm-4.7-flash")
         response = agent.send("Hello")
 
         assert response == "Response from LLM"
@@ -388,7 +388,7 @@ class TestOllamaAgent:
         mock_response.message.content = "Response"
         mock_chat.return_value = mock_response
 
-        agent = OllamaAgent("llama3.2", temperature=0.5)
+        agent = OllamaAgent("glm-4.7-flash", temperature=0.5)
         agent.send("Hello")
 
         # Verify chat was called with correct temperature in options
@@ -404,7 +404,7 @@ class TestOllamaAgent:
         mock_response.message.content = "Response"
         mock_chat.return_value = mock_response
 
-        agent = OllamaAgent("llama3.2")  # Should default to 0.7
+        agent = OllamaAgent("glm-4.7-flash")  # Should default to 0.7
         agent.send("Hello")
 
         call_kwargs = mock_chat.call_args[1]
@@ -417,7 +417,7 @@ class TestOllamaAgent:
         mock_response.message.content = "Response"
         mock_chat.return_value = mock_response
 
-        agent = OllamaAgent("llama3.2", max_tokens=1024)
+        agent = OllamaAgent("glm-4.7-flash", max_tokens=1024)
         agent.send("Hello")
 
         # Verify chat was called with correct max_tokens (as num_predict) in options
@@ -433,7 +433,7 @@ class TestOllamaAgent:
         mock_response.message.content = "Response"
         mock_chat.return_value = mock_response
 
-        agent = OllamaAgent("llama3.2")  # Should default to -1
+        agent = OllamaAgent("glm-4.7-flash")  # Should default to -1
         agent.send("Hello")
 
         call_kwargs = mock_chat.call_args[1]
@@ -448,7 +448,7 @@ class TestOllamaAgent:
         mock_response.message.content = "Response"
         mock_chat.return_value = mock_response
 
-        agent = OllamaAgent("llama3.2", temperature=0.3, max_tokens=512)
+        agent = OllamaAgent("glm-4.7-flash", temperature=0.3, max_tokens=512)
         agent.send("Hello")
 
         call_kwargs = mock_chat.call_args[1]
@@ -462,7 +462,7 @@ class TestOllamaAgent:
         mock_response.message.content = "Response"
         mock_chat.return_value = mock_response
 
-        agent = OllamaAgent("llama3.2", max_tokens=-1)
+        agent = OllamaAgent("glm-4.7-flash", max_tokens=-1)
         agent.send("Hello")
 
         call_kwargs = mock_chat.call_args[1]
@@ -476,7 +476,7 @@ class TestOllamaAgent:
         mock_response.message.content = "Response"
         mock_chat.return_value = mock_response
 
-        agent = OllamaAgent("llama3.2")
+        agent = OllamaAgent("glm-4.7-flash")
         agent.create_context("test")
         agent.switch_context("default")
         agent.send("Hello", context_name="test")
@@ -491,17 +491,19 @@ class TestOllamaAgent:
         mock_response.message.content = "Response"
         mock_chat.return_value = mock_response
 
-        agent = OllamaAgent("llama3.2")
+        agent = OllamaAgent("glm-4.7-flash")
         agent.send("Hello", context_name="new_context")
 
         assert "new_context" in agent.contexts
 
     def test_to_dict(self):
-        agent = OllamaAgent("llama3.2", agent_name="test_agent", system_prompt="Prompt")
+        agent = OllamaAgent(
+            "glm-4.7-flash", agent_name="test_agent", system_prompt="Prompt"
+        )
         d = agent.to_dict()
 
         assert d["name"] == "test_agent"
-        assert d["default_model"] == "llama3.2"
+        assert d["default_model"] == "glm-4.7-flash"
         assert d["system_prompt"] == "Prompt"
         assert d["temperature"] == 0.7  # Default temperature
         assert d["max_tokens"] == -1  # Default max_tokens (unlimited)
@@ -509,25 +511,25 @@ class TestOllamaAgent:
 
     def test_to_dict_with_custom_temperature(self):
         """Test serialization includes custom temperature."""
-        agent = OllamaAgent("llama3.2", temperature=0.3)
+        agent = OllamaAgent("glm-4.7-flash", temperature=0.3)
         d = agent.to_dict()
         assert d["temperature"] == 0.3
 
     def test_to_dict_with_custom_max_tokens(self):
         """Test serialization includes custom max_tokens."""
-        agent = OllamaAgent("llama3.2", max_tokens=1024)
+        agent = OllamaAgent("glm-4.7-flash", max_tokens=1024)
         d = agent.to_dict()
         assert d["max_tokens"] == 1024
 
     def test_to_dict_with_both_custom_params(self):
         """Test serialization includes both custom temperature and max_tokens."""
-        agent = OllamaAgent("llama3.2", temperature=0.2, max_tokens=512)
+        agent = OllamaAgent("glm-4.7-flash", temperature=0.2, max_tokens=512)
         d = agent.to_dict()
         assert d["temperature"] == 0.2
         assert d["max_tokens"] == 512
 
     def test_to_dict_with_multiple_contexts(self):
-        agent = OllamaAgent("llama3.2")
+        agent = OllamaAgent("glm-4.7-flash")
         agent.create_context("ctx1", "Prompt1")
         agent.contexts["ctx1"].add_message(UserMsg("Test"))
 
@@ -539,13 +541,13 @@ class TestOllamaAgent:
     def test_from_dict(self, mock_config_manager):
         """Test creating agent from dictionary with new default_model key."""
         config = {
-            "default_model": "llama3.2",
+            "default_model": "glm-4.7-flash",
             "name": "test_agent",
             "system_prompt": "Test prompt",
         }
         agent = OllamaAgent.from_dict(config, mock_config_manager)
 
-        assert agent.default_model == "llama3.2"
+        assert agent.default_model == "glm-4.7-flash"
         assert agent.agent_name == "test_agent"
         assert agent.default_system_prompt == "Test prompt"
         assert agent.temperature == 0.7  # Default when not specified
@@ -554,13 +556,13 @@ class TestOllamaAgent:
     def test_from_dict_legacy_model_key(self, mock_config_manager):
         """Test backward compatibility with legacy 'model' key."""
         config = {
-            "model": "llama3.2",
+            "model": "glm-4.7-flash",
             "name": "test_agent",
             "system_prompt": "Test prompt",
         }
         agent = OllamaAgent.from_dict(config, mock_config_manager)
 
-        assert agent.default_model == "llama3.2"
+        assert agent.default_model == "glm-4.7-flash"
         assert agent.agent_name == "test_agent"
         assert agent.default_system_prompt == "Test prompt"
 
@@ -568,7 +570,7 @@ class TestOllamaAgent:
     def test_from_dict_with_temperature(self, mock_config_manager):
         """Test creating agent from dictionary with temperature."""
         config = {
-            "default_model": "llama3.2",
+            "default_model": "glm-4.7-flash",
             "name": "test_agent",
             "system_prompt": "Test prompt",
             "temperature": 0.2,
@@ -581,7 +583,7 @@ class TestOllamaAgent:
     def test_from_dict_with_zero_temperature(self, mock_config_manager):
         """Test creating agent with temperature 0 from config."""
         config = {
-            "default_model": "llama3.2",
+            "default_model": "glm-4.7-flash",
             "name": "test_agent",
             "temperature": 0,
         }
@@ -593,7 +595,7 @@ class TestOllamaAgent:
     def test_from_dict_with_max_tokens(self, mock_config_manager):
         """Test creating agent from dictionary with max_tokens."""
         config = {
-            "model": "llama3.2",
+            "model": "glm-4.7-flash",
             "name": "test_agent",
             "max_tokens": 1024,
         }
@@ -605,7 +607,7 @@ class TestOllamaAgent:
     def test_from_dict_with_both_params(self, mock_config_manager):
         """Test creating agent with both temperature and max_tokens from config."""
         config = {
-            "model": "llama3.2",
+            "model": "glm-4.7-flash",
             "temperature": 0.3,
             "max_tokens": 512,
         }
@@ -618,7 +620,7 @@ class TestOllamaAgent:
     def test_from_dict_defaults(self, mock_config_manager):
         """Test that from_dict uses defaults when params not specified."""
         config = {
-            "model": "llama3.2",
+            "model": "glm-4.7-flash",
         }
         agent = OllamaAgent.from_dict(config, mock_config_manager)
 
@@ -638,7 +640,7 @@ class TestOllamaAgentStreaming:
         chunk3.message.content = "!"
         mock_chat.return_value = iter([chunk1, chunk2, chunk3])
 
-        agent = OllamaAgent("llama3.2")
+        agent = OllamaAgent("glm-4.7-flash")
         chunks = list(agent.stream("Hi"))
 
         assert chunks == ["Hello", " world", "!"]
@@ -648,7 +650,7 @@ class TestOllamaAgentStreaming:
         """stream() must call ollama with stream=True."""
         mock_chat.return_value = iter([])
 
-        agent = OllamaAgent("llama3.2")
+        agent = OllamaAgent("glm-4.7-flash")
         list(agent.stream("test"))
 
         call_kwargs = mock_chat.call_args[1]
@@ -661,7 +663,7 @@ class TestOllamaAgentStreaming:
         chunk.message.content = "response"
         mock_chat.return_value = iter([chunk])
 
-        agent = OllamaAgent("llama3.2")
+        agent = OllamaAgent("glm-4.7-flash")
         gen = agent.stream("Hello")
 
         # Generator has not been advanced at all — no code has run yet
@@ -684,7 +686,7 @@ class TestOllamaAgentStreaming:
             c.message.content = tok
         mock_chat.return_value = iter(chunks)
 
-        agent = OllamaAgent("llama3.2")
+        agent = OllamaAgent("glm-4.7-flash")
         list(agent.stream("question"))
 
         content = agent.contexts["default"].message_history[-1]["content"]
@@ -695,7 +697,7 @@ class TestOllamaAgentStreaming:
         """stream() should forward temperature in options."""
         mock_chat.return_value = iter([])
 
-        agent = OllamaAgent("llama3.2", temperature=0.2)
+        agent = OllamaAgent("glm-4.7-flash", temperature=0.2)
         list(agent.stream("Hi"))
 
         call_kwargs = mock_chat.call_args[1]
@@ -706,7 +708,7 @@ class TestOllamaAgentStreaming:
         """stream() should forward num_predict when max_tokens != -1."""
         mock_chat.return_value = iter([])
 
-        agent = OllamaAgent("llama3.2", max_tokens=512)
+        agent = OllamaAgent("glm-4.7-flash", max_tokens=512)
         list(agent.stream("Hi"))
 
         call_kwargs = mock_chat.call_args[1]
@@ -717,7 +719,7 @@ class TestOllamaAgentStreaming:
         """stream() must not include num_predict when max_tokens == -1."""
         mock_chat.return_value = iter([])
 
-        agent = OllamaAgent("llama3.2")  # default max_tokens = -1
+        agent = OllamaAgent("glm-4.7-flash")  # default max_tokens = -1
         list(agent.stream("Hi"))
 
         call_kwargs = mock_chat.call_args[1]
@@ -732,7 +734,7 @@ class TestOllamaAgentStreaming:
         c3.message.content = "B"
         mock_chat.return_value = iter([c1, c2, c3])
 
-        agent = OllamaAgent("llama3.2")
+        agent = OllamaAgent("glm-4.7-flash")
         result = list(agent.stream("Hi"))
 
         assert result == ["A", "", "B"]
@@ -746,7 +748,7 @@ class TestOllamaAgentStreaming:
 
         mock_chat.side_effect = ResponseError("boom")
 
-        agent = OllamaAgent("llama3.2")
+        agent = OllamaAgent("glm-4.7-flash")
         with pytest.raises(ResponseError):
             list(agent.stream("Hi"))
 

@@ -1,0 +1,39 @@
+name: io_nodes_demo
+description: Demonstration of the new IO nodes in the flowchart editor
+
+start_node: input
+
+nodes:
+  input:
+    type: chatinput
+    label: User Input
+    prompt_message: "Enter your question:"
+    save_to: user_question
+
+  process:
+    type: prompt
+    label: Process Question
+    prompt: |
+      Analyze the following question and provide a detailed answer:
+      {user_question}
+
+  output:
+    type: chatoutput
+    label: Display Answer
+    source: current_input
+    format_template: "Answer: {current_input}"
+
+edges:
+  - from: input
+    to: process
+    condition:
+      type: AlwaysCondition
+    priority: 1
+  
+  - from: process
+    to: output
+    condition:
+      type: AlwaysCondition
+    priority: 1
+
+use_message_routing: true

@@ -1,0 +1,51 @@
+name: file_io_demo
+description: Demonstration of file input/output nodes
+
+start_node: read_file
+
+nodes:
+  read_file:
+    type: fileinput
+    label: Read Input File
+    file_path: "data/input.txt"
+    save_to: file_content
+
+  analyze:
+    type: prompt
+    label: Analyze Content
+    prompt: |
+      Analyze the following content and summarize it:
+      {file_content}
+
+  save_result:
+    type: fileoutput
+    label: Save Analysis
+    file_path: "data/analysis_result.txt"
+    source: current_input
+    mode: w
+
+  display:
+    type: chatoutput
+    label: Show Result
+    source: current_input
+
+edges:
+  - from: read_file
+    to: analyze
+    condition:
+      type: AlwaysCondition
+    priority: 1
+  
+  - from: analyze
+    to: save_result
+    condition:
+      type: AlwaysCondition
+    priority: 1
+  
+  - from: save_result
+    to: display
+    condition:
+      type: AlwaysCondition
+    priority: 1
+
+use_message_routing: true

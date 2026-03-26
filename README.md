@@ -75,14 +75,14 @@ pithos-demo
 ```
 
 This provides a simple interface to:
-- Chat with a default model (llama3.2:3b)
+- Chat with a default model (glm-4.7-flash:latest)
 - Select from registered agent configurations
 - Use flowcharts to guide agent reasoning
 
 ### Chat with an Agent
 
 ```bash
-pithos-agent chat llama3.2:3b
+pithos-agent chat glm-4.7-flash:latest
 ```
 
 Or use a registered agent config:
@@ -94,7 +94,7 @@ pithos-agent chat llama-structured-reflect
 With a flowchart:
 
 ```bash
-pithos-agent chat llama3.2:3b --flowchart simple_reflect
+pithos-agent chat glm-4.7-flash:latest --flowchart simple_reflect
 ```
 
 ## Features
@@ -111,6 +111,8 @@ pithos-agent chat llama3.2:3b --flowchart simple_reflect
 - **Serialization**: Save and load agent states, contexts, and flowcharts
 - **Memory System**: Vector database for persistent knowledge storage and retrieval
 - **Conversation History**: Persistent per-agent conversation logging with full-text and semantic (RAG) search
+- **Automatic Context Compaction**: Summarise and archive old messages when history grows too large, keeping the context window manageable
+- **Automatic Memory Recall**: Surface relevant past memories via RAG before each response, without manual retrieval calls
 - **Structured Logging**: Runtime diagnostics via Python's `logging` module throughout all library modules
 
 ### Conversation History
@@ -120,7 +122,7 @@ pithos persists every message exchanged between an agent and users, enabling lat
 ```python
 from pithos import OllamaAgent
 
-agent = OllamaAgent("llama3.2")
+agent = OllamaAgent("glm-4.7-flash")
 agent.enable_history("./data/conversations")
 
 response = agent.send("Fix the authentication error")
@@ -150,6 +152,8 @@ pithos includes a vector database-based memory system for building persistent kn
 - Persistent local storage
 - Export/import for backup and migration
 - Metadata filtering for precise queries
+- **Automatic context compaction**: summarise old messages into an archived note when the history threshold is reached
+- **Automatic memory recall**: retrieve relevant stored knowledge via RAG and inject it before each agent response
 
 **Quick Start:**
 
@@ -158,7 +162,7 @@ from pithos import OllamaAgent, ConfigManager
 
 # Create agent and enable memory
 config_manager = ConfigManager()
-agent = OllamaAgent("llama3.2")
+agent = OllamaAgent("glm-4.7-flash")
 agent.enable_memory(config_manager)
 
 # Agent can now use memory operations
@@ -169,6 +173,31 @@ agent.send("Who created Python?")
 # Agent: retrievemem(facts, "Python creator")
 # System provides stored knowledge
 # Agent responds with the answer
+```
+
+**Automatic Context Compaction:**
+
+```python
+from pithos.agent.compaction import CompactionConfig
+
+agent.enable_compaction(CompactionConfig(
+    threshold=20,  # compact when history reaches 20 messages
+    keep_last=6,   # preserve the 6 most-recent messages
+))
+# Old messages are automatically summarised and replaced
+```
+
+**Automatic Memory Recall:**
+
+```python
+from pithos.agent.recall import RecallConfig
+
+agent.enable_memory(config_manager)
+agent.enable_recall(RecallConfig(
+    sources=["memory", "history"],
+    n_results=5,
+))
+# Relevant memories are injected before every response, automatically
 ```
 
 **CLI Usage:**
@@ -202,7 +231,95 @@ pithos-memory import backup.json
 - Create searchable code snippet libraries
 - Store conversation history semantically
 
-**See:** [Memory Tool Guide](docs/MEMORY.md) for detailed documentation.
+**See:** [Memory Tool Guide](docs/MEMORY.md) for detailed documentation, including the [Automatic Context Compaction](docs/MEMORY.md#automatic-context-compaction) and [Automatic Memory Recall](docs/MEMORY.md#automatic-memory-recall) sections.
+
+### Database Management
+
+pithos includes comprehensive database management tools for storing, searching, and managing flowcharts, conversation history, and knowledge bases.
+
+**Features:**
+- **Flowchart Database**: Persistent storage for flowcharts with metadata (tags, notes, descriptions)
+- **Universal Search**: Search across all databases (memory, history, flowcharts) simultaneously
+- **Exact Text Search**: Find specific text in any database
+- **Semantic Search**: ChromaDB-powered semantic search across all data
+- **Database Clearing**: Clear individual or all databases with confirmation
+- **Import/Export**: YAML import/export for flowcharts
+- **Tag Management**: Organize flowcharts with flexible tagging system
+- **Notes & Metadata**: Add freetext notes and rich metadata to flowcharts
+
+**Quick Start:**
+
+```python
+from pithos.database_manager import DatabaseManager
+from pithos.flowchart_store import FlowchartStore
+
+# Initialize database manager
+db_manager = DatabaseManager()
+
+# Search across all databases
+results = db_manager.search_all("authentication", semantic=True)
+for db_name, db_results in results.items():
+    print(f"{db_name}: {len(db_results)} results")
+
+# Store flowchart with metadata
+flowchart_store = FlowchartStore()
+flowchart_id = flowchart_store.store_flowchart(
+    name="Auth Flow",
+    config={"nodes": {...}, "edges": [...]},
+    description="User authentication workflow",
+    notes="Updated for OAuth2 support",
+    tags=["auth", "production", "v2.0"]
+)
+
+# Search flowcharts
+results = flowchart_store.search("authentication", semantic=True)
+for result in results:
+    print(f"{result.flowchart.name}: {result.relevance_score:.2f}")
+
+# Clear databases (with confirmation)
+db_manager.clear_all(confirm=True)
+```
+
+**CLI Usage:**
+
+```bash
+# Database management
+pithos-database info                         # Show database info
+pithos-database search "authentication"       # Search all databases
+pithos-database search "keyword" --exact      # Exact text search
+pithos-database clear all --confirm           # Clear all databases
+
+# Flowchart management
+pithos-flowcharts list                        # List all flowcharts
+pithos-flowcharts list --tags production      # Filter by tags
+pithos-flowcharts search "user login"         # Search flowcharts
+pithos-flowcharts import config.yaml          # Import from YAML
+pithos-flowcharts export fc_123 output.yaml   # Export to YAML
+pithos-flowcharts add-tags fc_123 "tag1,tag2" # Add tags
+pithos-flowcharts notes fc_123 "New notes"    # Update notes
+```
+
+**Web API:**
+
+```bash
+# Universal search
+POST /api/database/search
+{"query": "authentication", "semantic": true}
+
+# Flowchart operations
+GET  /api/database/flowcharts
+POST /api/database/flowcharts
+GET  /api/database/flowcharts/{id}
+PUT  /api/database/flowcharts/{id}
+DELETE /api/database/flowcharts/{id}
+POST /api/database/flowcharts/search
+
+# Clear databases
+POST /api/database/clear/{database}
+{"confirm": true}
+```
+
+**See:** [Database Management Guide](docs/DATABASE.md) for detailed documentation.
 
 ### Message-Based Routing
 
@@ -345,7 +462,7 @@ from pithos import OllamaAgent, ConfigManager
 
 # Create agent and enable tools
 config_manager = ConfigManager()
-agent = OllamaAgent("llama3.2")
+agent = OllamaAgent("glm-4.7-flash")
 agent.enable_tools(config_manager)
 
 # Agent can now use tools in responses
@@ -451,7 +568,7 @@ pytest tests/test_agent.py -v
 
 ### Test Statistics
 
-- **601 tests** covering all core modules
+- **748 tests** covering all core modules
 - All tests passing
 - Comprehensive coverage of:
   - Agent context management (copy vs share)
@@ -570,6 +687,92 @@ pithos-memory export python python_knowledge.json
 
 **See [MEMORY.md](docs/MEMORY.md) for detailed documentation.**
 
+### pithos-database
+
+Unified database management CLI for all pithos databases.
+
+```bash
+# Show database information
+pithos-database info
+
+# Clear specific database (requires --confirm)
+pithos-database clear memory --confirm
+pithos-database clear history --confirm
+pithos-database clear flowcharts --confirm
+
+# Clear all databases (requires --confirm)
+pithos-database clear all --confirm
+
+# Search across all databases
+pithos-database search "authentication"
+
+# Exact text search
+pithos-database search "specific_keyword" --exact
+
+# Limit results
+pithos-database search "machine learning" --limit 20
+```
+
+**See [DATABASE.md](docs/DATABASE.md) for detailed documentation.**
+
+### pithos-flowcharts
+
+Flowchart database management CLI for persistent flowchart storage.
+
+```bash
+# Import flowchart from YAML
+pithos-flowcharts import config.yaml
+
+# Import with specific ID
+pithos-flowcharts import config.yaml --id custom_id
+
+# Export flowchart to YAML
+pithos-flowcharts export fc_123 output.yaml
+
+# List flowcharts
+pithos-flowcharts list
+pithos-flowcharts list --tags production,critical
+pithos-flowcharts list --limit 10
+
+# Get flowchart details
+pithos-flowcharts get fc_123
+
+# Search flowcharts
+pithos-flowcharts search "authentication"
+pithos-flowcharts search "user login" --exact
+pithos-flowcharts search "payment" --tags production --limit 5
+
+# Manage tags
+pithos-flowcharts tags                           # List all tags
+pithos-flowcharts add-tags fc_123 "new,another"  # Add tags
+
+# Update notes
+pithos-flowcharts notes fc_123 "Updated implementation notes"
+
+# Delete flowchart
+pithos-flowcharts delete fc_123
+
+# Clear all flowcharts (requires --confirm)
+pithos-flowcharts clear --confirm
+```
+
+**Examples:**
+```bash
+# Import a flowchart with metadata
+pithos-flowcharts import auth_flow.yaml --id auth_v1
+
+# Search for authentication-related flowcharts in production
+pithos-flowcharts search "auth" --tags production
+
+# Export flowchart for backup
+pithos-flowcharts export auth_v1 backups/auth_flow_backup.yaml
+
+# Update flowchart notes
+pithos-flowcharts notes auth_v1 "Added OAuth2 support on 2024-03-26"
+```
+
+**See [DATABASE.md](docs/DATABASE.md) for detailed documentation.**
+
 ### pithos-benchmark
 
 Run benchmarks to evaluate and compare LLM agents and workflows.
@@ -621,7 +824,7 @@ configs/
 
 ```yaml
 # configs/agents/my-agent.yaml
-default_model: llama3.2:3b
+default_model: glm-4.7-flash:latest
 system_prompt: "You are a helpful assistant."
 ```
 

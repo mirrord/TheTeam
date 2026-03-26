@@ -1,0 +1,120 @@
+# Refined explicit reflection evaluation flowchart
+# Explicit critique and refinement loop (evaluation variant)
+# Compatible with both state-based and message-based routing
+
+nodes:
+  KneeJerk:
+    type: prompt
+    prompt: '{current_input}'
+    prompt_args:
+      record_answer: false
+      record_prompt: false
+    extraction: {}
+    set:
+      original_question: '{current_input}'
+    inputs: [default]
+    outputs: [default]
+  
+  EvaluateAnswer:
+    type: prompt
+    prompt: "|\n      Read the following question and answer, then perform the task below.\n      \n      <question>\n      {original_question}\n      </question>\n      \n      <answer>\n      {current_answer}\n      </answer>\n      \n      Carefully analyze this answer looking for any errors or inconsistencies. If\n      there are inconsistences, say CONTINUE and nothing else. If not, say DONE and\n      nothing else. Do not say anything except either \"CONTINUE\" or \"DONE\"."
+    prompt_args:
+      record_answer: false
+      record_prompt: false
+    extraction: {}
+    set:
+      current_answer: '{current_input}'
+    inputs: [default]
+    outputs: [default]
+  
+  CritiqueAnswer:
+    type: prompt
+    prompt: "|\n      Read the following question and answer, then perform the task below.\n      \n      <question>\n      {original_question}\n      </question>\n      \n      <answer>\n      {current_answer}\n      </answer>\n      \n      Carefully and critically analyze the answer above looking for any errors or\n      inconsistencies that may be present, then provide directions for correcting\n      the answer."
+    prompt_args:
+      record_answer: false
+      record_prompt: false
+    extraction: {}
+    set:
+      current_answer: '{current_input}'
+    inputs: [default]
+    outputs: [default]
+  
+  RefineAnswer:
+    type: prompt
+    prompt: "|\n      Read the following question, answer, and reflection. Then perform the task below.\n      \n      <question>\n      {original_question}\n      </question>\n      \n      <think>\n      {current_answer}\n      </think>\n      \n      <reflection>\n      {current_input}\n      </reflection>\n      \n      Now refine the answer given using the REFLECTION feedback. Output ONLY the refined\n      reasoning and solution to the question and no other text."
+    prompt_args:
+      record_answer: false
+      record_prompt: false
+    extraction: {}
+    inputs: [default]
+    outputs: [default]
+  
+  FinishAnswer:
+    type: prompt
+    prompt: "|\n      Answer the following question using the thought process below.\n      \n      <question>\n      {original_question}\n      </question>\n      \n      <think>\n      {current_answer}\n      </think>\n      \n      Output only the ANSWER in JSON format and no other text."
+    extraction: {}
+    inputs: [default]
+    outputs: [default]
+
+edges:
+  - from: KneeJerk
+    to: EvaluateAnswer
+    condition:
+      enabled: true
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+  
+  # Finish if \"DONE\" regex matches
+  - from: EvaluateAnswer
+    to: FinishAnswer
+    condition:
+      enabled: true
+      matchtype: match
+      regex: ^DONE
+      type: RegexCondition
+    priority: 1
+    output_key: default
+    input_key: default
+  
+  # Critique up to 3 times  
+  - from: EvaluateAnswer
+    to: CritiqueAnswer
+    condition:
+      enabled: true
+      limit: 3
+      type: CountCondition
+    priority: 2
+    output_key: default
+    input_key: default
+  
+  - from: CritiqueAnswer
+    to: RefineAnswer
+    condition:
+      enabled: true
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+  
+  - from: RefineAnswer
+    to: EvaluateAnswer
+    condition:
+      enabled: true
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+  
+  # Default: finish after iterations
+  - from: EvaluateAnswer
+    to: FinishAnswer
+    condition:
+      enabled: true
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+
+start_node: KneeJerk

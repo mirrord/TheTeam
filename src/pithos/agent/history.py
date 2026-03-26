@@ -110,6 +110,7 @@ class ConversationStore:
         self._conn = self._init_db()
 
         # Optional ChromaDB for semantic search
+        self._chroma_client: Any = None
         self._chroma_collection: Any = None
         if CHROMADB_AVAILABLE and chromadb is not None:
             try:
@@ -117,11 +118,13 @@ class ConversationStore:
                     path=persist_directory,
                     settings=ChromaSettings(anonymized_telemetry=False),
                 )
+                self._chroma_client = client
                 self._chroma_collection = client.get_or_create_collection(
                     name=_CHROMA_COLLECTION
                 )
             except Exception:
                 # Non-fatal: fall back to text search
+                self._chroma_client = None
                 self._chroma_collection = None
 
     # ------------------------------------------------------------------
@@ -548,6 +551,92 @@ class ConversationStore:
         """``True`` when ChromaDB is available and the vector index is ready."""
         return self._chroma_collection is not None
 
+    def clear_all(self) -> None:
+        """Clear all conversation history data.
+
+        Removes all messages, tags, and vector embeddings. Use with caution!
+        """
+        # Clear SQLite tables
+        self._conn.execute("DELETE FROM tags")
+        self._conn.execute("DELETE FROM messages_fts")
+        self._conn.execute("DELETE FROM messages")
+        self._conn.commit()
+
+        # Clear vector index if available
+        if self._chroma_client is not None:
+            try:
+                self._chroma_client.delete_collection(name=_CHROMA_COLLECTION)
+                # Recreate empty collection
+                self._chroma_collection = self._chroma_client.get_or_create_collection(
+                    name=_CHROMA_COLLECTION
+                )
+            except Exception:
+                pass
+
+    def search_exact(
+        self,
+        text: str,
+        agent_name: Optional[str] = None,
+        session_id: Optional[str] = None,
+        role: Optional[str] = None,
+    ) -> list[MessageRecord]:
+        """Search for exact text matches in conversation history.
+
+        Args:
+            text: Exact text to search for (case-insensitive substring match).
+            agent_name: Filter by agent name.
+            session_id: Filter by session ID.
+            role: Filter by role.
+
+        Returns:
+            List of matching MessageRecord objects.
+        """
+        conds = ["content LIKE ?"]
+        params: list[Any] = [f"%{text}%"]
+
+        if agent_name:
+            conds.append("agent_name = ?")
+            params.append(agent_name)
+        if session_id:
+            conds.append("session_id = ?")
+            params.append(session_id)
+        if role:
+            conds.append("role = ?")
+            params.append(role)
+
+        where = " AND ".join(conds)
+        rows = self._conn.execute(
+            f"SELECT * FROM messages WHERE {where} ORDER BY timestamp DESC",
+            params,
+        ).fetchall()
+
+        return self._rows_to_records(list(rows))
+
     def close(self) -> None:
-        """Close the underlying database connection."""
+        """Close all underlying database connections.
+
+        Releases both the SQLite connection and, when ChromaDB was
+        initialised, the ChromaDB PersistentClient.  On Windows this is
+        required before the containing directory can be deleted, because
+        both ``chroma.sqlite3`` and HNSW index files are held open by
+        the underlying chromadb System.
+        """
+        import gc
+
         self._conn.close()
+        if self._chroma_client is not None:
+            try:
+                # Stop all chromadb components (SegmentManager, HNSW indices,
+                # SQLite connections) before clearing the global cache.
+                system = getattr(self._chroma_client, "_system", None)
+                if system is not None and hasattr(system, "stop"):
+                    system.stop()
+            except Exception:
+                pass
+            try:
+                self._chroma_client.clear_system_cache()
+            except Exception:
+                pass
+            self._chroma_collection = None
+            self._chroma_client = None
+            gc.collect()  # ensure C-extension destructors run promptly

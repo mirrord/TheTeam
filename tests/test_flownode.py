@@ -565,9 +565,9 @@ class TestAgentPromptNode:
             agent="analyst",
             prompt="Analyze {data}",
             extraction={},
-            model="llama3.2:latest",
+            model="glm-4.7-flash:latest",
         )
-        assert node.model == "llama3.2:latest"
+        assert node.model == "glm-4.7-flash:latest"
 
     def test_agent_prompt_node_with_context_name(self):
         """Test AgentPromptNode with specific context."""
@@ -661,13 +661,13 @@ class TestAgentPromptNode:
             "agent": "analyst",
             "prompt": "Analyze {data}",
             "extraction": {},
-            "model": "llama3.2",
+            "model": "glm-4.7-flash",
         }
         node = AgentPromptNode.from_dict(data)
 
         assert node.agent == "analyst"
         assert node.prompt == "Analyze {data}"
-        assert node.model == "llama3.2"
+        assert node.model == "glm-4.7-flash"
 
 
 class TestGetHistoryNode:

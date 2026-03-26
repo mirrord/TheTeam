@@ -32,7 +32,7 @@ Demos:
 Agents:
 ```
 # Create a new agent
-agent = OllamaAgent("llama3.2")
+agent = OllamaAgent("glm-4.7-flash")
 
 # Prompt the model once & show its response
 rsp = agent.send("Why is the sky blue? Be concise.")

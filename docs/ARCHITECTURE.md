@@ -467,7 +467,7 @@ tests/
 
 ## Future Enhancements
 
-See the [GitHub Issues tracker](https://github.com/Dane Howard/theteam/issues) for the full roadmap. Key planned features:
+See the [GitHub Issues tracker](https://github.com/mirrord/theteam/issues) for the full roadmap. Key planned features:
 
 1. **Enhanced Multi-Agent Teams**: Advanced coordination patterns between multiple agents
 2. **RAG Integration**: Retrieval-augmented generation support

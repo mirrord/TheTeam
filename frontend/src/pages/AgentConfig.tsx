@@ -54,7 +54,7 @@ export default function AgentConfig() {
     setEditingConfig({
       id: '',
       name: 'New Agent',
-      model: 'llama3.2:latest',
+      model: 'glm-4.7-flash:latest',
       system_prompt: '',
       temperature: 0.7,
       max_tokens: 2048,

@@ -1,0 +1,92 @@
+# Message-based routing flowchart example
+# Demonstrates merge pattern with multiple inputs
+
+use_message_routing: true
+start_node: input_processor
+
+nodes:
+  # Initial input node
+  input_processor:
+    type: prompt
+    prompt: "Processing input: {default}"
+    extraction: {}
+    inputs: [default]
+    outputs: [processed]
+  
+  # Branch 1: Extract key information
+  extract_key_info:
+    type: prompt
+    prompt: "Extract key information from: {default}"
+    extraction:
+      key_info: "Key: (.*?)\n"
+    inputs: [default]
+    outputs: [key_data]
+  
+  # Branch 2: Extract metadata
+  extract_metadata:
+    type: prompt
+    prompt: "Extract metadata from: {default}"
+    extraction:
+      metadata: "Meta: (.*?)\n"
+    inputs: [default]
+    outputs: [meta_data]
+  
+  # Merge node: Combines both inputs
+  merge_results:
+    type: prompt
+    prompt: "Merging: {input_key} and {input_meta}"
+    extraction: {}
+    inputs: [input_key, input_meta]
+    outputs: [combined]
+  
+  # Final output node
+  final_output:
+    type: prompt
+    prompt: "Final result: {default}"
+    extraction: {}
+    inputs: [default]
+    outputs: [default]
+
+edges:
+  # Split: input processor sends to both branches
+  - from: input_processor
+    to: extract_key_info
+    condition:
+      type: always
+    priority: 1
+    output_key: processed
+    input_key: default
+  
+  - from: input_processor
+    to: extract_metadata
+    condition:
+      type: always
+    priority: 1
+    output_key: processed
+    input_key: default
+  
+  # Merge: both branches feed into merge node
+  - from: extract_key_info
+    to: merge_results
+    condition:
+      type: always
+    priority: 1
+    output_key: key_data
+    input_key: input_key
+  
+  - from: extract_metadata
+    to: merge_results
+    condition:
+      type: always
+    priority: 1
+    output_key: meta_data
+    input_key: input_meta
+  
+  # Final: merge sends to output
+  - from: merge_results
+    to: final_output
+    condition:
+      type: always
+    priority: 1
+    output_key: combined
+    input_key: default

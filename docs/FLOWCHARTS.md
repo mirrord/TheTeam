@@ -729,7 +729,7 @@ from pithos import Flowchart, OllamaAgent, ConfigManager
 config_manager = ConfigManager()
 flowchart = Flowchart.from_yaml("my_flow.yaml", config_manager)
 
-agent = OllamaAgent("llama3.2")
+agent = OllamaAgent("glm-4.7-flash")
 context = agent.create_context("test", flowchart=flowchart)
 
 # Execute flowchart

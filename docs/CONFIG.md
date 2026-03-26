@@ -43,16 +43,18 @@ Agent configs define model settings, system prompts, and flowcharts.
 **File:** `configs/agents/my-agent.yaml`
 
 ```yaml
-default_model: llama3.2:3b
+default_model: glm-4.7-flash:latest
 system_prompt: "You are a helpful assistant."
 temperature: 0.7  # Optional: Controls randomness (0.0-1.0). Default is 0.7.
 max_tokens: -1    # Optional: Maximum tokens to generate. -1 = unlimited (default).
 ```
 
+**NOTE**: While max_tokens is generally documented to be the maximum number of tokens per response, many models interpret this parameter as the maximum number of tokens allowed in the history *including* the response to be generated. As a result, setting this parameter to a small positive value can result in empty responses. For this reason, -1 is the default and generally recommended value for this parameter.
+
 ### Agent with Flowchart
 
 ```yaml
-default_model: llama3.2:3b
+default_model: glm-4.7-flash:latest
 system_prompt: "You are a reflective reasoner."
 inference: simple_reflect
 ```
@@ -60,7 +62,7 @@ inference: simple_reflect
 ### Structured Output Agent
 
 ```yaml
-default_model: llama3.2:3b
+default_model: glm-4.7-flash:latest
 system_prompt: "Provide structured analysis."
 structured_with_format: |
   {
@@ -73,7 +75,7 @@ structured_with_format: |
 ### Agent with Tools
 
 ```yaml
-default_model: llama3.2:3b
+default_model: glm-4.7-flash:latest
 system_prompt: "You are an assistant that can execute commands."
 enable_tools: true
 ```
@@ -128,13 +130,13 @@ Note: In Ollama, this is passed as `num_predict` in the options. When set to -1,
 
 ```python
 # Unlimited responses (default)
-agent = OllamaAgent("llama3.2")  # max_tokens=-1
+agent = OllamaAgent("glm-4.7-flash")  # max_tokens=-1
 
 # Explicitly set unlimited
-agent = OllamaAgent("llama3.2", max_tokens=-1)
+agent = OllamaAgent("glm-4.7-flash", max_tokens=-1)
 
 # Limit to 1024 tokens
-agent = OllamaAgent("llama3.2", max_tokens=1024)
+agent = OllamaAgent("glm-4.7-flash", max_tokens=1024)
 ```
 
 ### Loading Agent Configs
@@ -436,7 +438,7 @@ tool = tool_registry.get_tool("python")
 from pithos import OllamaAgent, ConfigManager
 
 config_manager = ConfigManager()
-agent = OllamaAgent("llama3.2")
+agent = OllamaAgent("glm-4.7-flash")
 
 # Enable tools
 agent.enable_tools(config_manager)
@@ -458,7 +460,7 @@ You can also create configurations dynamically:
 ```python
 from pithos import OllamaAgent, AgentContext
 
-agent = OllamaAgent("llama3.2:3b")
+agent = OllamaAgent("glm-4.7-flash:latest")
 agent.create_context("my-context", system_prompt="You are helpful.")
 ```
 

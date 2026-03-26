@@ -4,8 +4,8 @@ This provides a simple interactive demonstration of pithos capabilities.
 """
 
 import sys
-from .agent import OllamaAgent, interactive_chat
-from .config_manager import ConfigManager
+from pithos.agent import OllamaAgent, interactive_chat
+from pithos.config_manager import ConfigManager
 
 
 def main() -> None:
@@ -26,7 +26,7 @@ def main() -> None:
         print(f"Available agents: {', '.join(agents)}")
 
     print("\nOptions:")
-    print("  1. Chat with default model (llama3.2:3b)")
+    print("  1. Chat with default model (glm-4.7-flash)")
     if agents:
         print("  2. Chat with a registered agent")
     print("  q. Quit")
@@ -41,8 +41,8 @@ def main() -> None:
     agent = None
 
     if choice == "1":
-        print("\nUsing default model: llama3.2:3b")
-        agent = OllamaAgent(default_model="llama3.2:3b")
+        print("\nUsing default model: glm-4.7-flash")
+        agent = OllamaAgent(default_model="glm-4.7-flash")
 
     elif choice == "2" and agents:
         print("\nAvailable agents:")
@@ -56,11 +56,11 @@ def main() -> None:
             agent = OllamaAgent.from_config(agent_name, config_manager)
         except (ValueError, IndexError):
             print("Invalid choice. Using default model.")
-            agent = OllamaAgent(default_model="llama3.2:3b")
+            agent = OllamaAgent(default_model="glm-4.7-flash")
 
     else:
-        print("\nUsing default model: llama3.2:3b")
-        agent = OllamaAgent(default_model="llama3.2:3b")
+        print("\nUsing default model: glm-4.7-flash")
+        agent = OllamaAgent(default_model="glm-4.7-flash")
 
     print("\n" + "=" * 60)
     print("Starting interactive chat...")

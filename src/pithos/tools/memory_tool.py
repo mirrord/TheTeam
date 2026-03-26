@@ -19,6 +19,7 @@ except ImportError:
     chromadb = None
 
 from ..config_manager import ConfigManager
+from .tag_suggester import CategoryTagSuggester, TagSuggestion
 
 
 @dataclass
@@ -105,6 +106,9 @@ class MemoryStore:
         cache_config = self.config.get("collection_cache", {})
         self._cache_ttl: float = float(cache_config.get("ttl_seconds", 300))
         self._cache_max_size: int = int(cache_config.get("max_size", 50))
+
+        # Optional LLM-backed tag suggestions (disabled until enable_tag_suggestions() is called).
+        self._tag_suggester: Optional[CategoryTagSuggester] = None
 
     def _load_config(self) -> dict:
         """Load memory tool configuration."""
@@ -213,6 +217,21 @@ class MemoryStore:
         entry_metadata["timestamp"] = datetime.now().isoformat()
         entry_metadata["category"] = category
 
+        # Attach LLM-suggested tags when auto-suggestions are enabled.
+        if self._tag_suggester is not None:
+            try:
+                existing = self.list_categories()
+                suggestions = self._tag_suggester.suggest(content, existing)
+                if suggestions:
+                    entry_metadata["suggested_tags"] = [
+                        s.category for s in suggestions
+                    ]
+                    entry_metadata["suggested_tags_confidence"] = [
+                        round(s.confidence, 4) for s in suggestions
+                    ]
+            except Exception:
+                pass  # Suggestions are advisory; never block a store.
+
         # Get collection
         collection = self._get_collection(category)
 
@@ -281,6 +300,7 @@ class MemoryStore:
         query: str,
         n_results: Optional[int] = None,
         where: Optional[dict[str, Any]] = None,
+        min_relevance: Optional[float] = None,
     ) -> list[SearchResult]:
         """Retrieve relevant knowledge from a category.
 
@@ -289,6 +309,11 @@ class MemoryStore:
             query: The search query text.
             n_results: Maximum number of results to return. Uses config default if None.
             where: Optional metadata filter (e.g., {"source": "manual"}).
+            min_relevance: Minimum relevance score (0–1) for a result to be
+                included in the response.  When provided, overrides the
+                ``similarity_threshold`` value from config so that callers
+                (e.g. :class:`~pithos.agent.recall.AutoRecall`) can specify
+                their own threshold without modifying the global config.
 
         Returns:
             List of SearchResult objects, ordered by relevance.
@@ -334,8 +359,12 @@ class MemoryStore:
                     )
                 )
 
-        # Filter by similarity threshold
-        threshold = self.config.get("similarity_threshold", 0.7)
+        # Filter by similarity threshold.  If the caller supplied an explicit
+        # min_relevance, use that; otherwise fall back to the config value.
+        if min_relevance is not None:
+            threshold = min_relevance
+        else:
+            threshold = self.config.get("similarity_threshold", 0.7)
         search_results = [r for r in search_results if r.relevance_score >= threshold]
 
         return search_results
@@ -407,6 +436,128 @@ class MemoryStore:
             },
         }
 
+    # ------------------------------------------------------------------
+    # LLM-backed tag suggestions
+    # ------------------------------------------------------------------
+
+    def close(self) -> None:
+        """Close the ChromaDB client and release all database resources.
+
+        On Windows, ChromaDB holds file locks on ``chroma.sqlite3`` and
+        HNSW index files until the underlying system is stopped.  Call
+        this method before deleting the persistence directory to avoid a
+        ``PermissionError: [WinError 32]``.
+        """
+        import gc
+
+        self._collections.clear()
+        if self.client is not None:
+            try:
+                system = getattr(self.client, "_system", None)
+                if system is not None and hasattr(system, "stop"):
+                    system.stop()
+            except Exception:
+                pass
+            try:
+                self.client.clear_system_cache()
+            except Exception:
+                pass
+            self.client = None
+            gc.collect()  # ensure C-extension destructors run promptly
+
+    def enable_tag_suggestions(
+        self,
+        model: str,
+        max_suggestions: int = 3,
+        temperature: float = 0.2,
+        timeout: int = 30,
+    ) -> None:
+        """Enable automatic LLM-generated category tag suggestions.
+
+        When enabled, :meth:`store` will call the LLM to suggest up to
+        *max_suggestions* category tags for each piece of content stored.
+        The suggestions are attached to the entry's metadata under the keys
+        ``suggested_tags`` (list of tag strings) and
+        ``suggested_tags_confidence`` (parallel list of float scores).
+
+        Tag suggestions are purely advisory — they do not change the
+        *category* argument passed to :meth:`store` and a failure in the LLM
+        call will never prevent an entry from being stored.
+
+        Args:
+            model: Ollama model name to use for suggestions.
+            max_suggestions: Maximum number of suggestions per entry (1-10).
+            temperature: LLM sampling temperature (lower = more deterministic).
+            timeout: HTTP timeout in seconds for the LLM request.
+        """
+        self._tag_suggester = CategoryTagSuggester(
+            model=model,
+            max_suggestions=max_suggestions,
+            temperature=temperature,
+            timeout=timeout,
+        )
+
+    def disable_tag_suggestions(self) -> None:
+        """Disable automatic LLM tag suggestions."""
+        self._tag_suggester = None
+
+    @property
+    def tag_suggestions_enabled(self) -> bool:
+        """``True`` if LLM tag suggestions are currently active."""
+        return self._tag_suggester is not None
+
+    def suggest_categories(
+        self,
+        content: str,
+        max_suggestions: int = 3,
+        model: Optional[str] = None,
+    ) -> list[TagSuggestion]:
+        """Ask the LLM to suggest category tags for *content*.
+
+        This is a one-shot utility method that does **not** require
+        :meth:`enable_tag_suggestions` to be called first.  If a
+        :class:`~.tag_suggester.CategoryTagSuggester` is already configured
+        (via :meth:`enable_tag_suggestions`) and *model* is ``None``, the
+        existing suggester is reused; otherwise a temporary suggester is
+        created with the given *model*.
+
+        Args:
+            content: Text to generate category suggestions for.
+            max_suggestions: Maximum number of suggestions to return.
+            model: Ollama model name.  Required when
+                :meth:`enable_tag_suggestions` has not been called.
+
+        Returns:
+            List of :class:`~.tag_suggester.TagSuggestion` objects sorted by
+            descending confidence.  Empty list on error or if no LLM is
+            configured.
+
+        Raises:
+            ValueError: If no model is available (neither configured via
+                :meth:`enable_tag_suggestions` nor passed as *model*).
+        """
+        if self._tag_suggester is not None and model is None:
+            suggester = self._tag_suggester
+        elif model:
+            suggester = CategoryTagSuggester(
+                model=model,
+                max_suggestions=max_suggestions,
+            )
+        else:
+            raise ValueError(
+                "No LLM model configured. Pass model= or call enable_tag_suggestions() first."
+            )
+
+        existing = []
+        try:
+            existing = self.list_categories()
+        except Exception:
+            pass
+
+        return suggester.suggest(content, existing_categories=existing)
+
+    # ------------------------------------------------------------------
+
     def list_categories(self) -> list[str]:
         """List all available categories.
 
@@ -472,6 +623,85 @@ class MemoryStore:
             return entries
         except Exception:
             return []
+
+    def search_all_categories(
+        self,
+        query: str,
+        n_results: Optional[int] = None,
+        min_relevance: Optional[float] = None,
+        categories: Optional[list[str]] = None,
+    ) -> dict[str, list[SearchResult]]:
+        """Search across all or specified categories.
+
+        Args:
+            query: The search query text.
+            n_results: Maximum number of results per category.
+            min_relevance: Minimum relevance score (0–1).
+            categories: List of categories to search. If None, searches all.
+
+        Returns:
+            Dictionary mapping category names to lists of SearchResult objects.
+        """
+        if not query or not query.strip():
+            raise ValueError("Query cannot be empty")
+
+        if categories is None:
+            categories = self.list_categories()
+
+        if n_results is None:
+            n_results = self.config.get("max_results", 10)
+
+        results_by_category = {}
+        for category in categories:
+            try:
+                results = self.retrieve(
+                    category=category,
+                    query=query,
+                    n_results=n_results,
+                    min_relevance=min_relevance,
+                )
+                if results:
+                    results_by_category[category] = results
+            except Exception:
+                # Skip categories that error out
+                continue
+
+        return results_by_category
+
+    def search_exact(
+        self,
+        text: str,
+        categories: Optional[list[str]] = None,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Search for exact text matches across categories.
+
+        Args:
+            text: Exact text to search for.
+            categories: List of categories to search. If None, searches all.
+
+        Returns:
+            Dictionary mapping category names to lists of matching entries.
+        """
+        if not text or not text.strip():
+            raise ValueError("Search text cannot be empty")
+
+        if categories is None:
+            categories = self.list_categories()
+
+        results_by_category = {}
+        for category in categories:
+            try:
+                entries = self.get_all_entries(category)
+                matches = [
+                    entry for entry in entries if text.lower() in entry["content"].lower()
+                ]
+                if matches:
+                    results_by_category[category] = matches
+            except Exception:
+                # Skip categories that error out
+                continue
+
+        return results_by_category
 
     def clear_all(self) -> None:
         """Clear all data (use with caution!)."""

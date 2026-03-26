@@ -19,7 +19,9 @@ class TestConfigManager:
             agents_dir = config_dir / "agents"
             agents_dir.mkdir()
             config_file = agents_dir / "test_agent.yaml"
-            config_file.write_text(yaml.dump({"model": "llama3.2", "name": "test"}))
+            config_file.write_text(
+                yaml.dump({"model": "glm-4.7-flash", "name": "test"})
+            )
 
             cm = ConfigManager(config_dir=str(config_dir))
             assert cm.config_dir == config_dir
@@ -43,7 +45,7 @@ class TestConfigManager:
         assert cm.config_dir == tmp_path / "configs"
 
     def test_env_var_overrides_default(self, monkeypatch, tmp_path):
-        """Test that pithos_CONFIG_DIR env var takes precedence over built-in default."""
+        """Test that PITHOS_CONFIG_DIR env var takes precedence over built-in default."""
         custom_dir = tmp_path / "custom_configs"
         custom_dir.mkdir()
         monkeypatch.setenv(CONFIG_DIR_ENV_VAR, str(custom_dir))
@@ -208,7 +210,7 @@ class TestConfigManager:
 
             config = {
                 "name": "agent",
-                "model": "llama3.2",
+                "model": "glm-4.7-flash",
                 "contexts": {
                     "ctx1": {"system_prompt": "Test"},
                     "ctx2": {"system_prompt": "Test2"},
@@ -235,7 +237,7 @@ class TestConfigManagerIntegration:
 
             # Register agent config
             agent_config = {
-                "model": "llama3.2",
+                "model": "glm-4.7-flash",
                 "name": "test_agent",
                 "system_prompt": "You are helpful",
             }

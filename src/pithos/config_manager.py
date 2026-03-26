@@ -9,7 +9,7 @@ import yaml
 logger = logging.getLogger(__name__)
 
 # Environment variable name for overriding the config directory.
-CONFIG_DIR_ENV_VAR = "pithos_CONFIG_DIR"
+CONFIG_DIR_ENV_VAR = "PITHOS_CONFIG_DIR"
 
 
 class ConfigManager:
@@ -21,12 +21,12 @@ class ConfigManager:
         Resolution order for the config directory:
         1. *config_dir* argument — absolute paths are used as-is; relative paths
            are resolved against the current working directory.
-        2. ``pithos_CONFIG_DIR`` environment variable (absolute or CWD-relative).
+        2. ``PITHOS_CONFIG_DIR`` environment variable (absolute or CWD-relative).
         3. ``<cwd>/configs`` as a built-in default.
 
         Args:
             config_dir: Path to the directory containing configuration files.
-                If *None* (the default), the ``pithos_CONFIG_DIR`` environment
+                If *None* (the default), the ``PITHOS_CONFIG_DIR`` environment
                 variable is consulted, falling back to ``<cwd>/configs``.
 
         Raises:

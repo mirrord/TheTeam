@@ -122,13 +122,20 @@ class AgentContext:
         return new_ctx
 
     def get_messages(self, workspace: Optional[str] = None) -> list[dict[str, str]]:
-        """Get all messages including system prompt and optional workspace."""
+        """Get all messages including system prompt and optional workspace.
+
+        Internal ``_pithos_*`` metadata keys are stripped from each message
+        before the list is returned so the LLM backend never receives them.
+        """
         messages = []
         if self.system_prompt["content"]:
             messages.append(self.system_prompt.raw())
         if workspace:
             messages.append({"role": "user", "content": workspace})
-        messages.extend(self.message_history)
+        for msg in self.message_history:
+            # Strip internal pithos metadata so the LLM only sees role+content
+            clean = {k: v for k, v in msg.items() if not k.startswith("_pithos_")}
+            messages.append(clean)
         return messages
 
     def to_dict(self, with_history: bool = False) -> dict[str, Any]:

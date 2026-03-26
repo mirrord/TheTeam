@@ -1,0 +1,164 @@
+# Refined reflection flowchart with iterative refinement
+# Captures question, gives knee-jerk answer, evaluates, and refines up to 3 times
+# Compatible with both state-based and message-based routing
+
+nodes:
+  CaptureQuestion:
+    type: textparse
+    extraction: {}
+    set:
+      original_question: '{current_input}'
+    inputs: [default]
+    outputs: [default]
+  
+  KneeJerk:
+    type: prompt
+    prompt: '{current_input}'
+    prompt_args:
+      record_answer: false
+      record_prompt: false
+    extraction: {}
+    inputs: [default]
+    outputs: [default]
+  
+  CaptureAnswer:
+    type: textparse
+    extraction: {}
+    set:
+      current_answer: '{current_input}'
+    inputs: [default]
+    outputs: [default]
+  
+  EvaluateAnswer:
+    type: prompt
+    prompt: |
+      Read the following question and answer, then perform the task below.
+      
+      <question>
+      {original_question}
+      </question>
+      
+      <answer>
+      {current_answer}
+      </answer>
+      
+      Carefully analyze this answer looking for any errors or inconsistencies and do one of the following:
+      
+        * Provide directions for correcting the answer if you found errors or inconsistencies.
+        * Say *ONLY* the word DONE and nothing else if (and only if) there are no errors or inconsistencies.
+    prompt_args:
+      record_answer: false
+      record_prompt: false
+    extraction: {}
+    inputs: [default]
+    outputs: [default]
+  
+  FinishAnswer:
+    type: prompt
+    prompt: |
+      Answer the following question using the thought process below.
+      
+      <question>
+      {original_question}
+      </question>
+      
+      <think>
+      {current_answer}
+      </think>
+      
+      Output only the ANSWER in JSON format and no other text.
+    extraction: {}
+    inputs: [default]
+    outputs: [default]
+  
+  RefineAnswer:
+    type: prompt
+    prompt: |
+      Read the following question, answer, and reflection. Then perform the task below.
+      
+      <question>
+      {original_question}
+      </question>
+      
+      <think>
+      {current_answer}
+      </think>
+      
+      <reflection>
+      {current_input}
+      </reflection>
+      
+      Now refine the answer given using the REFLECTION feedback. Output ONLY the refined
+      reasoning and solution to the question and no other text.
+    prompt_args:
+      record_answer: false
+      record_prompt: false
+    extraction: {}
+    inputs: [default]
+    outputs: [default]
+
+edges:
+  - from: CaptureQuestion
+    to: KneeJerk
+    condition:
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+  
+  - from: KneeJerk
+    to: CaptureAnswer
+    condition:
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+  
+  - from: CaptureAnswer
+    to: EvaluateAnswer
+    condition:
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+  
+  # Finish if "DONE" regex matches
+  - from: EvaluateAnswer
+    to: FinishAnswer
+    condition:
+      type: RegexCondition
+      matchtype: match
+      regex: ^DONE
+    priority: 1
+    output_key: default
+    input_key: default
+  
+  # Refine up to 3 times
+  - from: EvaluateAnswer
+    to: RefineAnswer
+    condition:
+      limit: 3
+      type: CountCondition
+    priority: 2
+    output_key: default
+    input_key: default
+  
+  # Default: finish after iterations
+  - from: EvaluateAnswer
+    to: FinishAnswer
+    condition:
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+  
+  # Loop back to capture refined answer
+  - from: RefineAnswer
+    to: CaptureAnswer
+    condition:
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+
+start_node: CaptureQuestion

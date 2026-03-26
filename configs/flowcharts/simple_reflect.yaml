@@ -1,0 +1,88 @@
+# Simple reflection flowchart
+# Compatible with both state-based and message-based routing
+# To enable message routing: set use_message_routing: true
+
+nodes:
+  Generate:
+    type: prompt
+    prompt: '{current_input}'
+    extraction: {}
+    inputs: [default]
+    outputs: [default]
+  
+  CaptureQuestion:
+    type: textparse
+    extraction: {}
+    set:
+      original_question: '{current_input}'
+    inputs: [default]
+    outputs: [default]
+  
+  Reflect:
+    type: prompt
+    prompt: Reflect on your previous answer and decide if you want to change it.
+    extraction: {}
+    inputs: [default]  
+    outputs: [default]
+  
+  CaptureAnswer:
+    type: textparse
+    extraction: {}
+    set:
+      original_answer: '{current_input}'
+    inputs: [default]
+    outputs: [default]
+  
+  Regenerate:
+    type: prompt
+    prompt: |
+      Answer the following question using the thought process below.
+      
+      {original_question}
+      
+      <think>
+      {original_answer}
+      {current_input}
+      </think>
+      
+      Output *ONLY* the ANSWER in JSON format. Do not produce any other text.
+    extraction: {}
+    set:
+      context: regen
+    inputs: [default]
+    outputs: [default]
+
+edges:
+  - from: Generate
+    to: CaptureQuestion
+    condition:
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+  
+  - from: CaptureQuestion
+    to: Reflect
+    condition:
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+  
+  - from: Reflect
+    to: CaptureAnswer
+    condition:
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+  
+  - from: CaptureAnswer
+    to: Regenerate
+    condition:
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+
+start_node: Generate

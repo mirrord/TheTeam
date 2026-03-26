@@ -19,6 +19,7 @@ from .conditions import Condition, AlwaysCondition, CountCondition, ConditionMan
 from .flownode import create_node
 from .message import Message, MessageRouter
 from .validation import validate_flowchart, ValidationError  # noqa: F401
+from .metrics import MetricsCollector
 
 
 @dataclass
@@ -199,6 +200,27 @@ class Flowchart:
         self._watcher_stop: threading.Event = threading.Event()
         self._reload_lock: threading.Lock = threading.Lock()
         self._on_reload: Optional[Callable[["Flowchart"], None]] = None
+
+        # Metrics collection (optional, attached via attach_metrics())
+        self.metrics: Optional[MetricsCollector] = None
+        self._metrics_name: str = registered_name or "unnamed"
+
+    def attach_metrics(
+        self, collector: MetricsCollector, name: Optional[str] = None
+    ) -> None:
+        """Attach a :class:`~pithos.metrics.MetricsCollector` to this flowchart.
+
+        Once attached, every node execution step will record its node type,
+        duration, and predecessor node into *collector*.
+
+        Args:
+            collector: The collector instance to receive metrics.
+            name: Optional identifying name used in path entries.  Defaults to
+                  the registered name or ``"unnamed"``.
+        """
+        self.metrics = collector
+        if name is not None:
+            self._metrics_name = name
 
     def reset(self) -> None:
         """Reset flowchart execution state."""
@@ -581,10 +603,12 @@ class Flowchart:
         # Clear this node's inputs after execution
         self.message_router.clear_node_inputs(node_id)
 
+        # Capture execution duration (shared by tracing and metrics)
+        duration_ms = (ts_end - ts_start).total_seconds() * 1000
+
         # Capture trace entry if tracing is enabled
         if self._trace_enabled:
             checkpoint = self._capture_checkpoint()
-            duration_ms = (ts_end - ts_start).total_seconds() * 1000
             entry = TraceEntry(
                 step=current_step,
                 node_id=node_id,
@@ -598,6 +622,20 @@ class Flowchart:
                 _checkpoint=checkpoint,
             )
             self._trace_entries.append(entry)
+
+        # Record flowchart step metrics if a collector is attached
+        if self.metrics is not None:
+            try:
+                edge_info = self._node_route_info.get(node_id)
+                self.metrics.record_flowchart_step(
+                    flowchart_name=self._metrics_name,
+                    node_id=node_id,
+                    node_type=type(node_obj).__name__,
+                    duration_ms=duration_ms,
+                    from_node=edge_info.from_node if edge_info is not None else None,
+                )
+            except Exception:
+                pass
 
         return output_messages
 

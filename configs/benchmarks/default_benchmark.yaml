@@ -1,0 +1,62 @@
+# Default Benchmark Configuration
+name: "Multi-Benchmark"
+
+# Dataset configuration
+dataset:
+  type: "multiple_choice"
+  path: "benchmarks/easy_problems/linguistic_benchmark_multi_choice.json"
+
+# Models to benchmark - can run multiple models with different configurations
+models:
+  glm-4.7-flash-base:
+    model: "glm-4.7-flash"
+    service: "ollama"
+  
+  glm-4.7-flash-simple-reflect:
+    model: "glm-4.7-flash:latest"
+    service: "ollama_flow"
+    flowchart: "simple_reflect"
+  
+  glm-4.7-flash-stepwise-reflect:
+    model: "glm-4.7-flash:latest"
+    service: "ollama_flow"
+    flowchart: "stepwise_reflect"
+  
+  glm-4.7-flash-refined-reflect:
+    model: "glm-4.7-flash:latest"
+    service: "ollama_flow"
+    flowchart: "refined_reflect"
+  
+  glm-4.7-flash-refined-explicit-reflect:
+    model: "glm-4.7-flash:latest"
+    service: "ollama_flow"
+    flowchart: "refined_explicit_reflect"
+  
+  glm-4.7-flash-refined-explicit-reflect-eval:
+    model: "glm-4.7-flash:latest"
+    service: "ollama_flow"
+    flowchart: "refined_explicit_reflect_eval"
+  
+  glm-4.7-flash-teacher-student:
+    model: "glm-4.7-flash:latest"
+    service: "ollama_flow"
+    flowchart: "teacher_student"
+  
+  glm-4.7-flash-teacher-student-looped:
+    model: "glm-4.7-flash:latest"
+    service: "ollama_flow"
+    flowchart: "teacher_student_looped"
+
+# Execution parameters
+execution:
+  rounds: 10  # Number of rounds to run each model
+  num_retries: 3  # Number of retries for failed questions
+  temperature: 0  # Model temperature (0 = most deterministic)
+  max_tokens: 2048  # Maximum tokens per response
+
+# Output configuration
+output:
+  base_dir: "./results"
+  save_answers: true
+  save_stats: true
+  create_charts: true

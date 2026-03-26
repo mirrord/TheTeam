@@ -26,7 +26,7 @@ Tool calling allows LLM agents to discover and execute command-line tools from y
 from pithos import OllamaAgent, ConfigManager
 
 config_manager = ConfigManager()
-agent = OllamaAgent("llama3.2")
+agent = OllamaAgent("glm-4.7-flash")
 
 # Enable tool calling
 agent.enable_tools(config_manager)
@@ -644,7 +644,7 @@ max_output_size: 102400  # Increase from default 10KB
 1. Verify tools are enabled: `agent.tools_enabled == True`
 2. Check model capability (some models are better at tool use)
 3. Give explicit instructions: "Use the python tool to check the version"
-4. Try a more capable model (e.g., llama3.2:3b or larger)
+4. Try a more capable model (e.g., glm-4.7-flash:latest or larger)
 
 ### Tool Execution Error
 
@@ -667,7 +667,7 @@ ls -l $(which python)
 ### Check System Information
 
 ```python
-agent = OllamaAgent("llama3.2")
+agent = OllamaAgent("glm-4.7-flash")
 agent.enable_tools(config_manager)
 
 response = agent.send("""

@@ -1,0 +1,83 @@
+# Agent Context Sharing Example
+# Demonstrates GetHistoryNode and SetHistoryNode for sharing context between agents
+#
+# This flowchart shows how to extract one agent's conversation history
+# and inject it into another agent for context-aware collaboration
+
+nodes:
+  TeacherExplains:
+    type: agentprompt
+    agent: teacher
+    prompt: |
+      Explain the following concept in a clear, pedagogical way:
+      
+      {current_input}
+      
+      Break it down into simple steps and use examples.
+    extraction: {}
+    inputs: [default]
+    outputs: [default]
+  
+  CaptureExplanation:
+    type: textparse
+    extraction: {}
+    set:
+      explanation: '{current_input}'
+    inputs: [default]
+    outputs: [default]
+  
+  ExtractTeacherHistory:
+    type: gethistory
+    agent: teacher
+    save_to: teacher_conversation
+    extraction: {}
+    inputs: [default]
+    outputs: [default]
+  
+  ShareContextWithStudent:
+    type: sethistory
+    agent: student
+    history_from: teacher_conversation
+    mode: replace
+    extraction: {}
+    inputs: [default]
+    outputs: [default]
+  
+  StudentApplies:
+    type: agentprompt
+    agent: student
+    prompt: |
+      Now that you've learned about this concept, create a practical example 
+      or exercise that demonstrates your understanding.
+      
+      Show how you would apply this concept in a real-world scenario.
+    extraction: {}
+    inputs: [default]
+    outputs: [default]
+
+edges:
+  - from: TeacherExplains
+    to: CaptureExplanation
+    condition:
+      type: AlwaysCondition
+    priority: 9
+  
+  - from: CaptureExplanation
+    to: ExtractTeacherHistory
+    condition:
+      type: AlwaysCondition
+    priority: 9
+  
+  - from: ExtractTeacherHistory
+    to: ShareContextWithStudent
+    condition:
+      type: AlwaysCondition
+    priority: 9
+  
+  - from: ShareContextWithStudent
+    to: StudentApplies
+    condition:
+      type: AlwaysCondition
+    priority: 9
+
+start_node: TeacherExplains

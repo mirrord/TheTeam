@@ -189,13 +189,13 @@ export default function ChatInterface() {
         model: model,
         system_prompt: '',
         temperature: 0.7,
-        max_tokens: 2048,
+        max_tokens: -1,
         tools: [],
       }
       
       // Send config to use this model
       try {
-        const response = await fetch(`/api/v1/conversations/${currentConversation.id}/agent`, {
+        const response = await fetch(`/api/v1/chat/conversations/${currentConversation.id}/agent`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ agent_config: tempAgentConfig }),

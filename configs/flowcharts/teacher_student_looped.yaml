@@ -1,0 +1,95 @@
+# Teacher-Student looped flowchart with evaluation feedback
+# Teacher provides instructions, student follows, teacher evaluates, loops up to 3 times
+# Compatible with both state-based and message-based routing
+
+nodes:
+  Instruct:
+    type: prompt
+    prompt: "|\n      Examine the problem below. Do not attempt to solve the problem. Instead,\n      focus on the structure, form and intention of the question.\n      \n      <question>\n      {current_input}\n      </question>\n      \n      First identify the type of question being asked in terms of its subject matter.\n      Then, in a concise bulleted list, please describe the steps a student should\n      take to solve the problem. *Do not* perform any of the steps for the student."
+    extraction: {}
+    set:
+      original_question: '{current_input}'
+    inputs: [default]
+    outputs: [default]
+  
+  Follow:
+    type: prompt
+    prompt: "|\n      Your tutor has provided the following instructions. Follow them carefully\n      to answer the question.\n      \n      INSTRUCTIONS\n      ---------------\n      {current_input}"
+    prompt_args:
+      record_answer: false
+      record_prompt: false
+    extraction: {}
+    set:
+      workspace: "|\n        Your task is to answer the question below to the best of your ability.\n        \n        <question>\n        {original_question}\n        </question>"
+    inputs: [default]
+    outputs: [default]
+  
+  Evaluate:
+    type: prompt
+    prompt: "|\n      The student answers as follows.\n      \n      <student>\n      {student_thought_process}\n      </student>\n      \n      Has the student reached the correct conclusion? Answer either YES or NO, then\n      proceed to offer further instruction or correction if necessary."
+    extraction: {}
+    set:
+      student_thought_process: '{current_input}'
+    inputs: [default]
+    outputs: [default]
+  
+  FinishAnswer:
+    type: prompt
+    prompt: "|\n      Answer the following question using the thought process below.\n      \n      <question>\n      {original_question}\n      </question>\n      \n      <think>\n      {student_thought_process}\n      </think>\n      \n      Be sure to answer the question directly and concisely."
+    extraction: {}
+    inputs: [default]
+    outputs: [default]
+
+edges:
+  - from: Instruct
+    to: Follow
+    condition:
+      enabled: true
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+  
+  - from: Follow
+    to: Evaluate
+    condition:
+      enabled: true
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+  
+  # Finish if teacher says "YES"
+  - from: Evaluate
+    to: FinishAnswer
+    condition:
+      enabled: true
+      matchtype: match
+      regex: ^YES
+      type: RegexCondition
+    priority: 1
+    output_key: default
+    input_key: default
+  
+  # Loop back up to 3 times if not "YES"
+  - from: Evaluate
+    to: Follow
+    condition:
+      enabled: true
+      limit: 3
+      type: CountCondition
+    priority: 2
+    output_key: default
+    input_key: default
+  
+  # Default: finish after iterations
+  - from: Evaluate
+    to: FinishAnswer
+    condition:
+      enabled: true
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+
+start_node: Instruct

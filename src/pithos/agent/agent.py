@@ -17,6 +17,9 @@ from ..config_manager import ConfigManager
 from ..tools import ToolRegistry, ToolExecutor, MemoryOpRequest, MemoryOpExtractor
 from ..context import Msg, UserMsg, AgentMsg, AgentContext
 from .history import ConversationStore, HistorySearchResult
+from .compaction import CompactionConfig, MemoryCompactor
+from .recall import RecallConfig, AutoRecall
+from ..metrics import MetricsCollector
 
 try:
     from ..tools.memory_tool import MemoryStore
@@ -65,6 +68,14 @@ class Agent(ABC):
         self.history_store: Optional[ConversationStore] = None
         self.session_id: Optional[str] = None
         self._last_history_message_id: Optional[str] = None
+        # Metrics collection (optional, attached via attach_metrics())
+        self.metrics: Optional[MetricsCollector] = None
+        # Automatic context compaction (optional, enabled via enable_compaction())
+        self.compaction_enabled = False
+        self._compactor: Optional[MemoryCompactor] = None
+        # Automatic memory recall (optional, enabled via enable_recall())
+        self.recall_enabled = False
+        self._auto_recall: Optional[AutoRecall] = None
         # Create default context
         self.create_context("default", system_prompt)
 
@@ -97,6 +108,30 @@ class Agent(ABC):
         current_ctx = config.get("current_context", "default")
         if current_ctx in agent.contexts:
             agent.current_context = current_ctx
+
+        # Load compaction config if present
+        compaction_cfg = config.get("compaction")
+        if compaction_cfg and compaction_cfg.get("enabled", False):
+            cfg = CompactionConfig(
+                threshold=compaction_cfg.get("threshold", 20),
+                keep_last=compaction_cfg.get("keep_last", 6),
+                summary_model=compaction_cfg.get("summary_model"),
+                memory_category=compaction_cfg.get("memory_category", "context_summaries"),
+                summary_max_tokens=compaction_cfg.get("summary_max_tokens", 512),
+            )
+            agent.enable_compaction(cfg)
+
+        # Load recall config if present
+        recall_cfg = config.get("recall")
+        if recall_cfg and recall_cfg.get("enabled", False):
+            cfg_r = RecallConfig(
+                sources=recall_cfg.get("sources", ["memory", "history"]),
+                n_results=recall_cfg.get("n_results", 5),
+                recall_model=recall_cfg.get("recall_model"),
+                categories=recall_cfg.get("categories", []),
+                min_relevance=recall_cfg.get("min_relevance", 0.5),
+            )
+            agent.enable_recall(cfg_r)
 
         return agent
 
@@ -230,6 +265,86 @@ class Agent(ABC):
             self.current_context = "default" if "default" in self.contexts else None
         del self.contexts[context_name]
 
+    def attach_metrics(self, collector: MetricsCollector) -> None:
+        """Attach a :class:`~pithos.metrics.MetricsCollector` to this agent.
+
+        Once attached, every LLM call, tool execution, and memory operation
+        will automatically record metrics into *collector*.
+
+        Args:
+            collector: The collector instance to receive metrics.
+        """
+        self.metrics = collector
+
+    def enable_compaction(self, config: Optional[CompactionConfig] = None) -> None:
+        """Enable automatic context compaction.
+
+        When enabled, the oldest messages in the active context are
+        summarised and replaced with a compact summary whenever the message
+        count reaches ``config.threshold``.
+
+        Args:
+            config: Compaction settings.  Defaults to
+                :class:`~pithos.agent.compaction.CompactionConfig` with its
+                default values when not supplied.
+        """
+        self.compaction_enabled = True
+        self._compactor = MemoryCompactor(config or CompactionConfig())
+
+    def disable_compaction(self) -> None:
+        """Disable automatic context compaction."""
+        self.compaction_enabled = False
+        self._compactor = None
+
+    def enable_recall(self, config: Optional[RecallConfig] = None) -> None:
+        """Enable automatic memory recall.
+
+        When enabled, relevant memories are retrieved via RAG before each
+        user turn and prepended to the context as a ``[RECALLED CONTEXT]``
+        system message.  The injection is not subject to compaction and
+        replaces any previous recall injection.
+
+        Memory and/or history must be enabled separately via
+        :meth:`enable_memory` / :meth:`enable_history` for the respective
+        recall sources to work.  If neither is available the recall pass
+        simply produces no snippets.
+
+        Args:
+            config: Recall settings.  Defaults to
+                :class:`~pithos.agent.recall.RecallConfig` with its default
+                values when not supplied.
+        """
+        self.recall_enabled = True
+        self._auto_recall = AutoRecall(config or RecallConfig())
+
+    def disable_recall(self) -> None:
+        """Disable automatic memory recall."""
+        self.recall_enabled = False
+        self._auto_recall = None
+
+    def close(self) -> None:
+        """Close all open database connections held by this agent.
+
+        Releases file handles for the SQLite and ChromaDB connections used
+        by :attr:`history_store` and :attr:`memory_store`.  Should be called
+        when the agent is no longer needed, especially before the persistence
+        directory is deleted (required on Windows to avoid
+        ``PermissionError: [WinError 32]``).
+
+        It is safe to call this method multiple times, or when no stores are
+        open.
+        """
+        if self.history_store is not None:
+            try:
+                self.history_store.close()
+            except Exception:
+                pass
+        if self.memory_store is not None:
+            try:
+                self.memory_store.close()
+            except Exception:
+                pass
+
     @abstractmethod
     def send(
         self,
@@ -316,6 +431,17 @@ class Agent(ABC):
         results = []
         for req in requests:
             result = self.tool_executor.run(req.command, self.tool_registry)
+            # Record tool call metrics
+            if self.metrics is not None:
+                try:
+                    tool_name = req.command.split()[0] if req.command else "unknown"
+                    self.metrics.record_tool_call(
+                        tool_name=tool_name,
+                        success=result.success,
+                        execution_time_ms=result.execution_time * 1000.0,
+                    )
+                except Exception:
+                    pass
             results.append(self._format_tool_result(result))
 
         return "\n\n".join(results)
@@ -442,6 +568,44 @@ Only use tools when necessary. If a tool fails, you will receive clear error fee
         # Enhance system prompt with memory usage instructions
         self._add_memory_prompt_to_contexts()
 
+    def enable_tag_suggestions(
+        self,
+        model: str,
+        max_suggestions: int = 3,
+        temperature: float = 0.2,
+        timeout: int = 30,
+    ) -> None:
+        """Enable automatic LLM category tag suggestions for memory storage.
+
+        Each time the agent stores a memory entry, the LLM will be asked to
+        suggest up to *max_suggestions* category tags for the content.  The
+        suggestions are saved in the entry's metadata (``suggested_tags`` and
+        ``suggested_tags_confidence``) and reported back to the agent as part
+        of the store result message.
+
+        :meth:`enable_memory` must be called before this method.
+
+        Args:
+            model: Ollama model name to use for generating suggestions.
+            max_suggestions: Maximum tags to suggest per entry (1–10).
+            temperature: LLM sampling temperature (lower = more deterministic).
+            timeout: HTTP timeout in seconds for the LLM request.
+
+        Raises:
+            RuntimeError: If memory has not been enabled on this agent.
+        """
+        if not self.memory_enabled or self.memory_store is None:
+            raise RuntimeError(
+                "Memory must be enabled before enabling tag suggestions. "
+                "Call enable_memory() first."
+            )
+        self.memory_store.enable_tag_suggestions(
+            model=model,
+            max_suggestions=max_suggestions,
+            temperature=temperature,
+            timeout=timeout,
+        )
+
     def _add_memory_prompt_to_contexts(self) -> None:
         """Add memory usage instructions to all context system prompts."""
         if not self.memory_store:
@@ -529,9 +693,31 @@ Results will be provided to you automatically. If an operation fails, you will r
                         continue
 
                     entry_id = self.memory_store.store(op.category, op.content)
-                    results.append(
+                    # Record store metric
+                    if self.metrics is not None:
+                        try:
+                            self.metrics.record_memory_store()
+                        except Exception:
+                            pass
+                    store_msg = (
                         f"✓ Stored in {op.category}: {op.content[:50]}... (ID: {entry_id})"
                     )
+                    # Append suggested tags to the result message when available.
+                    if self.memory_store.tag_suggestions_enabled:
+                        try:
+                            entry_meta = self.memory_store.get_all_entries(op.category)
+                            tags: list[str] = []
+                            for e in entry_meta:
+                                if e.get("id") == entry_id:
+                                    tags = e.get("metadata", {}).get(
+                                        "suggested_tags", []
+                                    )
+                                    break
+                            if tags:
+                                store_msg += f"\n  🏷 Suggested tags: {', '.join(tags)}"
+                        except Exception:
+                            pass
+                    results.append(store_msg)
 
                 elif op.operation == "retrieve":
                     if not op.query:
@@ -542,6 +728,14 @@ Results will be provided to you automatically. If an operation fails, you will r
                         continue
 
                     search_results = self.memory_store.retrieve(op.category, op.query)
+                    # Record retrieve metric (hit if ≥1 result returned)
+                    if self.metrics is not None:
+                        try:
+                            self.metrics.record_memory_retrieve(
+                                result_count=len(search_results)
+                            )
+                        except Exception:
+                            pass
                     if search_results:
                         results.append(
                             f"✓ Retrieved {len(search_results)} results from {op.category} for query: {op.query}"
@@ -732,6 +926,8 @@ class OllamaAgent(Agent):
         model: Optional[str] = None,
     ) -> str:
         """Send a message via Ollama and get a response."""
+        import time as _time
+
         ctx = context_name or self.current_context
         if not ctx:
             raise ValueError("No context selected.")
@@ -739,6 +935,14 @@ class OllamaAgent(Agent):
             self.create_context(ctx)
 
         context = self.contexts[ctx]
+
+        # Auto-recall: inject relevant memories before the user message is appended
+        if self.recall_enabled and self._auto_recall:
+            try:
+                self._auto_recall.inject_recall(agent=self, context=context, content=content, model=model)
+            except Exception as exc:
+                logger.warning("Auto-recall failed (non-fatal): %s", exc)
+
         context.add_message(UserMsg(content))
 
         try:
@@ -754,15 +958,32 @@ class OllamaAgent(Agent):
 
             model_to_use = model or self.default_model
 
+            _t0 = _time.monotonic()
             response: ChatResponse = chat(
                 model=model_to_use,
                 messages=messages,
                 options=options,
             )
+            _response_ms = (_time.monotonic() - _t0) * 1000.0
 
             if verbose:
                 logger.debug("<<< RECV: %s", response.message.content)
                 logger.debug("-" * 40)
+
+            # Record token usage and response time metrics
+            if self.metrics is not None:
+                try:
+                    usage = response.usage
+                    prompt_tok = getattr(usage, "prompt_tokens", 0) or 0
+                    completion_tok = getattr(usage, "completion_tokens", 0) or 0
+                    self.metrics.record_token_usage(
+                        model=model_to_use,
+                        prompt_tokens=prompt_tok,
+                        completion_tokens=completion_tok,
+                        response_time_ms=_response_ms,
+                    )
+                except Exception:
+                    pass
 
         except OllamaResponseError as e:
             context.remove_last_message()
@@ -778,6 +999,14 @@ class OllamaAgent(Agent):
                 else:
                     raise RuntimeError("Model not available.") from e
             raise e
+        except Exception as exc:
+            context.remove_last_message()
+            raise RuntimeError(
+                f"Failed to communicate with Ollama: {exc}. "
+                "Ensure Ollama is running. "
+                "If using localhost, try setting "
+                "OLLAMA_HOST=http://127.0.0.1:11434 to avoid IPv6 resolution issues."
+            ) from exc
 
         context.add_message(AgentMsg(response.message.content or ""))
 
@@ -812,6 +1041,13 @@ class OllamaAgent(Agent):
                         "", context_name=ctx, workspace=workspace, verbose=verbose
                     )
 
+        # Auto-compaction: summarise old messages when the context is too large
+        if self.compaction_enabled and self._compactor:
+            try:
+                self._compactor.compact(agent=self, context=context, context_name=ctx)
+            except Exception as exc:
+                logger.warning("Auto-compaction failed (non-fatal): %s", exc)
+
         return response.message.content or ""
 
     def stream(
@@ -831,6 +1067,8 @@ class OllamaAgent(Agent):
         Yields:
             Text chunks as produced by the model.
         """
+        import time as _time
+
         ctx = context_name or self.current_context
         if not ctx:
             raise ValueError("No context selected.")
@@ -838,6 +1076,14 @@ class OllamaAgent(Agent):
             self.create_context(ctx)
 
         context = self.contexts[ctx]
+
+        # Auto-recall: inject relevant memories before the user message is appended
+        if self.recall_enabled and self._auto_recall:
+            try:
+                self._auto_recall.inject_recall(agent=self, context=context, content=content, model=model)
+            except Exception as exc:
+                logger.warning("Auto-recall failed (non-fatal): %s", exc)
+
         context.add_message(UserMsg(content))
 
         try:
@@ -859,19 +1105,46 @@ class OllamaAgent(Agent):
             )
 
             full_response = ""
+            _t0 = _time.monotonic()
+            _last_chunk = None
             for chunk in stream_iter:
                 token = chunk.message.content or ""
                 full_response += token
                 if verbose:
                     logger.debug("%s", token)
+                _last_chunk = chunk
                 yield token
+            _response_ms = (_time.monotonic() - _t0) * 1000.0
 
             if verbose:
                 logger.debug("-" * 40)
 
+            # Record token usage and response time metrics (final chunk has usage)
+            if self.metrics is not None:
+                try:
+                    usage = getattr(_last_chunk, "usage", None) if _last_chunk else None
+                    prompt_tok = getattr(usage, "prompt_tokens", 0) or 0
+                    completion_tok = getattr(usage, "completion_tokens", 0) or 0
+                    self.metrics.record_token_usage(
+                        model=model_to_use,
+                        prompt_tokens=prompt_tok,
+                        completion_tokens=completion_tok,
+                        response_time_ms=_response_ms,
+                    )
+                except Exception:
+                    pass
+
         except OllamaResponseError as e:
             context.remove_last_message()
             raise e
+        except Exception as exc:
+            context.remove_last_message()
+            raise RuntimeError(
+                f"Failed to communicate with Ollama: {exc}. "
+                "Ensure Ollama is running. "
+                "If using localhost, try setting "
+                "OLLAMA_HOST=http://127.0.0.1:11434 to avoid IPv6 resolution issues."
+            ) from exc
 
         # Commit full response to context after streaming is done
         context.add_message(AgentMsg(full_response))
@@ -894,6 +1167,13 @@ class OllamaAgent(Agent):
             if mem_ops:
                 result_message = self._execute_memory_ops(mem_ops)
                 context.add_message(Msg("system", result_message))
+
+        # Auto-compaction: summarise old messages when the context is too large
+        if self.compaction_enabled and self._compactor:
+            try:
+                self._compactor.compact(agent=self, context=context, context_name=ctx)
+            except Exception as exc:
+                logger.warning("Auto-compaction failed (non-fatal): %s", exc)
 
 
 class EXLAgent(Agent):

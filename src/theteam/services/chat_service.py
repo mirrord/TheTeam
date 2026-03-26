@@ -281,7 +281,7 @@ class ChatService:
                     f"No agent specified for conversation {conversation_id}, using default"
                 )
                 agent_config = {
-                    "config": {"model": "llama3.2:latest", "name": "Default Agent"}
+                    "config": {"model": "glm-4.7-flash:latest", "name": "Default Agent"}
                 }
 
             # Notify that processing started
@@ -299,7 +299,9 @@ class ChatService:
             # Create agent and generate response
             config = agent_config["config"]
             model = (
-                config.get("default_model") or config.get("model") or "llama3.2:latest"
+                config.get("default_model")
+                or config.get("model")
+                or "glm-4.7-flash:latest"
             )
             agent = OllamaAgent(
                 default_model=model,
@@ -400,7 +402,7 @@ class ChatService:
                     f"No agent specified for conversation {conversation_id}, using default"
                 )
                 agent_config = {
-                    "config": {"model": "llama3.2:latest", "name": "Default Agent"}
+                    "config": {"model": "glm-4.7-flash:latest", "name": "Default Agent"}
                 }
 
             if socketio and client_id:
@@ -416,7 +418,9 @@ class ChatService:
 
             config = agent_config["config"]
             model = (
-                config.get("default_model") or config.get("model") or "llama3.2:latest"
+                config.get("default_model")
+                or config.get("model")
+                or "glm-4.7-flash:latest"
             )
             agent = OllamaAgent(
                 default_model=model,

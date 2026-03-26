@@ -1,0 +1,75 @@
+# Stepwise reflection flowchart
+# Systematize -> Follow -> Summarize pattern
+# Compatible with both state-based and message-based routing
+
+nodes:
+  Systematize:
+    type: prompt
+    prompt: |
+      Examine the problem below. Do not attempt to solve the problem. Instead,
+      focus on understanding the question in full.
+      
+      "{current_input}"
+      
+      First identify the type of question being asked in terms of its subject matter.
+      Then, in a concise bulleted list, please describe the steps a student should
+      take to solve the problem. *Do not* perform any of the steps for the student.
+    extraction: {}
+    set:
+      original_question: '{current_input}'
+      context: sys
+    inputs: [default]
+    outputs: [default]
+  
+  Follow:
+    type: prompt
+    prompt: |
+      Consider the following query.
+      
+      "{original_question}"
+      
+      Now *carefully* follow the steps below to solve the question.
+      
+      "{current_input}"
+    extraction: {}
+    set:
+      context: fol
+    inputs: [default]
+    outputs: [default]
+  
+  Summarize:
+    type: prompt
+    prompt: |
+      Answer the following question using the thought process below.
+      
+      {original_question}
+      
+      <think>
+      {current_input}
+      </think>
+      
+      Output *ONLY* the ANSWER in JSON format. Do not produce any other text.
+    extraction: {}
+    set:
+      context: sum
+    inputs: [default]
+    outputs: [default]
+
+edges:
+  - from: Systematize
+    to: Follow
+    condition:
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+  
+  - from: Follow
+    to: Summarize
+    condition:
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+
+start_node: Systematize

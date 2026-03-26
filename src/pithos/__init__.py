@@ -2,6 +2,8 @@
 
 from .agent import Agent, OllamaAgent, EXLAgent, LlamacppAgent
 from .agent.history import ConversationStore, HistorySearchResult, MessageRecord
+from .agent.compaction import CompactionConfig, MemoryCompactor
+from .agent.recall import RecallConfig, AutoRecall
 from .context import AgentContext, Msg, UserMsg, AgentMsg
 from .tools import MemoryOpRequest, MemoryOpExtractor
 from .team import AgentTeam, TeamContext
@@ -20,6 +22,7 @@ from .flownode import (
 from .conditions import Condition, CountCondition, RegexCondition, AlwaysCondition
 from .config_manager import ConfigManager
 from .message import Message, MessageRouter, NodeInputState
+from .metrics import MetricsCollector
 
 __all__ = [
     "Agent",
@@ -57,4 +60,9 @@ __all__ = [
     "ConversationStore",
     "HistorySearchResult",
     "MessageRecord",
+    "CompactionConfig",
+    "MemoryCompactor",
+    "RecallConfig",
+    "AutoRecall",
+    "MetricsCollector",
 ]

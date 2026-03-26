@@ -25,7 +25,7 @@ Models are now swappable on demand:
 ```python
 # Agent has a default model
 agent = OllamaAgent(
-    default_model="llama3.2",
+    default_model="glm-4.7-flash",
     agent_name="assistant",
     system_prompt="You are helpful.",
 )
@@ -49,7 +49,7 @@ response = agent.send("Hello", model="phi4")
 
 Example:
 ```python
-agent = OllamaAgent(default_model="llama3.2")
+agent = OllamaAgent(default_model="glm-4.7-flash")
 flowchart = Flowchart.from_registered("simple_reflect", config_manager)
 
 result = agent.follow_flowchart(
@@ -68,12 +68,12 @@ Example:
 ```python
 # Create agents with different roles
 researcher = OllamaAgent(
-    default_model="llama3.2",
+    default_model="glm-4.7-flash",
     system_prompt="You are a thorough researcher.",
 )
 
 writer = OllamaAgent(
-    default_model="llama3.2",
+    default_model="glm-4.7-flash",
     system_prompt="You are a skilled writer.",
 )
 
@@ -100,7 +100,7 @@ nodes:
     type: agentprompt
     agent: researcher  # Which agent to use
     prompt: "Research the topic: {topic}"
-    model: llama3.2  # Optional: override agent's default model
+    model: glm-4.7-flash  # Optional: override agent's default model
     context_name: research_context  # Optional: specific context
     extraction: {}
     inputs: [default]
@@ -114,7 +114,7 @@ from pithos.flownode import AgentPromptNode
 node = AgentPromptNode(
     agent="researcher",
     prompt="Research {topic}",
-    model="llama3.2",  # Optional override
+    model="glm-4.7-flash",  # Optional override
 )
 ```
 
@@ -179,7 +179,7 @@ node = SetHistoryNode(
 
 ### Old Format (Legacy - Still Supported)
 ```yaml
-model: llama3.2
+model: glm-4.7-flash
 name: my-agent
 system_prompt: "You are helpful."
 temperature: 0.7
@@ -187,7 +187,7 @@ temperature: 0.7
 
 ### New Format (Recommended)
 ```yaml
-default_model: llama3.2
+default_model: glm-4.7-flash
 name: my-agent
 system_prompt: "You are helpful."
 temperature: 0.7
@@ -220,10 +220,10 @@ else:
 1. **Agent Creation:**
    ```python
    # Old
-   agent = OllamaAgent(model_name="llama3.2")
+   agent = OllamaAgent(model_name="glm-4.7-flash")
    
    # New
-   agent = OllamaAgent(default_model="llama3.2")
+   agent = OllamaAgent(default_model="glm-4.7-flash")
    ```
 
 2. **Agent Configurations:**
@@ -233,12 +233,12 @@ else:
 3. **Using Different Models:**
    ```python
    # Old: Had to create new agent
-   agent_llama = OllamaAgent(model_name="llama3.2")
+   agent_llama = OllamaAgent(model_name="glm-4.7-flash")
    agent_phi = OllamaAgent(model_name="phi4")
    
    # New: Same agent, different models
-   agent = OllamaAgent(default_model="llama3.2")
-   response1 = agent.send("Query", model="llama3.2")
+   agent = OllamaAgent(default_model="glm-4.7-flash")
+   response1 = agent.send("Query", model="glm-4.7-flash")
    response2 = agent.send("Query", model="phi4")
    # History maintained across both calls
    ```

@@ -1,0 +1,69 @@
+name: io_example
+description: Example flowchart demonstrating Input and Output nodes
+
+start_node: file_input
+
+nodes:
+  # Read input from a file
+  file_input:
+    type: fileinput
+    file_path: "data/input.txt"
+    save_to: file_content
+  
+  # Process the file content
+  analyze:
+    type: prompt
+    prompt: |
+      Analyze the following content and provide a summary:
+      
+      {file_content}
+      
+      Your summary:
+  
+  # Parse and store the summary
+  extract_summary:
+    type: textparse
+    set:
+      summary: "{current_input}"
+  
+  # Display to user
+  chat_output:
+    type: chatoutput
+    source: summary
+    format_template: |
+      Summary:
+      {summary}
+  
+  # Save to file
+  file_output:
+    type: fileoutput
+    file_path: "data/output.txt"
+    source: summary
+    mode: w
+
+edges:
+  - from: file_input
+    to: analyze
+    condition:
+      type: AlwaysCondition
+    priority: 1
+  
+  - from: analyze
+    to: extract_summary
+    condition:
+      type: AlwaysCondition
+    priority: 1
+  
+  - from: extract_summary
+    to: chat_output
+    condition:
+      type: AlwaysCondition
+    priority: 1
+  
+  - from: chat_output
+    to: file_output
+    condition:
+      type: AlwaysCondition
+    priority: 1
+
+use_message_routing: true

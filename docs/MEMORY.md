@@ -1,6 +1,6 @@
 # Memory Tool Guide
 
-The pithos Memory Tool provides vector database-based knowledge storage and retrieval for agents. It enables agents to build up domain knowledge over time, store important facts, and retrieve relevant context from previous interactions.
+The pithos Memory Tool provides vector database-based knowledge storage and retrieval for agents. It enables agents to build up domain knowledge over time, store important facts, and retrieve relevant context from previous interactions. Two automatic memory management features sit on top of the core store: **context compaction** trims long conversation histories into summaries, and **automatic recall** surfaces relevant past knowledge before each response.
 
 ## Overview
 
@@ -51,7 +51,7 @@ Enable memory for an agent to allow it to store and retrieve knowledge during co
 from pithos import OllamaAgent, ConfigManager
 
 config_manager = ConfigManager()
-agent = OllamaAgent("llama3.2")
+agent = OllamaAgent("glm-4.7-flash")
 
 # Enable memory
 agent.enable_memory(config_manager)
@@ -479,6 +479,223 @@ Adjust similarity thresholds based on your use case:
 - **General use**: 0.7 (balanced)
 - **Fact lookup**: 0.8-0.9 (high precision)
 
+---
+
+## Automatic Context Compaction
+
+As a conversation grows, the message history can exceed the model's effective context window, slowing inference and degrading response quality. **Automatic context compaction** solves this by monitoring history length and replacing the oldest messages with a concise LLM-generated summary when a threshold is reached.
+
+### How It Works
+
+1. After each agent response, the compactor checks whether `len(message_history) >= threshold`.
+2. It identifies _compactable_ messages — everything except protected entries (auto-recall injections and prior summaries).
+3. The oldest compactable messages, except the last `keep_last`, are fed to the LLM in a single summarisation call.
+4. The summary is stored in the vector memory (if enabled) under `memory_category` for future recall.
+5. The compacted messages are removed and replaced with a single `[CONTEXT SUMMARY]` system message that is itself protected from future compaction.
+
+### Quick Start
+
+```python
+from pithos import OllamaAgent, ConfigManager
+from pithos.agent.compaction import CompactionConfig
+
+config_manager = ConfigManager()
+agent = OllamaAgent("glm-4.7-flash")
+agent.enable_memory(config_manager)  # optional — enables archiving summaries
+
+agent.enable_compaction(CompactionConfig(
+    threshold=20,       # compact when history reaches 20 messages
+    keep_last=6,        # always keep the 6 most-recent messages intact
+    summary_model=None, # None = use agent's default_model
+))
+
+# Now just chat normally — compaction runs automatically
+for _ in range(30):
+    agent.send("Tell me something interesting about astronomy.")
+```
+
+### YAML Configuration
+
+```yaml
+# configs/agents/my-agent.yaml
+default_model: glm-4.7-flash
+compaction:
+  enabled: true
+  threshold: 20           # message count that triggers compaction
+  keep_last: 6            # most-recent messages to leave untouched
+  summary_model: null     # null = use default_model
+  memory_category: context_summaries
+  summary_max_tokens: 512
+```
+
+### CompactionConfig Reference
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `threshold` | int | `20` | Total message count before compaction runs |
+| `keep_last` | int | `6` | Most-recent compactable messages to preserve |
+| `summary_model` | str \| None | `None` | Ollama model for summarisation; falls back to `default_model` |
+| `memory_category` | str | `"context_summaries"` | ChromaDB category for archived summaries |
+| `summary_max_tokens` | int | `512` | Max output tokens for the summary response |
+
+### Summary Format
+
+The compactor asks the model to respond in a structured two-line format:
+
+```
+Summary: <concise paragraph summarising the compacted turns>
+Entities: <comma-separated list of important named entities not already named in the summary>
+```
+
+The resulting `[CONTEXT SUMMARY]` system message injected into history looks like:
+
+```
+[CONTEXT SUMMARY]
+Discussion covered setting up a Python project, installing dependencies, and
+resolving a version conflict with numpy. A fix using a virtual environment was agreed upon.
+
+Key entities: numpy, pip, venv, requirements.txt
+```
+
+### API Reference
+
+```python
+# Enable with default settings
+agent.enable_compaction()
+
+# Enable with custom settings
+from pithos.agent.compaction import CompactionConfig
+agent.enable_compaction(CompactionConfig(threshold=15, keep_last=4))
+
+# Disable
+agent.disable_compaction()
+
+# Check status
+print(agent.compaction_enabled)   # True / False
+print(agent._compactor.config.threshold)
+```
+
+---
+
+## Automatic Memory Recall
+
+**Automatic recall** retrieves relevant memories and prior conversation snippets before each user turn and injects them as context. The agent therefore "remembers" past interactions without you needing to manually manage retrieval.
+
+### How It Works
+
+1. Before the user message is appended to the context, the recaller makes an *ephemeral* LLM call (not stored in history) asking: "Given this conversation so far and the incoming message, what should I search for?"
+2. The model returns 1–3 concise search queries.
+3. These queries are run against the configured sources (vector memory and/or conversation history).
+4. Snippets scoring above `min_relevance` are collected, deduplicated, and injected into the conversation as a `[RECALLED CONTEXT]` system message at position 0.
+5. Any previously injected recall message is replaced, so at most one is present at any time.
+6. The recall message is tagged `_pithos_no_compact` so it is never included in compaction candidates.
+
+### Quick Start
+
+```python
+from pithos import OllamaAgent, ConfigManager
+from pithos.agent.recall import RecallConfig
+
+config_manager = ConfigManager()
+agent = OllamaAgent("glm-4.7-flash")
+agent.enable_memory(config_manager)    # recall needs a source to search
+agent.enable_history()                  # optional second source
+
+agent.enable_recall(RecallConfig(
+    sources=["memory", "history"],  # search both sources
+    n_results=5,                    # max snippets to inject
+    min_relevance=0.5,              # relevance filter (0–1)
+))
+
+# The agent now surfaces relevant memories automatically
+agent.send("What did we decide about the database schema last time?")
+# → recall injects matching history snippets before the LLM sees the question
+```
+
+### YAML Configuration
+
+```yaml
+# configs/agents/my-agent.yaml
+default_model: glm-4.7-flash
+recall:
+  enabled: true
+  sources:
+    - memory      # ChromaDB vector memory store
+    - history     # SQLite + vector conversation history
+  n_results: 5
+  recall_model: null   # null = use default_model
+  categories: []       # empty = search all memory categories
+  min_relevance: 0.5
+```
+
+### RecallConfig Reference
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `sources` | list[str] | `["memory", "history"]` | Data sources to search (`"memory"` and/or `"history"`) |
+| `n_results` | int | `5` | Maximum snippets injected per turn |
+| `recall_model` | str \| None | `None` | Model for query generation; falls back to `default_model` |
+| `categories` | list[str] | `[]` | Memory categories to search; empty = all |
+| `min_relevance` | float | `0.5` | Minimum relevance score (0–1) to include a snippet |
+
+### Injected Message Format
+
+The recall message appears as the first item in `message_history` and looks like:
+
+```
+[RECALLED CONTEXT]
+The following memories were automatically retrieved as relevant context:
+
+1. [memory] The project uses PostgreSQL 15 with pgvector enabled.
+2. [memory] Database migrations are managed by Alembic.
+3. [history] [user] What is the schema for the conversations table?
+4. [history] [assistant] The conversations table has columns: id, session_id, agent_name, ...
+```
+
+### Sources
+
+| Source | Requires | Searches |
+|---|---|---|
+| `"memory"` | `agent.enable_memory(...)` | Vector memory store (ChromaDB) |
+| `"history"` | `agent.enable_history(...)` | Persistent conversation log (ChromaDB + SQLite FTS5) |
+
+If a source is configured but its backing store is not enabled on the agent, it is silently skipped.
+
+### API Reference
+
+```python
+# Enable with default settings
+agent.enable_recall()
+
+# Enable with custom settings
+from pithos.agent.recall import RecallConfig
+agent.enable_recall(RecallConfig(sources=["memory"], n_results=3))
+
+# Disable
+agent.disable_recall()
+
+# Check status
+print(agent.recall_enabled)   # True / False
+```
+
+### Combining Compaction and Recall
+
+Compaction and recall work seamlessly together. Recall injections are protected from compaction, and compaction summaries are stored in the memory store where recall can later find them:
+
+```python
+agent.enable_memory(config_manager)
+agent.enable_history()
+agent.enable_compaction(CompactionConfig(threshold=20, keep_last=6))
+agent.enable_recall(RecallConfig(sources=["memory", "history"], n_results=4))
+```
+
+Each turn the agent:
+1. Retrieves relevant prior context and injects it at the top of history
+2. Responds normally
+3. If history is now too long, compacts the oldest messages and archives the summary to memory — ready to be recalled on the next relevant turn
+
+---
+
 ## Troubleshooting
 
 ### ChromaDB Not Installed
@@ -636,7 +853,7 @@ class SearchResult:
 from pithos import OllamaAgent, ConfigManager
 
 config_manager = ConfigManager()
-agent = OllamaAgent("llama3.2")
+agent = OllamaAgent("glm-4.7-flash")
 agent.enable_memory(config_manager)
 
 # Teach the agent facts
@@ -672,7 +889,7 @@ rust_info = memory.retrieve("rust", "memory management")
 ### Example 3: Context-Aware Assistant
 
 ```python
-agent = OllamaAgent("llama3.2")
+agent = OllamaAgent("glm-4.7-flash")
 agent.enable_memory(ConfigManager())
 
 # First interaction

@@ -1,0 +1,150 @@
+# Multi-Agent Research Team Flowchart
+# Demonstrates team flowcharts with multiple agents collaborating
+# 
+# This flowchart requires multiple agents in state['agents']:
+#   - researcher: Gathers and analyzes information
+#   - writer: Synthesizes findings into clear output
+#   - critic: Reviews and provides feedback
+
+nodes:
+  InitialResearch:
+    type: agentprompt
+    agent: researcher
+    prompt: |
+      Research the following topic and gather key facts and insights:
+      
+      {current_input}
+      
+      Provide a comprehensive overview of the main points, evidence, and different perspectives.
+    extraction: {}
+    inputs: [default]
+    outputs: [default]
+  
+  CaptureResearch:
+    type: textparse
+    extraction: {}
+    set:
+      research_findings: '{current_input}'
+    inputs: [default]
+    outputs: [default]
+  
+  WriteDraft:
+    type: agentprompt
+    agent: writer
+    prompt: |
+      Based on the research findings below, write a clear and well-structured summary:
+      
+      <research>
+      {research_findings}
+      </research>
+      
+      Focus on clarity, organization, and making the content accessible to a general audience.
+    extraction: {}
+    inputs: [default]
+    outputs: [default]
+  
+  CaptureDraft:
+    type: textparse
+    extraction: {}
+    set:
+      draft_content: '{current_input}'
+    inputs: [default]
+    outputs: [default]
+  
+  ReviewAndCritique:
+    type: agentprompt
+    agent: critic
+    prompt: |
+      Review the following draft and provide constructive feedback:
+      
+      <draft>
+      {draft_content}
+      </draft>
+      
+      Evaluate:
+      1. Accuracy and completeness
+      2. Clarity and organization
+      3. Areas that need improvement
+      
+      Provide specific suggestions for enhancement.
+    extraction: {}
+    inputs: [default]
+    outputs: [default]
+  
+  CaptureFeedback:
+    type: textparse
+    extraction: {}
+    set:
+      critique: '{current_input}'
+    inputs: [default]
+    outputs: [default]
+  
+  FinalRevision:
+    type: agentprompt
+    agent: writer
+    prompt: |
+      Revise the draft based on the feedback below:
+      
+      <original_draft>
+      {draft_content}
+      </original_draft>
+      
+      <feedback>
+      {critique}
+      </feedback>
+      
+      Produce a final, polished version that addresses all feedback while maintaining clarity.
+    extraction: {}
+    inputs: [default]
+    outputs: [default]
+
+edges:
+  - from: InitialResearch
+    to: CaptureResearch
+    condition:
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+  
+  - from: CaptureResearch
+    to: WriteDraft
+    condition:
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+  
+  - from: WriteDraft
+    to: CaptureDraft
+    condition:
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+  
+  - from: CaptureDraft
+    to: ReviewAndCritique
+    condition:
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+  
+  - from: ReviewAndCritique
+    to: CaptureFeedback
+    condition:
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+  
+  - from: CaptureFeedback
+    to: FinalRevision
+    condition:
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+
+start_node: InitialResearch

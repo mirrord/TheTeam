@@ -1,0 +1,97 @@
+# Teacher-Student flowchart
+# Teacher breaks down problem, student follows steps
+
+nodes:
+  Instruct:
+    type: prompt
+    prompt: |
+      Examine the problem below. Do not attempt to solve the problem. Instead,
+      focus on the structure, form and intention of the question.
+      
+      <question>
+      {current_input}
+      </question>
+      
+      First identify the type of question being asked in terms of its subject matter.
+      Then, in a concise bulleted list, please describe the steps a student should
+      take to solve the problem. *Do not* perform any of the steps for the student.
+    extraction: {}
+    inputs: [default]
+    outputs: [default]
+  
+  CaptureQuestion:
+    type: textparse
+    extraction: {}
+    set:
+      original_question: '{current_input}'
+    inputs: [default]
+    outputs: [default]
+  
+  Follow:
+    type: prompt
+    prompt: |
+      Consider the following query.
+      
+      <question>
+      {original_question}
+      </question>
+      
+      Now *carefully* follow the steps below to solve the question.
+      
+      INSTRUCTIONS
+      ---------------
+      {current_input}
+    prompt_args:
+      record_answer: false
+      record_prompt: false
+    extraction: {}
+    inputs: [default]
+    outputs: [default]
+  
+  Summarize:
+    type: prompt
+    prompt: |
+      Answer the following question using the thought process below.
+      
+      <question>
+      {original_question}
+      </question>
+      
+      <think>
+      {current_input}
+      </think>
+      
+      Be sure to answer the question directly and concisely.
+    extraction: {}
+    inputs: [default]
+    outputs: [default]
+
+edges:
+  - from: Instruct
+    to: CaptureQuestion
+    condition:
+      enabled: true
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+  
+  - from: CaptureQuestion
+    to: Follow
+    condition:
+      enabled: true
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+  
+  - from: Follow
+    to: Summarize
+    condition:
+      enabled: true
+      type: AlwaysCondition
+    priority: 9
+    output_key: default
+    input_key: default
+
+start_node: Instruct

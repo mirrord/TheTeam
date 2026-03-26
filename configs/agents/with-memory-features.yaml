@@ -1,0 +1,28 @@
+current_context: default
+default_model: glm-4.7-flash
+name: with-memory-features
+system_prompt: "You are a helpful AI assistant with persistent memory. You remember past conversations and summarise your context automatically when it grows too large."
+
+# Automatic context compaction
+# When message count reaches the threshold, old messages are summarised and
+# replaced with a compact note so the context window stays manageable.
+compaction:
+  enabled: true
+  threshold: 20          # compact when history has >= 20 messages
+  keep_last: 6           # always keep the 6 most-recent messages untouched
+  summary_model: null    # null = use default_model for summarisation
+  memory_category: context_summaries   # ChromaDB category for archived summaries
+  summary_max_tokens: -1
+
+# Automatic memory recall
+# Before each user turn, relevant memories are retrieved via RAG and
+# prepended to the conversation as a [RECALLED CONTEXT] block.
+recall:
+  enabled: true
+  sources:               # which data sources to search
+    - memory             # ChromaDB vector memory store
+    - history            # persistent conversation history (SQLite + vector)
+  n_results: 5           # max snippets to inject per turn
+  recall_model: null     # null = use default_model for query generation
+  categories: []         # empty = search all available memory categories
+  min_relevance: 0.5     # minimum relevance score (0-1) to include a result

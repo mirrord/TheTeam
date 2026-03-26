@@ -1,0 +1,42 @@
+current_context: default
+inference:
+  edges:
+  - condition:
+      type: AlwaysCondition
+    from: Generate
+    to: Reflect
+  - condition:
+      type: AlwaysCondition
+    from: Reflect
+    to: Regenerate
+  nodes:
+    Generate:
+      extraction: {}
+      prompt: '{current_input}'
+      set:
+        original_question: '{current_input}'
+      type: prompt
+    Reflect:
+      extraction: {}
+      prompt: Reflect on your previous answer and decide if you want to change it.
+      set:
+        original_answer: '{current_input}'
+      type: prompt
+    Regenerate:
+      extraction: {}
+      prompt: 'Answer the following question using the thought process below. **QUESTION**
+
+        {original_question}
+
+        <think>
+
+        {original_answer}
+
+        {current_input}
+
+        </think> Be sure to answer the question directly and concisely.'
+      set: {}
+      type: prompt
+  start_node: Generate
+default_model: glm-4.7-flash
+name: structured-reflect
