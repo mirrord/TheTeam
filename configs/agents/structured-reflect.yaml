@@ -38,5 +38,5 @@ inference:
       set: {}
       type: prompt
   start_node: Generate
-default_model: glm-4.7-flash
+model: glm-4.7-flash
 name: structured-reflect

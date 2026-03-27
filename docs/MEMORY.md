@@ -506,7 +506,7 @@ agent.enable_memory(config_manager)  # optional — enables archiving summaries
 agent.enable_compaction(CompactionConfig(
     threshold=20,       # compact when history reaches 20 messages
     keep_last=6,        # always keep the 6 most-recent messages intact
-    summary_model=None, # None = use agent's default_model
+    summary_model=None, # None = use agent's model
 ))
 
 # Now just chat normally — compaction runs automatically
@@ -518,12 +518,12 @@ for _ in range(30):
 
 ```yaml
 # configs/agents/my-agent.yaml
-default_model: glm-4.7-flash
+model: glm-4.7-flash
 compaction:
   enabled: true
   threshold: 20           # message count that triggers compaction
   keep_last: 6            # most-recent messages to leave untouched
-  summary_model: null     # null = use default_model
+  summary_model: null     # null = use agent's model
   memory_category: context_summaries
   summary_max_tokens: 512
 ```
@@ -534,7 +534,7 @@ compaction:
 |---|---|---|---|
 | `threshold` | int | `20` | Total message count before compaction runs |
 | `keep_last` | int | `6` | Most-recent compactable messages to preserve |
-| `summary_model` | str \| None | `None` | Ollama model for summarisation; falls back to `default_model` |
+| `summary_model` | str \| None | `None` | Ollama model for summarisation; falls back to agent's model |
 | `memory_category` | str | `"context_summaries"` | ChromaDB category for archived summaries |
 | `summary_max_tokens` | int | `512` | Max output tokens for the summary response |
 
@@ -616,14 +616,14 @@ agent.send("What did we decide about the database schema last time?")
 
 ```yaml
 # configs/agents/my-agent.yaml
-default_model: glm-4.7-flash
+model: glm-4.7-flash
 recall:
   enabled: true
   sources:
     - memory      # ChromaDB vector memory store
     - history     # SQLite + vector conversation history
   n_results: 5
-  recall_model: null   # null = use default_model
+  recall_model: null   # null = use agent's model
   categories: []       # empty = search all memory categories
   min_relevance: 0.5
 ```
@@ -634,7 +634,7 @@ recall:
 |---|---|---|---|
 | `sources` | list[str] | `["memory", "history"]` | Data sources to search (`"memory"` and/or `"history"`) |
 | `n_results` | int | `5` | Maximum snippets injected per turn |
-| `recall_model` | str \| None | `None` | Model for query generation; falls back to `default_model` |
+| `recall_model` | str \| None | `None` | Model for query generation; falls back to agent's model |
 | `categories` | list[str] | `[]` | Memory categories to search; empty = all |
 | `min_relevance` | float | `0.5` | Minimum relevance score (0–1) to include a snippet |
 

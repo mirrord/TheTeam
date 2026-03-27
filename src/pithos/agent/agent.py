@@ -84,10 +84,9 @@ class Agent(ABC):
         cls: Type[_AgentT], config: dict[str, Any], config_manager: ConfigManager
     ) -> _AgentT:
         """Create agent from configuration dictionary."""
-        # Support both 'default_model' and legacy 'model' key
-        model = config.get("default_model") or config.get("model")
+        model = config.get("model")
         if not model:
-            raise ValueError("Agent config must specify 'default_model' or 'model'")
+            raise ValueError("Agent config must specify 'model'")
         agent = cls(
             model,
             config.get("name"),
@@ -116,7 +115,9 @@ class Agent(ABC):
                 threshold=compaction_cfg.get("threshold", 20),
                 keep_last=compaction_cfg.get("keep_last", 6),
                 summary_model=compaction_cfg.get("summary_model"),
-                memory_category=compaction_cfg.get("memory_category", "context_summaries"),
+                memory_category=compaction_cfg.get(
+                    "memory_category", "context_summaries"
+                ),
                 summary_max_tokens=compaction_cfg.get("summary_max_tokens", 512),
             )
             agent.enable_compaction(cfg)
@@ -158,7 +159,7 @@ class Agent(ABC):
         """Serialize agent configuration to dictionary."""
         d: dict[str, Any] = {
             "name": self.agent_name,
-            "default_model": self.default_model,
+            "model": self.default_model,
             "system_prompt": self.default_system_prompt,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
@@ -699,9 +700,7 @@ Results will be provided to you automatically. If an operation fails, you will r
                             self.metrics.record_memory_store()
                         except Exception:
                             pass
-                    store_msg = (
-                        f"✓ Stored in {op.category}: {op.content[:50]}... (ID: {entry_id})"
-                    )
+                    store_msg = f"✓ Stored in {op.category}: {op.content[:50]}... (ID: {entry_id})"
                     # Append suggested tags to the result message when available.
                     if self.memory_store.tag_suggestions_enabled:
                         try:
@@ -939,7 +938,9 @@ class OllamaAgent(Agent):
         # Auto-recall: inject relevant memories before the user message is appended
         if self.recall_enabled and self._auto_recall:
             try:
-                self._auto_recall.inject_recall(agent=self, context=context, content=content, model=model)
+                self._auto_recall.inject_recall(
+                    agent=self, context=context, content=content, model=model
+                )
             except Exception as exc:
                 logger.warning("Auto-recall failed (non-fatal): %s", exc)
 
@@ -1080,7 +1081,9 @@ class OllamaAgent(Agent):
         # Auto-recall: inject relevant memories before the user message is appended
         if self.recall_enabled and self._auto_recall:
             try:
-                self._auto_recall.inject_recall(agent=self, context=context, content=content, model=model)
+                self._auto_recall.inject_recall(
+                    agent=self, context=context, content=content, model=model
+                )
             except Exception as exc:
                 logger.warning("Auto-recall failed (non-fatal): %s", exc)
 

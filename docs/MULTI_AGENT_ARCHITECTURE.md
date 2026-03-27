@@ -177,23 +177,14 @@ node = SetHistoryNode(
 
 ## Agent Configuration Changes
 
-### Old Format (Legacy - Still Supported)
+### Agent Config Format
+
 ```yaml
 model: glm-4.7-flash
 name: my-agent
 system_prompt: "You are helpful."
 temperature: 0.7
 ```
-
-### New Format (Recommended)
-```yaml
-default_model: glm-4.7-flash
-name: my-agent
-system_prompt: "You are helpful."
-temperature: 0.7
-```
-
-**Backward Compatibility:** The system automatically supports both `model` and `default_model` keys when loading configurations.
 
 ## Flowchart Detection
 
@@ -227,7 +218,7 @@ else:
    ```
 
 2. **Agent Configurations:**
-   - Update YAML files to use `default_model` instead of `model`
+   - Update YAML files to use `model` key
    - Legacy `model` key still works for backward compatibility
 
 3. **Using Different Models:**

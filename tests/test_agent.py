@@ -503,7 +503,7 @@ class TestOllamaAgent:
         d = agent.to_dict()
 
         assert d["name"] == "test_agent"
-        assert d["default_model"] == "glm-4.7-flash"
+        assert d["model"] == "glm-4.7-flash"
         assert d["system_prompt"] == "Prompt"
         assert d["temperature"] == 0.7  # Default temperature
         assert d["max_tokens"] == -1  # Default max_tokens (unlimited)
@@ -539,9 +539,9 @@ class TestOllamaAgent:
 
     @patch("pithos.agent.agent.ConfigManager")
     def test_from_dict(self, mock_config_manager):
-        """Test creating agent from dictionary with new default_model key."""
+        """Test creating agent from dictionary."""
         config = {
-            "default_model": "glm-4.7-flash",
+            "model": "glm-4.7-flash",
             "name": "test_agent",
             "system_prompt": "Test prompt",
         }
@@ -553,24 +553,10 @@ class TestOllamaAgent:
         assert agent.temperature == 0.7  # Default when not specified
 
     @patch("pithos.agent.agent.ConfigManager")
-    def test_from_dict_legacy_model_key(self, mock_config_manager):
-        """Test backward compatibility with legacy 'model' key."""
-        config = {
-            "model": "glm-4.7-flash",
-            "name": "test_agent",
-            "system_prompt": "Test prompt",
-        }
-        agent = OllamaAgent.from_dict(config, mock_config_manager)
-
-        assert agent.default_model == "glm-4.7-flash"
-        assert agent.agent_name == "test_agent"
-        assert agent.default_system_prompt == "Test prompt"
-
-    @patch("pithos.agent.agent.ConfigManager")
     def test_from_dict_with_temperature(self, mock_config_manager):
         """Test creating agent from dictionary with temperature."""
         config = {
-            "default_model": "glm-4.7-flash",
+            "model": "glm-4.7-flash",
             "name": "test_agent",
             "system_prompt": "Test prompt",
             "temperature": 0.2,
@@ -583,7 +569,7 @@ class TestOllamaAgent:
     def test_from_dict_with_zero_temperature(self, mock_config_manager):
         """Test creating agent with temperature 0 from config."""
         config = {
-            "default_model": "glm-4.7-flash",
+            "model": "glm-4.7-flash",
             "name": "test_agent",
             "temperature": 0,
         }

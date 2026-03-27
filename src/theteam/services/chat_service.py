@@ -237,14 +237,17 @@ class ChatService:
             conversation.updated_at = datetime.now().isoformat()
             self._save_conversation(conversation)
 
-        # Start async processing
+        # Start async processing — use socketio.start_background_task when
+        # available so the task runs inside the eventlet/gevent event loop and
+        # can reliably emit SocketIO events back to the client.
         target = self._process_message_streaming if stream else self._process_message
-        thread = threading.Thread(
-            target=target,
-            args=(conversation_id, message, socketio, client_id),
-        )
-        thread.daemon = True
-        thread.start()
+        args = (conversation_id, message, socketio, client_id)
+        if socketio is not None:
+            socketio.start_background_task(target, *args)
+        else:
+            thread = threading.Thread(target=target, args=args)
+            thread.daemon = True
+            thread.start()
 
         return message_id
 
@@ -298,16 +301,12 @@ class ChatService:
 
             # Create agent and generate response
             config = agent_config["config"]
-            model = (
-                config.get("default_model")
-                or config.get("model")
-                or "glm-4.7-flash:latest"
-            )
+            model = config.get("model") or "glm-4.7-flash:latest"
             agent = OllamaAgent(
                 default_model=model,
                 system_prompt=config.get("system_prompt") or "",
                 temperature=float(config.get("temperature", 0.7)),
-                max_tokens=int(config.get("max_tokens", 2048)),
+                max_tokens=int(config.get("max_tokens", -1)),
             )
 
             # Build context from conversation history
@@ -417,16 +416,12 @@ class ChatService:
                 )
 
             config = agent_config["config"]
-            model = (
-                config.get("default_model")
-                or config.get("model")
-                or "glm-4.7-flash:latest"
-            )
+            model = config.get("model") or "glm-4.7-flash:latest"
             agent = OllamaAgent(
                 default_model=model,
                 system_prompt=config.get("system_prompt") or "",
                 temperature=float(config.get("temperature", 0.7)),
-                max_tokens=int(config.get("max_tokens", 2048)),
+                max_tokens=int(config.get("max_tokens", -1)),
             )
 
             # Pre-allocate the ID that will identify the streaming message

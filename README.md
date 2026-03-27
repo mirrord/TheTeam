@@ -824,7 +824,7 @@ configs/
 
 ```yaml
 # configs/agents/my-agent.yaml
-default_model: glm-4.7-flash:latest
+model: glm-4.7-flash:latest
 system_prompt: "You are a helpful assistant."
 ```
 

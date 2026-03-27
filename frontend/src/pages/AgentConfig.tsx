@@ -16,6 +16,7 @@ export default function AgentConfig() {
   const [testLoading, setTestLoading] = useState(false)
   const [availableTools, setAvailableTools] = useState<string[]>([])
   const [availableModels, setAvailableModels] = useState<string[]>([])
+  const [agentType, setAgentType] = useState<'base_model' | 'custom'>('base_model')
   
   useEffect(() => {
     fetchAgents()
@@ -51,6 +52,7 @@ export default function AgentConfig() {
   const handleCreate = () => {
     setIsCreating(true)
     setIsEditing(true)
+    setAgentType('base_model')
     setEditingConfig({
       id: '',
       name: 'New Agent',
@@ -63,15 +65,30 @@ export default function AgentConfig() {
       tool_auto_loop: false,
       tool_max_iterations: 5,
       memory_enabled: false,
-      top_k: 40,
-      top_p: 0.9,
-      repeat_penalty: 1.1,
+      current_context: 'default',
+      compaction: {
+        enabled: false,
+        threshold: 20,
+        keep_last: 6,
+        summary_model: null,
+        memory_category: 'context_summaries',
+        summary_max_tokens: 512,
+      },
+      recall: {
+        enabled: false,
+        sources: ['memory', 'history'],
+        n_results: 5,
+        recall_model: null,
+        categories: [],
+        min_relevance: 0.5,
+      },
     })
   }
   
   const handleEdit = (agent: Agent) => {
     setSelectedAgent(agent)
     setIsEditing(true)
+    setAgentType('base_model') // Default to base_model type
     // Fetch full config
     fetch(`/api/v1/agents/${agent.id}`)
       .then(res => res.json())
@@ -259,17 +276,31 @@ export default function AgentConfig() {
                     </div>
                     
                     <div>
-                      <label className="block text-sm font-medium mb-2">Model</label>
+                      <label className="block text-sm font-medium mb-2">Agent Type</label>
                       <select
-                        value={editingConfig.model}
-                        onChange={(e) => updateConfig('model', e.target.value)}
+                        value={agentType}
+                        onChange={(e) => setAgentType(e.target.value as 'base_model' | 'custom')}
                         className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                       >
-                        {availableModels.map((model) => (
-                          <option key={model} value={model}>{model}</option>
-                        ))}
+                        <option value="base_model">Base Model</option>
+                        <option value="custom">Custom</option>
                       </select>
                     </div>
+                    
+                    {agentType === 'base_model' && (
+                      <div>
+                        <label className="block text-sm font-medium mb-2">Model</label>
+                        <select
+                          value={editingConfig.model}
+                          onChange={(e) => updateConfig('model', e.target.value)}
+                          className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                        >
+                          {availableModels.map((model) => (
+                            <option key={model} value={model}>{model}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                     
                     <div>
                       <label className="block text-sm font-medium mb-2">System Prompt</label>
@@ -279,6 +310,19 @@ export default function AgentConfig() {
                         rows={6}
                         className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                       />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Current Context</label>
+                      <input
+                        type="text"
+                        value={editingConfig.current_context || 'default'}
+                        onChange={(e) => updateConfig('current_context', e.target.value)}
+                        className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        Name of the active conversation context
+                      </p>
                     </div>
                   </div>
                   
@@ -308,42 +352,7 @@ export default function AgentConfig() {
                           onChange={(e) => updateConfig('max_tokens', parseInt(e.target.value))}
                           className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                         />
-                      </div>
-                      
-                      <div>
-                        <label className="block text-sm font-medium mb-2">Top K</label>
-                        <input
-                          type="number"
-                          value={editingConfig.top_k || 40}
-                          onChange={(e) => updateConfig('top_k', parseInt(e.target.value))}
-                          className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                        />
-                      </div>
-                      
-                      <div>
-                        <label className="block text-sm font-medium mb-2">Top P</label>
-                        <input
-                          type="number"
-                          step="0.1"
-                          min="0"
-                          max="1"
-                          value={editingConfig.top_p || 0.9}
-                          onChange={(e) => updateConfig('top_p', parseFloat(e.target.value))}
-                          className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                        />
-                      </div>
-                      
-                      <div>
-                        <label className="block text-sm font-medium mb-2">Repeat Penalty</label>
-                        <input
-                          type="number"
-                          step="0.1"
-                          min="0"
-                          max="2"
-                          value={editingConfig.repeat_penalty || 1.1}
-                          onChange={(e) => updateConfig('repeat_penalty', parseFloat(e.target.value))}
-                          className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                        />
+                        <p className="text-xs text-gray-500 mt-1">Use -1 for unlimited</p>
                       </div>
                     </div>
                   </div>
@@ -441,6 +450,203 @@ export default function AgentConfig() {
                         Chain-of-thought flowcharts guide the agent's reasoning process
                       </p>
                     </div>
+                  </div>
+                  
+                  {/* Compaction Section */}
+                  <div className="space-y-4">
+                    <h4 className="text-md font-semibold border-b border-gray-700 pb-2">Context Compaction</h4>
+                    
+                    <div>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={editingConfig.compaction?.enabled || false}
+                          onChange={(e) => updateConfig('compaction', {
+                            ...editingConfig.compaction,
+                            enabled: e.target.checked
+                          })}
+                          className="w-4 h-4"
+                        />
+                        <span className="text-sm">Enable Context Compaction</span>
+                      </label>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Automatically summarize old messages when context grows too large
+                      </p>
+                    </div>
+                    
+                    {editingConfig.compaction?.enabled && (
+                      <div className="grid grid-cols-2 gap-4 ml-6">
+                        <div>
+                          <label className="block text-sm font-medium mb-2">Threshold</label>
+                          <input
+                            type="number"
+                            min="1"
+                            value={editingConfig.compaction?.threshold || 20}
+                            onChange={(e) => updateConfig('compaction', {
+                              ...editingConfig.compaction,
+                              threshold: parseInt(e.target.value)
+                            })}
+                            className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">Messages before compacting</p>
+                        </div>
+                        
+                        <div>
+                          <label className="block text-sm font-medium mb-2">Keep Last</label>
+                          <input
+                            type="number"
+                            min="1"
+                            value={editingConfig.compaction?.keep_last || 6}
+                            onChange={(e) => updateConfig('compaction', {
+                              ...editingConfig.compaction,
+                              keep_last: parseInt(e.target.value)
+                            })}
+                            className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">Recent messages to preserve</p>
+                        </div>
+                        
+                        <div>
+                          <label className="block text-sm font-medium mb-2">Memory Category</label>
+                          <input
+                            type="text"
+                            value={editingConfig.compaction?.memory_category || 'context_summaries'}
+                            onChange={(e) => updateConfig('compaction', {
+                              ...editingConfig.compaction,
+                              memory_category: e.target.value
+                            })}
+                            className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                          />
+                        </div>
+                        
+                        <div>
+                          <label className="block text-sm font-medium mb-2">Summary Max Tokens</label>
+                          <input
+                            type="number"
+                            value={editingConfig.compaction?.summary_max_tokens || 512}
+                            onChange={(e) => updateConfig('compaction', {
+                              ...editingConfig.compaction,
+                              summary_max_tokens: parseInt(e.target.value)
+                            })}
+                            className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Recall Section */}
+                  <div className="space-y-4">
+                    <h4 className="text-md font-semibold border-b border-gray-700 pb-2">Memory Recall</h4>
+                    
+                    <div>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={editingConfig.recall?.enabled || false}
+                          onChange={(e) => updateConfig('recall', {
+                            ...editingConfig.recall,
+                            enabled: e.target.checked
+                          })}
+                          className="w-4 h-4"
+                        />
+                        <span className="text-sm">Enable Memory Recall</span>
+                      </label>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Automatically retrieve relevant memories before each response
+                      </p>
+                    </div>
+                    
+                    {editingConfig.recall?.enabled && (
+                      <div className="grid grid-cols-2 gap-4 ml-6">
+                        <div>
+                          <label className="block text-sm font-medium mb-2">Max Results</label>
+                          <input
+                            type="number"
+                            min="1"
+                            value={editingConfig.recall?.n_results || 5}
+                            onChange={(e) => updateConfig('recall', {
+                              ...editingConfig.recall,
+                              n_results: parseInt(e.target.value)
+                            })}
+                            className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">Max memories to retrieve</p>
+                        </div>
+                        
+                        <div>
+                          <label className="block text-sm font-medium mb-2">Min Relevance</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            min="0"
+                            max="1"
+                            value={editingConfig.recall?.min_relevance || 0.5}
+                            onChange={(e) => updateConfig('recall', {
+                              ...editingConfig.recall,
+                              min_relevance: parseFloat(e.target.value)
+                            })}
+                            className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">Minimum relevance score (0-1)</p>
+                        </div>
+                        
+                        <div className="col-span-2">
+                          <label className="block text-sm font-medium mb-2">Memory Categories</label>
+                          <input
+                            type="text"
+                            value={editingConfig.recall?.categories?.join(', ') || ''}
+                            onChange={(e) => updateConfig('recall', {
+                              ...editingConfig.recall,
+                              categories: e.target.value ? e.target.value.split(',').map(s => s.trim()) : []
+                            })}
+                            placeholder="Leave empty to search all categories"
+                            className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">Comma-separated list of categories to search</p>
+                        </div>
+                        
+                        <div className="col-span-2">
+                          <label className="block text-sm font-medium mb-2">Sources</label>
+                          <div className="flex gap-4">
+                            <label className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={editingConfig.recall?.sources?.includes('memory') || false}
+                                onChange={(e) => {
+                                  const sources = editingConfig.recall?.sources || [];
+                                  updateConfig('recall', {
+                                    ...editingConfig.recall,
+                                    sources: e.target.checked 
+                                      ? [...sources.filter(s => s !== 'memory'), 'memory']
+                                      : sources.filter(s => s !== 'memory')
+                                  });
+                                }}
+                                className="w-4 h-4"
+                              />
+                              <span className="text-sm">Memory Store</span>
+                            </label>
+                            <label className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={editingConfig.recall?.sources?.includes('history') || false}
+                                onChange={(e) => {
+                                  const sources = editingConfig.recall?.sources || [];
+                                  updateConfig('recall', {
+                                    ...editingConfig.recall,
+                                    sources: e.target.checked 
+                                      ? [...sources.filter(s => s !== 'history'), 'history']
+                                      : sources.filter(s => s !== 'history')
+                                  });
+                                }}
+                                className="w-4 h-4"
+                              />
+                              <span className="text-sm">Conversation History</span>
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                   
                   {/* Persistence Section */}

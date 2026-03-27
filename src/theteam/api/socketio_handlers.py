@@ -97,7 +97,7 @@ def register_handlers(socketio):
     def handle_chat_message(data):
         """Handle incoming chat message (triggers async processing)."""
         from flask import request
-        from theteam.services.chat_service import ChatService
+        from theteam.api.chat import chat_service
 
         client_id = request.sid
         conversation_id = data.get("conversation_id")
@@ -109,7 +109,6 @@ def register_handlers(socketio):
             return
 
         try:
-            chat_service = ChatService()
             message_id = chat_service.send_message(
                 conversation_id=conversation_id,
                 message=message,

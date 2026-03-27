@@ -21,6 +21,28 @@ export interface AgentConfig {
   temperature?: number
   max_tokens?: number
   tools?: string[]
+  flowchart?: string
+  tool_auto_loop?: boolean
+  tool_max_iterations?: number
+  memory_enabled?: boolean
+  current_context?: string
+  save_to_file?: boolean
+  compaction?: {
+    enabled: boolean
+    threshold?: number
+    keep_last?: number
+    summary_model?: string | null
+    memory_category?: string
+    summary_max_tokens?: number
+  }
+  recall?: {
+    enabled: boolean
+    sources?: string[]
+    n_results?: number
+    recall_model?: string | null
+    categories?: string[]
+    min_relevance?: number
+  }
   [key: string]: any
 }
 

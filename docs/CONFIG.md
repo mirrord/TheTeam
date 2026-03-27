@@ -43,7 +43,7 @@ Agent configs define model settings, system prompts, and flowcharts.
 **File:** `configs/agents/my-agent.yaml`
 
 ```yaml
-default_model: glm-4.7-flash:latest
+model: glm-4.7-flash:latest
 system_prompt: "You are a helpful assistant."
 temperature: 0.7  # Optional: Controls randomness (0.0-1.0). Default is 0.7.
 max_tokens: -1    # Optional: Maximum tokens to generate. -1 = unlimited (default).
@@ -54,7 +54,7 @@ max_tokens: -1    # Optional: Maximum tokens to generate. -1 = unlimited (defaul
 ### Agent with Flowchart
 
 ```yaml
-default_model: glm-4.7-flash:latest
+model: glm-4.7-flash:latest
 system_prompt: "You are a reflective reasoner."
 inference: simple_reflect
 ```
@@ -62,7 +62,7 @@ inference: simple_reflect
 ### Structured Output Agent
 
 ```yaml
-default_model: glm-4.7-flash:latest
+model: glm-4.7-flash:latest
 system_prompt: "Provide structured analysis."
 structured_with_format: |
   {
@@ -75,7 +75,7 @@ structured_with_format: |
 ### Agent with Tools
 
 ```yaml
-default_model: glm-4.7-flash:latest
+model: glm-4.7-flash:latest
 system_prompt: "You are an assistant that can execute commands."
 enable_tools: true
 ```
@@ -83,7 +83,7 @@ enable_tools: true
 ### Advanced Agent Config
 
 ```yaml
-default_model: phi3:mini
+model: phi3:mini
 temperature: 0.3  # Lower temperature for more focused, deterministic responses
 max_tokens: 1024  # Limit response length
 system_prompt: |

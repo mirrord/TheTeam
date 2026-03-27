@@ -14,7 +14,7 @@ bp = Blueprint("system", __name__, url_prefix=f"{API_PREFIX}/system")
 @bp.route("/health", methods=["GET"])
 def health_check():
     """Health check endpoint."""
-    return jsonify({"status": "healthy", "service": "theteam", "version": "0.1.0"}), 200
+    return jsonify({"status": "healthy", "service": "theteam", "version": "0.1.1"}), 200
 
 
 @bp.route("/info", methods=["GET"])
