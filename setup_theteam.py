@@ -4,7 +4,6 @@ Setup script for TheTeam web interface.
 Creates necessary directories and initializes the application.
 """
 
-import os
 import sys
 from pathlib import Path
 

@@ -42,6 +42,7 @@ class VerboseSocketIOFilter(logging.Filter):
             'emitting event "connection_established"',
             "Sending packet MESSAGE data 2[",
             "Sending packet MESSAGE data 0{",
+            'emitting event "stream_chunk"',
         ]
         for pattern in verbose_patterns:
             if pattern in message:
@@ -112,26 +113,61 @@ def create_app(config=None):
     # Serve React app
     @app.route("/")
     def index():
+        """Serve the main React app entry point."""
         if app.static_folder:
             static_dir = Path(app.static_folder)
-            if (static_dir / "index.html").exists():
+            index_path = static_dir / "index.html"
+            if index_path.exists():
                 return send_from_directory(app.static_folder, "index.html")
+        logger.warning("index.html not found in static folder, serving API-only mode")
         return {"message": "TheTeam API Server", "status": "running"}, 200
 
     @app.route("/<path:path>")
     def serve_static(path):
-        if app.static_folder:
-            static_dir = Path(app.static_folder)
-            if (static_dir / path).exists():
-                return send_from_directory(app.static_folder, path)
-            # Serve index.html for client-side routing
-            if (static_dir / "index.html").exists():
-                return send_from_directory(app.static_folder, "index.html")
+        """Serve static files or fallback to index.html for client-side routing."""
+        # API routes should never fall through to this handler (they're registered as blueprints)
+        # but we'll be defensive and check anyway
+        if path.startswith("api/"):
+            return {"error": "Not found"}, 404
+
+        if not app.static_folder:
+            logger.error("static_folder not configured")
+            return {"error": "Not found"}, 404
+
+        static_dir = Path(app.static_folder)
+        requested_file = static_dir / path
+
+        # If the requested path exists as a file (e.g., assets, CSS, JS), serve it
+        if requested_file.exists() and requested_file.is_file():
+            return send_from_directory(app.static_folder, path)
+
+        # Otherwise, serve index.html for client-side routing (SPA fallback)
+        # This handles routes like /chat, /chat/123, /flowcharts, etc.
+        index_path = static_dir / "index.html"
+        if index_path.exists():
+            return send_from_directory(app.static_folder, "index.html")
+
+        logger.error(f"index.html not found at {index_path}")
         return {"error": "Not found"}, 404
 
     # Error handlers
     @app.errorhandler(404)
     def not_found(error):
+        """Handle 404 errors - serve SPA for non-API routes, JSON for API routes."""
+        from flask import request
+
+        # If it's an API request, return JSON error
+        if request.path.startswith("/api/"):
+            return {"error": "Not found"}, 404
+
+        # For all other routes, try to serve the SPA (for client-side routing)
+        if app.static_folder:
+            static_dir = Path(app.static_folder)
+            index_path = static_dir / "index.html"
+            if index_path.exists():
+                return send_from_directory(app.static_folder, "index.html")
+
+        # Final fallback
         return {"error": "Not found"}, 404
 
     @app.errorhandler(500)

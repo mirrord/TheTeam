@@ -18,7 +18,9 @@ export default function ChatInterface() {
     updateAgent,
     addMessage,
     sending,
+    processing,
     streamingMessages,
+    setProcessing,
     startStreaming,
     appendStreamChunk,
     finalizeStreaming,
@@ -76,31 +78,46 @@ export default function ChatInterface() {
   
   // WebSocket handlers for real-time messages (non-streaming fallback + streaming)
   useEffect(() => {
+    console.log('🔧 Setting up socket handlers for conversation:', currentConversation?.id)
+    
     const handleMessageResponse = (data: any) => {
+      console.log('📨 message_response received:', data)
       if (currentConversation && data.conversation_id === currentConversation.id) {
         addMessage(data.message)
       }
     }
     
     const handleMessageError = (data: any) => {
+      console.error('❌ message_error received:', data)
       if (currentConversation && data.conversation_id === currentConversation.id) {
         console.error('Message error:', data.error)
+        setProcessing(data.conversation_id, false)
+      }
+    }
+
+    const handleMessageProcessing = (data: any) => {
+      console.log('⏳ message_processing received:', data)
+      if (currentConversation && data.conversation_id === currentConversation.id) {
+        setProcessing(data.conversation_id, true)
       }
     }
 
     const handleStreamStart = (data: any) => {
+      console.log('🚀 stream_start received:', data)
       if (currentConversation && data.conversation_id === currentConversation.id) {
         startStreaming(data.conversation_id, data.message_id)
       }
     }
 
     const handleStreamChunk = (data: any) => {
+      console.log('📦 stream_chunk received, length:', data.chunk?.length)
       if (currentConversation && data.conversation_id === currentConversation.id) {
         appendStreamChunk(data.conversation_id, data.message_id, data.chunk)
       }
     }
 
     const handleStreamEnd = (data: any) => {
+      console.log('🏁 stream_end received:', data)
       if (currentConversation && data.conversation_id === currentConversation.id) {
         finalizeStreaming(data.conversation_id, data.message)
       }
@@ -108,18 +125,23 @@ export default function ChatInterface() {
     
     on('message_response', handleMessageResponse)
     on('message_error', handleMessageError)
+    on('message_processing', handleMessageProcessing)
     on('stream_start', handleStreamStart)
     on('stream_chunk', handleStreamChunk)
     on('stream_end', handleStreamEnd)
     
+    console.log('✅ Socket handlers registered')
+    
     return () => {
+      console.log('🧹 Cleaning up socket handlers')
       off('message_response', handleMessageResponse)
       off('message_error', handleMessageError)
+      off('message_processing', handleMessageProcessing)
       off('stream_start', handleStreamStart)
       off('stream_chunk', handleStreamChunk)
       off('stream_end', handleStreamEnd)
     }
-  }, [currentConversation, on, off, addMessage, startStreaming, appendStreamChunk, finalizeStreaming])
+  }, [currentConversation, on, off, addMessage, setProcessing, startStreaming, appendStreamChunk, finalizeStreaming])
   
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || !currentConversation || !connected) return
@@ -132,6 +154,9 @@ export default function ChatInterface() {
       timestamp: new Date().toISOString(),
     }
     addMessage(userMessage)
+    
+    // Set processing state immediately
+    setProcessing(currentConversation.id, true)
     
     // Send via WebSocket — streaming is enabled by default
     emit('chat_message', {
@@ -348,6 +373,22 @@ export default function ChatInterface() {
                   </div>
                 </div>
               ))}
+
+              {/* Processing/thinking indicator - shows immediately when message is being processed */}
+              {processing && !activeStreaming && (
+                <div className="flex justify-start">
+                  <div className="max-w-[70%] rounded-lg px-4 py-2 bg-gray-800 text-gray-100">
+                    <div className="flex items-center gap-2">
+                      <div className="flex gap-1">
+                        <span className="inline-block w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <span className="inline-block w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <span className="inline-block w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </div>
+                      <span className="text-sm text-gray-400">Thinking...</span>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* In-progress streaming message */}
               {activeStreaming && (

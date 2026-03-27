@@ -29,6 +29,7 @@ interface ChatState {
   currentConversation: ConversationDetail | null
   loading: boolean
   sending: boolean
+  processing: boolean
   error: string | null
   /** Active streaming messages keyed by conversation id. */
   streamingMessages: Record<string, { id: string; content: string }>
@@ -42,6 +43,7 @@ interface ChatState {
   updateAgent: (conversationId: string, agent_id: string) => Promise<void>
   setCurrentConversation: (conversation: ConversationDetail | null) => void
   addMessage: (message: Message) => void
+  setProcessing: (conversationId: string, processing: boolean) => void
   startStreaming: (conversationId: string, messageId: string) => void
   appendStreamChunk: (conversationId: string, messageId: string, chunk: string) => void
   finalizeStreaming: (conversationId: string, message: Message) => void
@@ -52,6 +54,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   currentConversation: null,
   loading: false,
   sending: false,
+  processing: false,
   error: null,
   streamingMessages: {},
 
@@ -176,17 +179,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
     })
   },
 
+  setProcessing: (_conversationId: string, processing: boolean) => {
+    set({ processing })
+  },
+
   startStreaming: (conversationId: string, messageId: string) => {
+    console.log('🔵 startStreaming called:', { conversationId, messageId })
     set((state) => ({
       streamingMessages: {
         ...state.streamingMessages,
         [conversationId]: { id: messageId, content: '' },
       },
       sending: true,
+      processing: false,
     }))
   },
 
   appendStreamChunk: (conversationId: string, _messageId: string, chunk: string) => {
+    console.log('📝 appendStreamChunk called:', { conversationId, chunk: chunk.substring(0, 20) + '...' })
     set((state) => {
       const current = state.streamingMessages[conversationId]
       if (!current) return state
@@ -200,15 +210,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   finalizeStreaming: (conversationId: string, message: Message) => {
+    console.log('✅ finalizeStreaming called:', { conversationId, messageId: message.id })
     set((state) => {
       const { [conversationId]: _removed, ...rest } = state.streamingMessages
       const conv = state.currentConversation
       if (!conv || conv.id !== conversationId) {
-        return { streamingMessages: rest, sending: false }
+        return { streamingMessages: rest, sending: false, processing: false }
       }
       return {
         streamingMessages: rest,
         sending: false,
+        processing: false,
         currentConversation: {
           ...conv,
           messages: [...conv.messages, message],
