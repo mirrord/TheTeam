@@ -309,12 +309,18 @@ class ChatService:
                 max_tokens=int(config.get("max_tokens", -1)),
             )
 
-            # Build context from conversation history
-            context = []
+            # Pre-populate agent context with prior conversation history.
+            # Exclude the last message (the current user message) because
+            # agent.send() adds it internally via context.add_message().
+            from pithos.context import Msg
+
+            agent.create_context("default")
+            agent_ctx = agent.contexts["default"]
             with self.lock:
                 conversation = self.conversations[conversation_id]
-                for msg in conversation.messages:
-                    context.append(f"{msg.role}: {msg.content}")
+                prior = conversation.messages[:-1]  # everything except current user msg
+            for msg in prior:
+                agent_ctx.add_message(Msg(role=msg.role, content=msg.content))
 
             # Generate response
             response_text = agent.send(message)
@@ -423,6 +429,19 @@ class ChatService:
                 temperature=float(config.get("temperature", 0.7)),
                 max_tokens=int(config.get("max_tokens", -1)),
             )
+
+            # Pre-populate agent context with prior conversation history.
+            # Exclude the last message (the current user message) because
+            # agent.stream() adds it internally via context.add_message().
+            from pithos.context import Msg
+
+            agent.create_context("default")
+            agent_ctx = agent.contexts["default"]
+            with self.lock:
+                conversation = self.conversations[conversation_id]
+                prior = conversation.messages[:-1]  # everything except current user msg
+            for msg in prior:
+                agent_ctx.add_message(Msg(role=msg.role, content=msg.content))
 
             # Pre-allocate the ID that will identify the streaming message
             assistant_message_id = str(uuid.uuid4())
