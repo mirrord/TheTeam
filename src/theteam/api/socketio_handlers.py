@@ -102,7 +102,6 @@ def register_handlers(socketio):
         client_id = request.sid
         conversation_id = data.get("conversation_id")
         message = data.get("message")
-        stream = bool(data.get("stream", True))  # streaming is the default
 
         if not conversation_id or not message:
             emit("error", {"message": "Missing conversation_id or message"})
@@ -114,7 +113,6 @@ def register_handlers(socketio):
                 message=message,
                 client_id=client_id,
                 socketio=socketio,
-                stream=stream,
             )
 
             # Immediate acknowledgment

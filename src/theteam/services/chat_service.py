@@ -203,16 +203,14 @@ class ChatService:
         message: str,
         client_id: Optional[str] = None,
         socketio=None,
-        stream: bool = False,
     ) -> str:
-        """Send a message and get agent response (async).
+        """Send a message and get agent response (async, always streamed).
 
         Args:
             conversation_id: Conversation identifier.
             message: User message content.
             client_id: Optional client identifier for socket events.
             socketio: Optional socket.io instance for real-time updates.
-            stream: Whether to stream the response token by token via SocketIO.
 
         Returns:
             Message ID of the sent user message.
@@ -240,133 +238,15 @@ class ChatService:
         # Start async processing — use socketio.start_background_task when
         # available so the task runs inside the eventlet/gevent event loop and
         # can reliably emit SocketIO events back to the client.
-        target = self._process_message_streaming if stream else self._process_message
         args = (conversation_id, message, socketio, client_id)
         if socketio is not None:
-            socketio.start_background_task(target, *args)
+            socketio.start_background_task(self._process_message_streaming, *args)
         else:
-            thread = threading.Thread(target=target, args=args)
+            thread = threading.Thread(target=self._process_message_streaming, args=args)
             thread.daemon = True
             thread.start()
 
         return message_id
-
-    def _process_message(
-        self, conversation_id: str, message: str, socketio, client_id: Optional[str]
-    ):
-        """Process message and generate response (runs in background thread).
-
-        Args:
-            conversation_id: Conversation identifier.
-            message: User message content.
-            socketio: Socket.io instance for real-time updates.
-            client_id: Optional client identifier for socket events.
-        """
-        from pithos.agent import OllamaAgent
-        from theteam.services.agent_service import AgentService
-        from theteam.api.socketio_handlers import emit_to_client
-
-        try:
-            with self.lock:
-                conversation = self.conversations.get(conversation_id)
-                if not conversation:
-                    raise ValueError(f"Conversation {conversation_id} not found")
-
-                agent_id = conversation.agent_id
-
-            # Get agent configuration
-            agent_service = AgentService()
-            agent_config = agent_service.get_agent(agent_id) if agent_id else None
-
-            if not agent_config:
-                # Use default agent
-                logger.warning(
-                    f"No agent specified for conversation {conversation_id}, using default"
-                )
-                agent_config = {
-                    "config": {"model": "glm-4.7-flash:latest", "name": "Default Agent"}
-                }
-
-            # Notify that processing started
-            if socketio and client_id:
-                emit_to_client(
-                    socketio,
-                    client_id,
-                    "message_processing",
-                    {
-                        "conversation_id": conversation_id,
-                        "timestamp": datetime.now().isoformat(),
-                    },
-                )
-
-            # Create agent and generate response
-            config = agent_config["config"]
-            model = config.get("model") or "glm-4.7-flash:latest"
-            agent = OllamaAgent(
-                default_model=model,
-                system_prompt=config.get("system_prompt") or "",
-                temperature=float(config.get("temperature", 0.7)),
-                max_tokens=int(config.get("max_tokens", -1)),
-            )
-
-            # Pre-populate agent context with prior conversation history.
-            # Exclude the last message (the current user message) because
-            # agent.send() adds it internally via context.add_message().
-            from pithos.context import Msg
-
-            agent.create_context("default")
-            agent_ctx = agent.contexts["default"]
-            with self.lock:
-                conversation = self.conversations[conversation_id]
-                prior = conversation.messages[:-1]  # everything except current user msg
-            for msg in prior:
-                agent_ctx.add_message(Msg(role=msg.role, content=msg.content))
-
-            # Generate response
-            response_text = agent.send(message)
-
-            # Add assistant message
-            with self.lock:
-                conversation = self.conversations[conversation_id]
-                assistant_message = Message(
-                    id=str(uuid.uuid4()),
-                    role="assistant",
-                    content=response_text,
-                    timestamp=datetime.now().isoformat(),
-                )
-                conversation.messages.append(assistant_message)
-                conversation.updated_at = datetime.now().isoformat()
-                self._save_conversation(conversation)
-
-            # Send response to client
-            if socketio and client_id:
-                emit_to_client(
-                    socketio,
-                    client_id,
-                    "message_response",
-                    {
-                        "conversation_id": conversation_id,
-                        "message": assistant_message.to_dict(),
-                        "timestamp": datetime.now().isoformat(),
-                    },
-                )
-
-        except Exception as e:
-            logger.error(
-                f"Error processing message for conversation {conversation_id}: {e}",
-                exc_info=True,
-            )
-            if socketio and client_id:
-                emit_to_client(
-                    socketio,
-                    client_id,
-                    "message_error",
-                    {
-                        "conversation_id": conversation_id,
-                        "error": str(e),
-                        "timestamp": datetime.now().isoformat(),
-                    },
-                )
 
     def _process_message_streaming(
         self, conversation_id: str, message: str, socketio, client_id: Optional[str]
