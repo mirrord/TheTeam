@@ -52,7 +52,6 @@ execution:
   rounds: 10  # Number of rounds to run each model
   num_retries: 3  # Number of retries for failed questions
   temperature: 0  # Model temperature (0 = most deterministic)
-  max_tokens: 2048  # Maximum tokens per response
 
 # Output configuration
 output:
