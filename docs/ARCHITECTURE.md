@@ -74,18 +74,21 @@ theteam/
 The foundation is the `OllamaAgent` class that wraps the Ollama Python client:
 
 ```
-┌─────────────────────────────┐
-│     OllamaAgent             │
-│  - default_model            │
-│  - send()                   │
-│  - enable_tools()           │
-└─────────────────────────────┘
+┌─────────────────────────────────┐
+│     OllamaAgent                 │
+│  - default_model                │
+│  - inference_flowchart          │
+│  - send()                       │
+│  - set_inference_flowchart()    │
+│  - enable_tools()               │
+└─────────────────────────────────┘
 ```
 
 **Key Responsibilities:**
 - Communicate with local Ollama models
 - Manage multiple conversation contexts
 - Handle tool calling integration
+- Manage optional inference flowchart (chain-of-thought)
 - Serialize/deserialize agent state
 
 ### Layer 2: Context and History Management
@@ -98,7 +101,6 @@ Each agent can maintain multiple independent `AgentContext` instances:
 │  - name                                 │
 │  - system_prompt                        │
 │  - message_history                      │
-│  - flowchart (optional)                 │
 │  - copy() / share semantics             │
 └─────────────────────────────────────────┘
 
@@ -114,7 +116,6 @@ Each agent can maintain multiple independent `AgentContext` instances:
 **Context Capabilities:**
 - Independent conversation histories
 - Per-context system prompts
-- Optional flowchart attachment
 - Copy (deep) or share (reference) semantics
 
 **History Capabilities (`enable_history`):**
@@ -242,7 +243,56 @@ User Input
 Response to User
 ```
 
-### Flowchart-Guided Conversation
+### Chain-of-Thought Guided Inference
+
+When an agent has an inference flowchart attached via `set_inference_flowchart()`,
+every call to `send()` is automatically routed through the flowchart:
+
+```
+User Input
+    │
+    v
+┌──────────────────────────────┐
+│  OllamaAgent.send()          │
+│  (inference_flowchart set)   │
+└──────────────────────────────┘
+    │
+    v
+┌──────────────────────────────┐
+│  _inference_send()           │
+│  Creates temp context        │
+│  Sets _running_inference     │
+│  Injects agent into          │
+│  shared_context              │
+└──────────────────────────────┘
+    │
+    v
+┌──────────────────────────────┐
+│  Flowchart                   │
+│  run_message_based()         │
+│  PromptNodes call            │
+│  agent.send() directly       │
+│  (_running_inference guard   │
+│   prevents recursion)        │
+└──────────────────────────────┘
+    │
+    v
+┌──────────────────────────────┐
+│  Final output recorded in    │
+│  main conversation context   │
+│  Post-processing (tools,     │
+│  memory, compaction) runs    │
+└──────────────────────────────┘
+    │
+    v
+Response to User
+```
+
+The `_running_inference` flag prevents infinite recursion: when PromptNodes inside
+the flowchart call `agent.send()`, that nested call goes directly to the LLM
+without re-entering the flowchart.
+
+### Standalone Flowchart Execution
 
 ```
 User Input

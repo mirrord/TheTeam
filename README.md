@@ -103,6 +103,7 @@ pithos-agent chat glm-4.7-flash:latest --flowchart simple_reflect
 
 - **Agent Management**: Create, configure, and manage LLM agents
 - **Context Management**: Multiple contexts per agent with copy/share capabilities
+- **Chain-of-Thought Reasoning**: Attach inference flowcharts to agents for structured reasoning (e.g., Generate → Reflect → Refine) on every response
 - **Flowchart Execution**: Guide agent reasoning through configurable flowcharts
 - **Message-Based Routing**: Advanced data flow with explicit message passing between nodes
 - **Tool Calling**: Enable agents to execute CLI commands dynamically

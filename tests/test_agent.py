@@ -650,3 +650,417 @@ class TestOllamaAgentStreaming:
         chunks = list(agent.stream("Hello"))
 
         assert chunks == ["full reply"]
+
+
+class TestAgentInferenceFlowchart:
+    """Tests for optional chain-of-thought inference flowchart."""
+
+    def test_inference_flowchart_not_set_by_default(self):
+        agent = OllamaAgent("glm-4.7-flash")
+        assert agent.inference_flowchart is None
+        assert agent._inference_config is None
+        assert agent._running_inference is False
+
+    def test_set_inference_flowchart_with_instance(self):
+        """Setting a Flowchart instance directly."""
+        from pithos.flowchart import Flowchart
+        from pithos.config_manager import ConfigManager
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(config_dir=tmpdir)
+            fc = Flowchart(cm)
+            fc.add_node("n1", type="prompt", prompt="{current_input}", extraction={})
+            fc.set_start_node("n1")
+
+            agent = OllamaAgent("glm-4.7-flash")
+            agent.set_inference_flowchart(fc)
+
+            assert agent.inference_flowchart is fc
+            assert agent._inference_config is None
+
+    def test_set_inference_flowchart_with_dict(self):
+        """Setting an inline flowchart via dict config."""
+        from pithos.config_manager import ConfigManager
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(config_dir=tmpdir)
+            fc_dict = {
+                "nodes": {
+                    "Generate": {
+                        "type": "prompt",
+                        "prompt": "{current_input}",
+                        "extraction": {},
+                    },
+                },
+                "edges": [],
+                "start_node": "Generate",
+            }
+            agent = OllamaAgent("glm-4.7-flash")
+            agent.set_inference_flowchart(fc_dict, cm)
+
+            assert agent.inference_flowchart is not None
+            assert agent._inference_config is fc_dict
+
+    def test_set_inference_flowchart_with_registered_name(self):
+        """Setting a flowchart by registered name."""
+        from pithos.config_manager import ConfigManager
+        from pithos.flowchart import Flowchart
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(config_dir=tmpdir)
+            # Register a flowchart
+            fc_data = {
+                "nodes": {
+                    "N1": {
+                        "type": "prompt",
+                        "prompt": "{current_input}",
+                        "extraction": {},
+                    },
+                },
+                "edges": [],
+                "start_node": "N1",
+            }
+            cm.register_config(fc_data, "test_fc", "flowcharts")
+
+            agent = OllamaAgent("glm-4.7-flash")
+            agent.set_inference_flowchart("test_fc", cm)
+
+            assert agent.inference_flowchart is not None
+            assert agent._inference_config == "test_fc"
+
+    def test_set_inference_flowchart_no_config_manager_for_string(self):
+        agent = OllamaAgent("glm-4.7-flash")
+        with pytest.raises(ValueError, match="config_manager is required"):
+            agent.set_inference_flowchart("some_flowchart")
+
+    def test_set_inference_flowchart_no_config_manager_for_dict(self):
+        agent = OllamaAgent("glm-4.7-flash")
+        with pytest.raises(ValueError, match="config_manager is required"):
+            agent.set_inference_flowchart({"nodes": {}, "edges": []})
+
+    def test_set_inference_flowchart_invalid_type(self):
+        agent = OllamaAgent("glm-4.7-flash")
+        with pytest.raises(TypeError, match="Unsupported"):
+            agent.set_inference_flowchart(42)
+
+    def test_clear_inference_flowchart(self):
+        from pithos.flowchart import Flowchart
+        from pithos.config_manager import ConfigManager
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(config_dir=tmpdir)
+            fc = Flowchart(cm)
+            fc.add_node("n1", type="prompt", prompt="{current_input}", extraction={})
+            fc.set_start_node("n1")
+
+            agent = OllamaAgent("glm-4.7-flash")
+            agent.set_inference_flowchart(fc)
+            assert agent.inference_flowchart is not None
+
+            agent.clear_inference_flowchart()
+            assert agent.inference_flowchart is None
+            assert agent._inference_config is None
+
+    def test_to_dict_includes_inference_config_string(self):
+        from pithos.config_manager import ConfigManager
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(config_dir=tmpdir)
+            fc_data = {
+                "nodes": {
+                    "N1": {
+                        "type": "prompt",
+                        "prompt": "{current_input}",
+                        "extraction": {},
+                    },
+                },
+                "edges": [],
+                "start_node": "N1",
+            }
+            cm.register_config(fc_data, "my_fc", "flowcharts")
+
+            agent = OllamaAgent("glm-4.7-flash")
+            agent.set_inference_flowchart("my_fc", cm)
+
+            d = agent.to_dict()
+            assert d["inference"] == "my_fc"
+
+    def test_to_dict_includes_inference_config_dict(self):
+        from pithos.config_manager import ConfigManager
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(config_dir=tmpdir)
+            fc_dict = {
+                "nodes": {
+                    "N": {
+                        "type": "prompt",
+                        "prompt": "{current_input}",
+                        "extraction": {},
+                    },
+                },
+                "edges": [],
+                "start_node": "N",
+            }
+            agent = OllamaAgent("glm-4.7-flash")
+            agent.set_inference_flowchart(fc_dict, cm)
+
+            d = agent.to_dict()
+            assert d["inference"] is fc_dict
+
+    def test_to_dict_no_inference_when_not_set(self):
+        agent = OllamaAgent("glm-4.7-flash")
+        d = agent.to_dict()
+        assert "inference" not in d
+
+    @patch("pithos.agent.agent.ConfigManager")
+    def test_from_dict_loads_inline_inference(self, MockCM):
+        """from_dict should build an inference flowchart from inline config."""
+        from pithos.config_manager import ConfigManager
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(config_dir=tmpdir)
+            config = {
+                "model": "glm-4.7-flash",
+                "name": "cot_agent",
+                "inference": {
+                    "nodes": {
+                        "Generate": {
+                            "type": "prompt",
+                            "prompt": "{current_input}",
+                            "extraction": {},
+                        },
+                    },
+                    "edges": [],
+                    "start_node": "Generate",
+                },
+            }
+
+            agent = OllamaAgent.from_dict(config, cm)
+            assert agent.inference_flowchart is not None
+            assert agent._inference_config == config["inference"]
+
+    @patch("pithos.agent.agent.chat")
+    def test_send_uses_inference_flowchart(self, mock_chat):
+        """When inference flowchart is set, send() should route through it."""
+        from pithos.config_manager import ConfigManager
+        from pithos.flowchart import Flowchart
+        import tempfile
+
+        # The flowchart has a single PromptNode that calls the agent.
+        # The agent.send() (with _running_inference=True) will call the
+        # LLM directly. We mock to return a known response.
+        mock_response = Mock()
+        mock_response.message.content = "Reflected answer"
+        mock_chat.return_value = mock_response
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(config_dir=tmpdir)
+            fc_dict = {
+                "nodes": {
+                    "Generate": {
+                        "type": "prompt",
+                        "prompt": "{current_input}",
+                        "extraction": {},
+                    },
+                },
+                "edges": [],
+                "start_node": "Generate",
+            }
+            fc = Flowchart.from_dict(fc_dict, cm)
+
+            agent = OllamaAgent("glm-4.7-flash")
+            agent.set_inference_flowchart(fc)
+
+            result = agent.send("Hello world")
+
+            # The flowchart PromptNode should have invoked chat()
+            assert mock_chat.called
+            # The result should be the LLM response routed through the flowchart
+            assert result == "Reflected answer"
+            # Main context records user + assistant messages
+            history = agent.contexts["default"].message_history
+            assert len(history) == 2
+            assert history[0]["role"] == "user"
+            assert history[0]["content"] == "Hello world"
+            assert history[1]["role"] == "assistant"
+            assert history[1]["content"] == "Reflected answer"
+
+    @patch("pithos.agent.agent.chat")
+    def test_send_without_inference_flowchart_unchanged(self, mock_chat):
+        """Without inference flowchart, send() behaves exactly as before."""
+        mock_response = Mock()
+        mock_response.message.content = "Direct response"
+        mock_chat.return_value = mock_response
+
+        agent = OllamaAgent("glm-4.7-flash")
+        result = agent.send("Hello")
+
+        assert result == "Direct response"
+        assert agent.inference_flowchart is None
+
+    @patch("pithos.agent.agent.chat")
+    def test_inference_cleans_up_temp_context(self, mock_chat):
+        """Temporary inference context should not leak."""
+        mock_response = Mock()
+        mock_response.message.content = "response"
+        mock_chat.return_value = mock_response
+
+        from pithos.config_manager import ConfigManager
+        from pithos.flowchart import Flowchart
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(config_dir=tmpdir)
+
+            fc_dict = {
+                "nodes": {
+                    "N": {
+                        "type": "prompt",
+                        "prompt": "{current_input}",
+                        "extraction": {},
+                    },
+                },
+                "edges": [],
+                "start_node": "N",
+            }
+            fc = Flowchart.from_dict(fc_dict, cm)
+
+            agent = OllamaAgent("glm-4.7-flash")
+            agent.set_inference_flowchart(fc)
+
+            contexts_before = set(agent.list_contexts())
+            agent.send("test")
+            contexts_after = set(agent.list_contexts())
+
+            # No temp contexts should remain
+            assert contexts_before == contexts_after
+            # Current context should still be default
+            assert agent.current_context == "default"
+
+    @patch("pithos.agent.agent.chat")
+    def test_inference_resets_running_flag_on_error(self, mock_chat):
+        """_running_inference flag resets even if flowchart fails."""
+        mock_chat.side_effect = Exception("LLM down")
+
+        from pithos.config_manager import ConfigManager
+        from pithos.flowchart import Flowchart
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(config_dir=tmpdir)
+            fc_dict = {
+                "nodes": {
+                    "N": {
+                        "type": "prompt",
+                        "prompt": "{current_input}",
+                        "extraction": {},
+                    },
+                },
+                "edges": [],
+                "start_node": "N",
+            }
+            fc = Flowchart.from_dict(fc_dict, cm)
+
+            agent = OllamaAgent("glm-4.7-flash")
+            agent.set_inference_flowchart(fc)
+
+            with pytest.raises(RuntimeError, match="Inference flowchart"):
+                agent.send("test")
+
+            assert agent._running_inference is False
+            assert agent.current_context == "default"
+
+    @patch("pithos.agent.agent.chat")
+    def test_stream_with_inference_flowchart(self, mock_chat):
+        """stream() should yield flowchart result as single chunk."""
+        mock_response = Mock()
+        mock_response.message.content = "streamed via cot"
+        mock_chat.return_value = mock_response
+
+        from pithos.config_manager import ConfigManager
+        from pithos.flowchart import Flowchart
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(config_dir=tmpdir)
+            fc_dict = {
+                "nodes": {
+                    "N": {
+                        "type": "prompt",
+                        "prompt": "{current_input}",
+                        "extraction": {},
+                    },
+                },
+                "edges": [],
+                "start_node": "N",
+            }
+            fc = Flowchart.from_dict(fc_dict, cm)
+
+            agent = OllamaAgent("glm-4.7-flash")
+            agent.set_inference_flowchart(fc)
+
+            chunks = list(agent.stream("Hello"))
+            assert chunks == ["streamed via cot"]
+
+    @patch("pithos.agent.agent.chat")
+    def test_multi_step_inference_flowchart(self, mock_chat):
+        """A multi-node inference flowchart should call LLM multiple times."""
+        call_count = [0]
+
+        def side_effect(**kwargs):
+            call_count[0] += 1
+            resp = Mock()
+            resp.message.content = f"Step {call_count[0]} output"
+            return resp
+
+        mock_chat.side_effect = side_effect
+
+        from pithos.config_manager import ConfigManager
+        from pithos.flowchart import Flowchart
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(config_dir=tmpdir)
+            fc_dict = {
+                "nodes": {
+                    "Step1": {
+                        "type": "prompt",
+                        "prompt": "{current_input}",
+                        "extraction": {},
+                    },
+                    "Step2": {
+                        "type": "prompt",
+                        "prompt": "Reflect: {current_input}",
+                        "extraction": {},
+                    },
+                },
+                "edges": [
+                    {
+                        "from": "Step1",
+                        "to": "Step2",
+                        "condition": {"type": "AlwaysCondition"},
+                    }
+                ],
+                "start_node": "Step1",
+            }
+            fc = Flowchart.from_dict(fc_dict, cm)
+
+            agent = OllamaAgent("glm-4.7-flash")
+            agent.set_inference_flowchart(fc)
+
+            result = agent.send("Question")
+
+            # LLM should have been called at least twice (once per PromptNode)
+            assert call_count[0] >= 2
+            # Main context should only have user + final assistant
+            history = agent.contexts["default"].message_history
+            assert history[0]["role"] == "user"
+            assert history[0]["content"] == "Question"
+            assert history[-1]["role"] == "assistant"

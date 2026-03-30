@@ -21,9 +21,12 @@ def main() -> None:
 
     # Show available configs
     agents = list(config_manager.get_registered_agent_names())
+    flowcharts = list(config_manager.get_registered_flowchart_names())
 
     if agents:
         print(f"Available agents: {', '.join(agents)}")
+    if flowcharts:
+        print(f"Available flowcharts: {', '.join(flowcharts)}")
 
     print("\nOptions:")
     print("  1. Chat with default model (glm-4.7-flash)")
@@ -44,6 +47,22 @@ def main() -> None:
         print("\nUsing default model: glm-4.7-flash")
         agent = OllamaAgent(default_model="glm-4.7-flash")
 
+        # Offer to attach an inference flowchart
+        if flowcharts:
+            print("\nAttach an inference flowchart for chain-of-thought reasoning?")
+            print("  0. No flowchart (direct responses)")
+            for i, name in enumerate(flowcharts, 1):
+                print(f"  {i}. {name}")
+            fc_choice = input("Select (0 for none): ").strip()
+            try:
+                fc_idx = int(fc_choice)
+                if fc_idx > 0:
+                    fc_name = flowcharts[fc_idx - 1]
+                    agent.set_inference_flowchart(fc_name, config_manager)
+                    print(f"  Inference flowchart set: {fc_name}")
+            except (ValueError, IndexError):
+                pass  # No flowchart selected
+
     elif choice == "2" and agents:
         print("\nAvailable agents:")
         for i, name in enumerate(agents, 1):
@@ -61,6 +80,10 @@ def main() -> None:
     else:
         print("\nUsing default model: glm-4.7-flash")
         agent = OllamaAgent(default_model="glm-4.7-flash")
+
+    # Show agent status
+    if agent.inference_flowchart:
+        print("\n  [Chain-of-thought enabled via inference flowchart]")
 
     print("\n" + "=" * 60)
     print("Starting interactive chat...")

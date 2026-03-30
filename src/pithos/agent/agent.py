@@ -77,6 +77,10 @@ class Agent(ABC):
         # Automatic memory recall (optional, enabled via enable_recall())
         self.recall_enabled = False
         self._auto_recall: Optional[AutoRecall] = None
+        # Chain-of-thought inference flowchart (optional)
+        self.inference_flowchart: Optional[Any] = None
+        self._inference_config: Optional[Any] = None
+        self._running_inference: bool = False
         # Create default context
         self.create_context("default", system_prompt)
 
@@ -133,6 +137,11 @@ class Agent(ABC):
             )
             agent.enable_recall(cfg_r)
 
+        # Load inference flowchart if present
+        inference_cfg = config.get("inference")
+        if inference_cfg is not None:
+            agent.set_inference_flowchart(inference_cfg, config_manager)
+
         return agent
 
     @classmethod
@@ -172,6 +181,12 @@ class Agent(ABC):
                 contexts[ctx_name] = ctx.to_dict(with_history=True)
         if contexts:
             d["contexts"] = contexts
+
+        # Serialize inference flowchart config
+        if self._inference_config is not None:
+            d["inference"] = self._inference_config
+        elif self.inference_flowchart is not None:
+            d["inference"] = self.inference_flowchart.to_dict()
 
         return d
 
@@ -321,6 +336,63 @@ class Agent(ABC):
         """Disable automatic memory recall."""
         self.recall_enabled = False
         self._auto_recall = None
+
+    def set_inference_flowchart(
+        self,
+        config: Any,
+        config_manager: Optional["ConfigManager"] = None,
+    ) -> None:
+        """Set an optional chain-of-thought flowchart for inference.
+
+        When set, each call to :meth:`send` runs the flowchart instead of a
+        single LLM round-trip.  The flowchart receives the user message as
+        ``initial_input`` and its final output becomes the assistant response.
+        PromptNodes inside the flowchart invoke the agent's underlying LLM
+        call automatically.
+
+        Args:
+            config: One of:
+
+                * A :class:`~pithos.flowchart.Flowchart` instance.
+                * A ``str`` naming a registered flowchart configuration.
+                * A ``dict`` with ``nodes``, ``edges``, ``start_node`` keys
+                  (inline flowchart definition).
+
+            config_manager: Required when *config* is a ``str`` or ``dict``.
+                Can be ``None`` when passing a pre-built ``Flowchart``.
+
+        Raises:
+            TypeError: If *config* is not a supported type.
+            ValueError: If a registered name cannot be resolved.
+        """
+        from ..flowchart import Flowchart
+
+        if isinstance(config, Flowchart):
+            self.inference_flowchart = config
+            self._inference_config = None
+        elif isinstance(config, str):
+            if config_manager is None:
+                raise ValueError(
+                    "config_manager is required to load a registered flowchart."
+                )
+            self.inference_flowchart = Flowchart.from_registered(config, config_manager)
+            self._inference_config = config
+        elif isinstance(config, dict):
+            if config_manager is None:
+                raise ValueError(
+                    "config_manager is required to build an inline flowchart."
+                )
+            self.inference_flowchart = Flowchart.from_dict(config, config_manager)
+            self._inference_config = config
+        else:
+            raise TypeError(
+                f"Unsupported inference flowchart config type: {type(config).__name__}"
+            )
+
+    def clear_inference_flowchart(self) -> None:
+        """Remove the chain-of-thought inference flowchart."""
+        self.inference_flowchart = None
+        self._inference_config = None
 
     def close(self) -> None:
         """Close all open database connections held by this agent.
@@ -1019,6 +1091,13 @@ class OllamaAgent(Agent):
             except Exception as exc:
                 logger.warning("Auto-recall failed (non-fatal): %s", exc)
 
+        # If an inference flowchart is set and we are not already inside one,
+        # delegate to the chain-of-thought path instead of a single LLM call.
+        if self.inference_flowchart and not self._running_inference:
+            return self._inference_send(
+                content, ctx, context, workspace, verbose, model
+            )
+
         context.add_message(UserMsg(content))
 
         try:
@@ -1126,6 +1205,114 @@ class OllamaAgent(Agent):
 
         return response.message.content or ""
 
+    def _inference_send(
+        self,
+        content: str,
+        ctx: str,
+        context: AgentContext,
+        workspace: Optional[str],
+        verbose: bool,
+        model: Optional[str],
+    ) -> str:
+        """Run the chain-of-thought inference flowchart for a user message.
+
+        Executes the inference flowchart with *content* as initial input.
+        PromptNodes inside the flowchart invoke the agent's underlying LLM
+        call (the ``_running_inference`` guard prevents infinite recursion).
+
+        The user message and final response are recorded in the main
+        conversation context (*context*), but all intermediate flowchart
+        reasoning happens in a temporary context that is discarded
+        afterwards.
+
+        Args:
+            content: User message text.
+            ctx: Active context name.
+            context: Active :class:`AgentContext` instance.
+            workspace: Optional workspace string.
+            verbose: Verbose logging flag.
+            model: Model override (or ``None`` for default).
+
+        Returns:
+            The final response string produced by the flowchart.
+        """
+        # Add the user message to the main conversational context.
+        context.add_message(UserMsg(content))
+
+        # Create a disposable context for intermediate flowchart steps.
+        tmp_ctx_name = f"_cot_{uuid.uuid4().hex[:8]}"
+        self.create_context(tmp_ctx_name, self.default_system_prompt)
+        saved_current = ctx  # remember so we can restore later
+
+        self._running_inference = True
+        try:
+            fc = self.inference_flowchart
+            assert fc is not None  # guarded by caller
+            fc.reset()
+            fc._initialize_message_routing()
+
+            # Inject agent (singular) + supporting context into shared state
+            # so that PromptNodes can call agent.send().
+            fc.message_router.shared_context["agent"] = self
+            fc.message_router.shared_context["context_name"] = tmp_ctx_name
+            fc.message_router.shared_context["model"] = model or self.default_model
+            fc.message_router.shared_context["verbose"] = verbose
+
+            result = fc.run_message_based(initial_data=content)
+            response = ""
+            if result.get("messages"):
+                response = str(result["messages"][-1].data)
+        except Exception as exc:
+            logger.error("Inference flowchart failed: %s", exc)
+            # Remove the user message that was optimistically appended.
+            context.remove_last_message()
+            raise RuntimeError(f"Inference flowchart execution failed: {exc}") from exc
+        finally:
+            self._running_inference = False
+            # Discard the temporary context and restore the original one.
+            if tmp_ctx_name in self.contexts:
+                del self.contexts[tmp_ctx_name]
+            self.current_context = saved_current
+
+        # Commit the response to the main conversational context.
+        context.add_message(AgentMsg(response))
+
+        # Persist to conversation history if enabled.
+        if content:
+            self._history_persist(ctx, "user", content)
+        self._history_persist(ctx, "assistant", response, set_as_last=True)
+
+        # Tool calls post-processing on the final response.
+        if self.tools_enabled and self.tool_registry and self.tool_executor:
+            tool_requests = self._extract_tool_calls(response)
+            if tool_requests:
+                result_message = self._execute_tools(tool_requests)
+                context.add_message(Msg("system", result_message))
+                if self.tool_auto_loop:
+                    return self.send(
+                        "", context_name=ctx, workspace=workspace, verbose=verbose
+                    )
+
+        # Memory operations post-processing on the final response.
+        if self.memory_enabled and self.memory_store:
+            mem_ops = self._extract_memory_ops(response)
+            if mem_ops:
+                result_message = self._execute_memory_ops(mem_ops)
+                context.add_message(Msg("system", result_message))
+                if self.tool_auto_loop:
+                    return self.send(
+                        "", context_name=ctx, workspace=workspace, verbose=verbose
+                    )
+
+        # Auto-compaction.
+        if self.compaction_enabled and self._compactor:
+            try:
+                self._compactor.compact(agent=self, context=context, context_name=ctx)
+            except Exception as exc:
+                logger.warning("Auto-compaction failed (non-fatal): %s", exc)
+
+        return response
+
     def stream(
         self,
         content: str,
@@ -1161,6 +1348,16 @@ class OllamaAgent(Agent):
                 )
             except Exception as exc:
                 logger.warning("Auto-recall failed (non-fatal): %s", exc)
+
+        # If an inference flowchart is set and we are not already inside one,
+        # run it and yield the full result as a single chunk (flowchart
+        # execution is inherently non-streaming).
+        if self.inference_flowchart and not self._running_inference:
+            result = self._inference_send(
+                content, ctx, context, workspace, verbose, model
+            )
+            yield result
+            return
 
         context.add_message(UserMsg(content))
 

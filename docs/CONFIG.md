@@ -50,11 +50,54 @@ temperature: 0.7  # Optional: Controls randomness (0.0-1.0). Default is 0.7.
 
 ### Agent with Flowchart
 
+An agent can have an optional **inference flowchart** (chain-of-thought) that runs at each step of agent inference instead of a single LLM round-trip. This is useful for structured reasoning patterns like reflection, iterative refinement, or multi-step analysis.
+
+The `inference` field accepts either a registered flowchart name or an inline flowchart definition:
+
+**By registered name:**
 ```yaml
 model: glm-4.7-flash:latest
 system_prompt: "You are a reflective reasoner."
 inference: simple_reflect
 ```
+
+**Inline definition:**
+```yaml
+model: glm-4.7-flash:latest
+name: structured-reflect
+inference:
+  start_node: Generate
+  nodes:
+    Generate:
+      type: prompt
+      prompt: "{current_input}"
+      extraction: {}
+      set:
+        original_question: "{current_input}"
+    Reflect:
+      type: prompt
+      prompt: "Reflect on your previous answer and decide if you want to change it."
+      extraction: {}
+      set:
+        original_answer: "{current_input}"
+    Regenerate:
+      type: prompt
+      prompt: |
+        Answer the following question using the thought process below.
+        **QUESTION** {original_question}
+        <think>{original_answer} {current_input}</think>
+        Be sure to answer the question directly and concisely.
+      extraction: {}
+  edges:
+    - from: Generate
+      to: Reflect
+      condition: { type: AlwaysCondition }
+    - from: Reflect
+      to: Regenerate
+      condition: { type: AlwaysCondition }
+```
+
+When using an inference flowchart, PromptNodes inside the flowchart call the agent's underlying LLM automatically. The intermediate reasoning steps happen in a disposable context while only the final output is recorded in the main conversation history.
 
 ### Structured Output Agent
 
@@ -85,14 +128,13 @@ temperature: 0.3  # Lower temperature for more focused, deterministic responses
 system_prompt: |
   You are a careful reasoning assistant.
   Think step-by-step before answering.
-flowchart: refined_reflect
+inference: refined_reflect
 enable_tools: true
 contexts:
   - name: default
     system_prompt: "Default conversation mode"
   - name: coding
     system_prompt: "Code analysis and generation mode"
-    flowchart: systematic_backwards
 ```
 
 ### Model Parameters
