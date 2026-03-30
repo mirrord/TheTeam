@@ -228,7 +228,7 @@ class AgentService:
             # Create temporary agent instance
             config = agent_config["config"]
             agent = OllamaAgent(
-                default_model=config.get("model", "glm-4.7-flash:latest"),
+                model=config.get("model", "glm-4.7-flash:latest"),
                 agent_name=config.get("name", agent_id),
                 system_prompt=config.get("system_prompt", ""),
             )

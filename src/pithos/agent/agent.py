@@ -15,6 +15,7 @@ import ollama
 
 from ..config_manager import ConfigManager
 from ..tools import ToolRegistry, ToolExecutor, MemoryOpRequest, MemoryOpExtractor
+from ..tools.flowchart_tool import FlowchartToolExecutor
 from ..context import Msg, UserMsg, AgentMsg, AgentContext
 from .history import ConversationStore, HistorySearchResult
 from .compaction import CompactionConfig, MemoryCompactor
@@ -59,6 +60,7 @@ class Agent(ABC):
         self.tools_enabled = False
         self.tool_registry: Optional[ToolRegistry] = None
         self.tool_executor: Optional[ToolExecutor] = None
+        self.flowchart_executor: Optional[FlowchartToolExecutor] = None
         self.tool_auto_loop = False
         self.tool_max_iterations = 5
         # Memory tool support
@@ -431,13 +433,21 @@ class Agent(ABC):
 
         results = []
         for req in requests:
-            result = self.tool_executor.run(req.command, self.tool_registry)
+            parts = req.command.split(None, 1) if req.command else []
+            tool_name = parts[0] if parts else ""
+
+            if tool_name == "flowchart":
+                result = self._execute_flowchart_tool(
+                    parts[1] if len(parts) > 1 else ""
+                )
+            else:
+                result = self.tool_executor.run(req.command, self.tool_registry)
+
             # Record tool call metrics
             if self.metrics is not None:
                 try:
-                    tool_name = req.command.split()[0] if req.command else "unknown"
                     self.metrics.record_tool_call(
-                        tool_name=tool_name,
+                        tool_name=tool_name or "unknown",
                         success=result.success,
                         execution_time_ms=result.execution_time * 1000.0,
                     )
@@ -446,6 +456,65 @@ class Agent(ABC):
             results.append(self._format_tool_result(result))
 
         return "\n\n".join(results)
+
+    def _execute_flowchart_tool(self, args_str: str) -> Any:
+        """Run a flowchart invoked via the ``flowchart`` virtual tool.
+
+        Expected format: ``<flowchart_name> [input text ...]``
+
+        The calling agent is injected into the flowchart's agent dict under
+        every required agent name so single-agent flowcharts work
+        out-of-the-box.  For multi-agent flowcharts the caller is used as a
+        fallback for any unresolved agent name.
+        """
+        from ..tools.models import ToolResult
+
+        if not self.flowchart_executor:
+            return ToolResult(
+                success=False,
+                stdout="",
+                stderr="Flowchart tools are not enabled.",
+                exit_code=-1,
+                execution_time=0.0,
+                command=f"flowchart {args_str}",
+                error_hint="Enable flowcharts in tool_config.yaml under 'flowcharts.enabled: true'.",
+            )
+
+        parts = args_str.strip().split(None, 1)
+        if not parts:
+            available = self.flowchart_executor.list_flowcharts()
+            return ToolResult(
+                success=False,
+                stdout="",
+                stderr="No flowchart name provided.",
+                exit_code=-1,
+                execution_time=0.0,
+                command="flowchart",
+                error_hint=f"Usage: flowchart <name> [input]\nAvailable: {', '.join(available)}",
+            )
+
+        fc_name = parts[0]
+        fc_input = parts[1] if len(parts) > 1 else ""
+
+        # Build an agents dict: map every required agent name to *self* so
+        # that single-agent flowcharts (prompt nodes) just work.
+        from ..flowchart import Flowchart
+        from ..flownode import AgentPromptNode, GetHistoryNode, SetHistoryNode
+
+        try:
+            fc = Flowchart.from_registered(
+                fc_name, self.flowchart_executor.config_manager
+            )
+            required: set[str] = set()
+            for nid in fc.graph.nodes:
+                nobj = fc.graph.nodes[nid]["nodeobj"]
+                if isinstance(nobj, (AgentPromptNode, GetHistoryNode, SetHistoryNode)):
+                    required.add(nobj.agent)
+            agents_dict = {name: self for name in required}
+        except Exception:
+            agents_dict = {}
+
+        return self.flowchart_executor.run(fc_name, fc_input, agents_dict)
 
     def _format_tool_result(self, result) -> str:
         """Format a tool result with clear error feedback for the agent.
@@ -496,6 +565,15 @@ class Agent(ABC):
         self.tool_executor = ToolExecutor(timeout, max_output_size)
         self.tool_auto_loop = auto_loop
         self.tool_max_iterations = max_iterations
+
+        # Set up flowchart tool executor if flowcharts are enabled
+        fc_config = tool_config.get("flowcharts", {})
+        if fc_config.get("enabled", False):
+            self.flowchart_executor = FlowchartToolExecutor(
+                config_manager=config_manager,
+                timeout=fc_config.get("timeout", 120),
+                max_steps=fc_config.get("max_steps", 100),
+            )
 
         # Enhance system prompt with tool usage instructions
         self._add_tool_prompt_to_contexts()

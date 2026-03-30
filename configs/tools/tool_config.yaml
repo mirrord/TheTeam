@@ -17,18 +17,44 @@ mode: include
 
 # List of tools to include (used when mode is 'include')
 include:
+  # --- Python ---
   - python
   - python3
   - pip
   - pip3
+  # --- Shell interpreters ---
+  - powershell
+  - pwsh
+  - cmd
+  - bash
+  - sh
+  - wsl
+  # --- Version control ---
   - git
+  # --- Network ---
   - curl
   - wget
+  - ssh
+  - scp
+  - ping
+  - nslookup
+  - tracert
+  - traceroute
+  - netstat
+  - ipconfig
+  - ifconfig
+  # --- Node.js ---
   - node
   - npm
   - npx
+  # --- File & text utilities ---
   - echo
   - cat
+  - type
+  - more
+  - less
+  - head
+  - tail
   - ls
   - dir
   - pwd
@@ -37,6 +63,32 @@ include:
   - find
   - which
   - where
+  - sort
+  - wc
+  - awk
+  - sed
+  - tr
+  - diff
+  - tree
+  - touch
+  - cp
+  - copy
+  - mv
+  - move
+  - mkdir
+  # --- Archive ---
+  - tar
+  - zip
+  - unzip
+  # --- System info ---
+  - env
+  - set
+  - whoami
+  - hostname
+  - date
+  - uname
+  # --- Flowcharts (virtual tool) ---
+  - flowchart
 
 # List of tools to exclude (used when mode is 'exclude' or 'all')
 # These are dangerous commands that should never be allowed
@@ -57,25 +109,77 @@ exclude:
   - mkfs
   - fdisk
 
+# Flowchart tool configuration
+# Allows agents to run registered flowcharts as tools
+flowcharts:
+  enabled: true
+  # Maximum execution time for flowchart tools (seconds)
+  timeout: 120
+  # Maximum steps per flowchart execution
+  max_steps: 100
+
 # Manual tool descriptions (override auto-discovered descriptions)
 descriptions:
   python: "Python interpreter for running scripts and commands"
   python3: "Python 3 interpreter"
   pip: "Python package installer"
   pip3: "Python 3 package installer"
+  powershell: "Windows PowerShell — run scripts or commands via powershell -Command \"...\""
+  pwsh: "PowerShell Core (cross-platform) — run scripts or commands via pwsh -Command \"...\""
+  cmd: "Windows Command Prompt — run commands via cmd /c \"...\""
+  bash: "Bash shell — run scripts or commands via bash -c \"...\""
+  sh: "POSIX shell — run scripts or commands via sh -c \"...\""
+  wsl: "Windows Subsystem for Linux — run Linux commands via wsl <command>"
   git: "Distributed version control system"
   curl: "Transfer data from or to a server using various protocols"
   wget: "Download files from the web"
+  ssh: "Secure shell client for remote connections"
+  scp: "Secure copy over SSH"
+  ping: "Test network connectivity to a host"
+  nslookup: "Query DNS records"
+  tracert: "Trace network route to a host (Windows)"
+  traceroute: "Trace network route to a host (Unix)"
+  netstat: "Display network connections and statistics"
+  ipconfig: "Display network configuration (Windows)"
+  ifconfig: "Display network configuration (Unix)"
   node: "JavaScript runtime built on Chrome's V8 engine"
   npm: "Node.js package manager"
   npx: "Execute Node.js packages"
   echo: "Display a line of text"
-  cat: "Concatenate and display file contents"
-  ls: "List directory contents"
+  cat: "Concatenate and display file contents (Unix)"
+  type: "Display file contents (Windows)"
+  more: "Display file contents one page at a time"
+  less: "Display file contents with scrolling"
+  head: "Display first lines of a file"
+  tail: "Display last lines of a file"
+  ls: "List directory contents (Unix)"
   dir: "List directory contents (Windows)"
   pwd: "Print working directory"
   cd: "Change directory"
   grep: "Search text using patterns"
   find: "Search for files in directory hierarchy"
-  which: "Locate a command"
+  which: "Locate a command (Unix)"
   where: "Locate a command (Windows)"
+  sort: "Sort lines of text"
+  wc: "Count lines, words, and bytes"
+  awk: "Pattern scanning and text processing"
+  sed: "Stream editor for text transformation"
+  tr: "Translate or delete characters"
+  diff: "Compare files line by line"
+  tree: "Display directory tree structure"
+  touch: "Create empty files or update timestamps"
+  cp: "Copy files (Unix)"
+  copy: "Copy files (Windows)"
+  mv: "Move or rename files (Unix)"
+  move: "Move or rename files (Windows)"
+  mkdir: "Create directories"
+  tar: "Archive and compress files"
+  zip: "Create ZIP archives"
+  unzip: "Extract ZIP archives"
+  env: "Display or set environment variables (Unix)"
+  set: "Display or set environment variables (Windows)"
+  whoami: "Display current user name"
+  hostname: "Display system hostname"
+  date: "Display or set the system date"
+  uname: "Display system information (Unix)"
+  flowchart: "Run a registered pithos flowchart. Usage: flowchart <name> [input text]"

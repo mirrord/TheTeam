@@ -139,6 +139,52 @@ class ToolRegistry:
                         source="manual",
                     )
 
+        # Discover flowcharts as virtual tools
+        self._discover_flowcharts(manual_descriptions)
+
+    def _discover_flowcharts(self, manual_descriptions: dict[str, str]) -> None:
+        """Register each available flowchart as a virtual tool.
+
+        The ``flowchart`` entry in the config include-list gates this
+        feature. Individual flowcharts are registered as
+        ``flowchart:<name>`` so agents can call
+        ``RUN: flowchart <name> <input>``.
+        """
+        fc_config = self.config.get("flowcharts", {})
+        if not fc_config.get("enabled", False):
+            return
+        if not self.is_allowed("flowchart"):
+            return
+
+        # Register the dispatcher tool itself
+        fc_description = manual_descriptions.get(
+            "flowchart",
+            "Run a registered pithos flowchart. Usage: flowchart <name> [input text]",
+        )
+        self.tools["flowchart"] = ToolMetadata(
+            name="flowchart",
+            path="",
+            description=fc_description,
+            platform="cross-platform",
+            source="virtual",
+            tool_type="flowchart",
+        )
+
+        # Register each individual flowchart for discoverability
+        try:
+            for name in self.config_manager.get_registered_flowchart_names():
+                key = f"flowchart:{name}"
+                self.tools[key] = ToolMetadata(
+                    name=key,
+                    path="",
+                    description=f"Flowchart workflow '{name}'",
+                    platform="cross-platform",
+                    source="flowchart",
+                    tool_type="flowchart",
+                )
+        except Exception:
+            pass  # graceful degradation if no flowcharts directory
+
     def _scan_path(self) -> dict[str, str]:
         """Scan system PATH for executable tools.
 
@@ -348,14 +394,34 @@ class ToolRegistry:
         """Get formatted list of tools for system prompt.
 
         Returns:
-            Formatted string listing available tools.
+            Formatted string listing available tools grouped by type.
         """
         if not self.tools:
             return "No tools available."
 
-        lines = []
+        cli_lines: list[str] = []
+        flowchart_lines: list[str] = []
+
         for tool_name in sorted(self.tools.keys()):
             tool = self.tools[tool_name]
-            lines.append(f"  - {tool_name}: {tool.description}")
+            if tool.tool_type == "flowchart":
+                # Skip the individual flowchart:* entries in the summary;
+                # only list the dispatcher + available names.
+                if not tool_name.startswith("flowchart:"):
+                    flowchart_lines.append(f"  - {tool_name}: {tool.description}")
+                else:
+                    short = tool_name.removeprefix("flowchart:")
+                    flowchart_lines.append(f"      {short}")
+            else:
+                cli_lines.append(f"  - {tool_name}: {tool.description}")
 
-        return "\n".join(lines)
+        sections = []
+        if cli_lines:
+            sections.append("CLI tools:\n" + "\n".join(cli_lines))
+        if flowchart_lines:
+            sections.append(
+                "Flowchart tools (use: flowchart <name> [input]):\n"
+                + "\n".join(flowchart_lines)
+            )
+
+        return "\n\n".join(sections)
