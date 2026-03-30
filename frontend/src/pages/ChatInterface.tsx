@@ -214,7 +214,6 @@ export default function ChatInterface() {
         model: model,
         system_prompt: '',
         temperature: 0.7,
-        max_tokens: -1,
         tools: [],
       }
       

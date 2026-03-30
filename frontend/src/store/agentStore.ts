@@ -19,7 +19,6 @@ export interface AgentConfig {
   model: string
   system_prompt?: string
   temperature?: number
-  max_tokens?: number
   tools?: string[]
   flowchart?: string
   tool_auto_loop?: boolean

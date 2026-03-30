@@ -307,7 +307,6 @@ class ChatService:
                 default_model=model,
                 system_prompt=config.get("system_prompt") or "",
                 temperature=float(config.get("temperature", 0.7)),
-                max_tokens=int(config.get("max_tokens", -1)),
             )
 
             # Pre-populate agent context with prior conversation history.

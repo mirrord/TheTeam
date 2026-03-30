@@ -223,7 +223,7 @@ Real-time chat interface for conversing with AI agents.
 - Choose "Base Model" for direct model access without agent configuration
 - Choose from configured agents for specialized behavior
 - When Base Model is selected, a model dropdown appears
-- Base Model creates a temporary agent with default parameters (temperature: 0.7, max_tokens: -1, no tools)
+- Base Model creates a temporary agent with default parameters (temperature: 0.7, no tools)
 - Changes apply immediately without reload
 - Current agent/model displayed in conversation header
 

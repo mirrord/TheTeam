@@ -47,13 +47,12 @@ class Agent(ABC):
         agent_name: Optional[str] = None,
         system_prompt: str = "",
         temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
     ):
         self.default_model = default_model
         self.agent_name = agent_name or default_model
         self.default_system_prompt = system_prompt
         self.temperature = temperature if temperature is not None else 0.7
-        self.max_tokens = max_tokens if max_tokens is not None else -1
+        self.max_tokens = -1
         self.contexts: dict[str, AgentContext] = {}
         self.current_context: Optional[str] = None
         # Tool calling support
@@ -94,7 +93,6 @@ class Agent(ABC):
             config.get("name"),
             config.get("system_prompt", ""),
             config.get("temperature"),
-            config.get("max_tokens"),
         )
 
         # Load contexts

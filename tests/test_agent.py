@@ -225,17 +225,6 @@ class TestOllamaAgent:
         agent = OllamaAgent("glm-4.7-flash")
         assert agent.max_tokens == -1
 
-    def test_agent_creation_with_custom_max_tokens(self):
-        """Test creating agent with custom max_tokens."""
-        agent = OllamaAgent("glm-4.7-flash", max_tokens=1024)
-        assert agent.max_tokens == 1024
-
-    def test_agent_creation_with_both_temperature_and_max_tokens(self):
-        """Test creating agent with both custom temperature and max_tokens."""
-        agent = OllamaAgent("glm-4.7-flash", temperature=0.5, max_tokens=512)
-        assert agent.temperature == 0.5
-        assert agent.max_tokens == 512
-
     def test_create_context(self):
         agent = OllamaAgent("glm-4.7-flash")
         agent.create_context("test_ctx", "Test prompt")
@@ -411,58 +400,13 @@ class TestOllamaAgent:
         assert call_kwargs["options"]["temperature"] == 0.7
 
     @patch("pithos.agent.agent.chat")
-    def test_send_passes_max_tokens(self, mock_chat):
-        """Test that send passes max_tokens to chat function."""
+    def test_send_does_not_pass_num_predict(self, mock_chat):
+        """Test that send does not pass num_predict since max_tokens is always -1."""
         mock_response = Mock()
         mock_response.message.content = "Response"
         mock_chat.return_value = mock_response
 
-        agent = OllamaAgent("glm-4.7-flash", max_tokens=1024)
-        agent.send("Hello")
-
-        # Verify chat was called with correct max_tokens (as num_predict) in options
-        mock_chat.assert_called_once()
-        call_kwargs = mock_chat.call_args[1]
-        assert "options" in call_kwargs
-        assert call_kwargs["options"]["num_predict"] == 1024
-
-    @patch("pithos.agent.agent.chat")
-    def test_send_passes_default_max_tokens(self, mock_chat):
-        """Test that send does not pass num_predict when max_tokens is -1 (default)."""
-        mock_response = Mock()
-        mock_response.message.content = "Response"
-        mock_chat.return_value = mock_response
-
-        agent = OllamaAgent("glm-4.7-flash")  # Should default to -1
-        agent.send("Hello")
-
-        call_kwargs = mock_chat.call_args[1]
-        # When max_tokens is -1, num_predict should not be in options
-        assert "num_predict" not in call_kwargs["options"]
-        assert call_kwargs["options"]["temperature"] == 0.7
-
-    @patch("pithos.agent.agent.chat")
-    def test_send_passes_both_temperature_and_max_tokens(self, mock_chat):
-        """Test that send passes both temperature and max_tokens."""
-        mock_response = Mock()
-        mock_response.message.content = "Response"
-        mock_chat.return_value = mock_response
-
-        agent = OllamaAgent("glm-4.7-flash", temperature=0.3, max_tokens=512)
-        agent.send("Hello")
-
-        call_kwargs = mock_chat.call_args[1]
-        assert call_kwargs["options"]["temperature"] == 0.3
-        assert call_kwargs["options"]["num_predict"] == 512
-
-    @patch("pithos.agent.agent.chat")
-    def test_send_with_unlimited_max_tokens(self, mock_chat):
-        """Test that send does not pass num_predict when max_tokens is -1."""
-        mock_response = Mock()
-        mock_response.message.content = "Response"
-        mock_chat.return_value = mock_response
-
-        agent = OllamaAgent("glm-4.7-flash", max_tokens=-1)
+        agent = OllamaAgent("glm-4.7-flash")
         agent.send("Hello")
 
         call_kwargs = mock_chat.call_args[1]
@@ -515,18 +459,11 @@ class TestOllamaAgent:
         d = agent.to_dict()
         assert d["temperature"] == 0.3
 
-    def test_to_dict_with_custom_max_tokens(self):
-        """Test serialization includes custom max_tokens."""
-        agent = OllamaAgent("glm-4.7-flash", max_tokens=1024)
+    def test_to_dict_max_tokens_always_minus_one(self):
+        """Test serialization always has max_tokens as -1."""
+        agent = OllamaAgent("glm-4.7-flash")
         d = agent.to_dict()
-        assert d["max_tokens"] == 1024
-
-    def test_to_dict_with_both_custom_params(self):
-        """Test serialization includes both custom temperature and max_tokens."""
-        agent = OllamaAgent("glm-4.7-flash", temperature=0.2, max_tokens=512)
-        d = agent.to_dict()
-        assert d["temperature"] == 0.2
-        assert d["max_tokens"] == 512
+        assert d["max_tokens"] == -1
 
     def test_to_dict_with_multiple_contexts(self):
         agent = OllamaAgent("glm-4.7-flash")
@@ -578,8 +515,8 @@ class TestOllamaAgent:
         assert agent.temperature == 0
 
     @patch("pithos.agent.agent.ConfigManager")
-    def test_from_dict_with_max_tokens(self, mock_config_manager):
-        """Test creating agent from dictionary with max_tokens."""
+    def test_from_dict_max_tokens_ignored(self, mock_config_manager):
+        """Test that max_tokens in config dict is ignored; always -1."""
         config = {
             "model": "glm-4.7-flash",
             "name": "test_agent",
@@ -587,20 +524,7 @@ class TestOllamaAgent:
         }
         agent = OllamaAgent.from_dict(config, mock_config_manager)
 
-        assert agent.max_tokens == 1024
-
-    @patch("pithos.agent.agent.ConfigManager")
-    def test_from_dict_with_both_params(self, mock_config_manager):
-        """Test creating agent with both temperature and max_tokens from config."""
-        config = {
-            "model": "glm-4.7-flash",
-            "temperature": 0.3,
-            "max_tokens": 512,
-        }
-        agent = OllamaAgent.from_dict(config, mock_config_manager)
-
-        assert agent.temperature == 0.3
-        assert agent.max_tokens == 512
+        assert agent.max_tokens == -1
 
     @patch("pithos.agent.agent.ConfigManager")
     def test_from_dict_defaults(self, mock_config_manager):
@@ -690,22 +614,11 @@ class TestOllamaAgentStreaming:
         assert call_kwargs["options"]["temperature"] == 0.2
 
     @patch("pithos.agent.agent.chat")
-    def test_stream_passes_max_tokens(self, mock_chat):
-        """stream() should forward num_predict when max_tokens != -1."""
+    def test_stream_omits_num_predict(self, mock_chat):
+        """stream() must not include num_predict since max_tokens is always -1."""
         mock_chat.return_value = iter([])
 
-        agent = OllamaAgent("glm-4.7-flash", max_tokens=512)
-        list(agent.stream("Hi"))
-
-        call_kwargs = mock_chat.call_args[1]
-        assert call_kwargs["options"]["num_predict"] == 512
-
-    @patch("pithos.agent.agent.chat")
-    def test_stream_omits_num_predict_when_unlimited(self, mock_chat):
-        """stream() must not include num_predict when max_tokens == -1."""
-        mock_chat.return_value = iter([])
-
-        agent = OllamaAgent("glm-4.7-flash")  # default max_tokens = -1
+        agent = OllamaAgent("glm-4.7-flash")
         list(agent.stream("Hi"))
 
         call_kwargs = mock_chat.call_args[1]
