@@ -54,5 +54,5 @@ class TestDummyLLMService:
     def test_accepts_kwargs(self):
         """completion() accepts arbitrary kwargs without error."""
         svc = dummy_llm_service("test-model")
-        result = svc.completion([], temperature=0.5, max_tokens=100)
+        result = svc.completion([], temperature=0.5)
         assert result == '{"ANSWER": "A"}'

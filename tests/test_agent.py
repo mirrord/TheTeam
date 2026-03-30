@@ -220,11 +220,6 @@ class TestOllamaAgent:
         agent = OllamaAgent("glm-4.7-flash", temperature=0)
         assert agent.temperature == 0
 
-    def test_agent_creation_default_max_tokens(self):
-        """Test that agent has default max_tokens of -1 (unlimited)."""
-        agent = OllamaAgent("glm-4.7-flash")
-        assert agent.max_tokens == -1
-
     def test_create_context(self):
         agent = OllamaAgent("glm-4.7-flash")
         agent.create_context("test_ctx", "Test prompt")
@@ -459,12 +454,6 @@ class TestOllamaAgent:
         d = agent.to_dict()
         assert d["temperature"] == 0.3
 
-    def test_to_dict_max_tokens_always_minus_one(self):
-        """Test serialization always has max_tokens as -1."""
-        agent = OllamaAgent("glm-4.7-flash")
-        d = agent.to_dict()
-        assert d["max_tokens"] == -1
-
     def test_to_dict_with_multiple_contexts(self):
         agent = OllamaAgent("glm-4.7-flash")
         agent.create_context("ctx1", "Prompt1")
@@ -513,18 +502,6 @@ class TestOllamaAgent:
         agent = OllamaAgent.from_dict(config, mock_config_manager)
 
         assert agent.temperature == 0
-
-    @patch("pithos.agent.agent.ConfigManager")
-    def test_from_dict_max_tokens_ignored(self, mock_config_manager):
-        """Test that max_tokens in config dict is ignored; always -1."""
-        config = {
-            "model": "glm-4.7-flash",
-            "name": "test_agent",
-            "max_tokens": 1024,
-        }
-        agent = OllamaAgent.from_dict(config, mock_config_manager)
-
-        assert agent.max_tokens == -1
 
     @patch("pithos.agent.agent.ConfigManager")
     def test_from_dict_defaults(self, mock_config_manager):

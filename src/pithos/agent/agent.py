@@ -118,7 +118,6 @@ class Agent(ABC):
                 memory_category=compaction_cfg.get(
                     "memory_category", "context_summaries"
                 ),
-                summary_max_tokens=compaction_cfg.get("summary_max_tokens", 512),
             )
             agent.enable_compaction(cfg)
 

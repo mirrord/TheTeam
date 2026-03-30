@@ -32,7 +32,6 @@ export interface AgentConfig {
     keep_last?: number
     summary_model?: string | null
     memory_category?: string
-    summary_max_tokens?: number
   }
   recall?: {
     enabled: boolean

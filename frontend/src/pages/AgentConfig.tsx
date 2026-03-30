@@ -71,7 +71,6 @@ export default function AgentConfig() {
         keep_last: 6,
         summary_model: null,
         memory_category: 'context_summaries',
-        summary_max_tokens: 512,
       },
       recall: {
         enabled: false,
@@ -502,19 +501,6 @@ export default function AgentConfig() {
                             onChange={(e) => updateConfig('compaction', {
                               ...editingConfig.compaction,
                               memory_category: e.target.value
-                            })}
-                            className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                          />
-                        </div>
-                        
-                        <div>
-                          <label className="block text-sm font-medium mb-2">Summary Max Tokens</label>
-                          <input
-                            type="number"
-                            value={editingConfig.compaction?.summary_max_tokens || 512}
-                            onChange={(e) => updateConfig('compaction', {
-                              ...editingConfig.compaction,
-                              summary_max_tokens: parseInt(e.target.value)
                             })}
                             className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                           />

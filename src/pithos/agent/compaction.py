@@ -49,15 +49,12 @@ class CompactionConfig:
             the agent's ``default_model`` when ``None``.
         memory_category: Category name used when archiving summaries to the
             vector memory store.
-        summary_max_tokens: Maximum tokens allowed for the summarisation
-            response.
     """
 
     threshold: int = 20
     keep_last: int = 6
     summary_model: Optional[str] = None
     memory_category: str = "context_summaries"
-    summary_max_tokens: int = -1
 
 
 class MemoryCompactor:
@@ -180,11 +177,11 @@ class MemoryCompactor:
         )
         prompt = _SUMMARY_PROMPT.format(history=history_text)
 
-        print("Compaction max tokens config:", self.config.summary_max_tokens)
         model = self.config.summary_model or agent.default_model
         options: dict = {
             "temperature": 0.3,
-            "num_predict": self.config.summary_max_tokens,
+            "num_predict": -1,  # Allow as many tokens as the model supports
+            # note: changing this parameter has been shown to produce empty responses in many models
         }
 
         raw = ""
