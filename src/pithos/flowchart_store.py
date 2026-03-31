@@ -538,11 +538,9 @@ class FlowchartStore:
             records = self._filter_by_tags(records, tags)
 
         results: list[FlowchartSearchResult] = []
-        import math
-
         for record in records[:limit]:
             distance = id_to_distance.get(record.id, 0.0)
-            relevance = math.exp(-distance)
+            relevance = 1.0 / (1.0 + distance)
             results.append(
                 FlowchartSearchResult(
                     flowchart=record,
