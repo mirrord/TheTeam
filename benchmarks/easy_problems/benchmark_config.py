@@ -28,7 +28,6 @@ class ExecutionConfig:
     rounds: int = 10
     num_retries: int = 3
     temperature: float = 0.0
-    max_tokens: int = -1
     timeout: int = 120
 
     @classmethod
@@ -37,7 +36,6 @@ class ExecutionConfig:
             rounds=data.get("rounds", 10),
             num_retries=data.get("num_retries", 3),
             temperature=data.get("temperature", 0.0),
-            max_tokens=data.get("max_tokens", -1),
             timeout=data.get("timeout", 120),
         )
 
@@ -97,7 +95,6 @@ class BenchmarkConfig:
         """Hyperparameters dictionary for backwards compatibility."""
         return {
             "temperature": self.execution.temperature,
-            "max_tokens": self.execution.max_tokens,
             "num_retries": self.execution.num_retries,
             "timeout": self.execution.timeout,
         }

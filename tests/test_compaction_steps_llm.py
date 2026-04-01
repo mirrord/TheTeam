@@ -84,7 +84,6 @@ def _make_compactor(
             summary_model=MODEL,
             # Use -1 (unlimited) because glm-4.7-flash returns empty
             # responses when num_predict is a positive value.
-            summary_max_tokens=-1,
             **kwargs,
         )
     )

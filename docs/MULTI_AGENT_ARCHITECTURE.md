@@ -12,7 +12,7 @@ This document describes the refactored relationship between agents, models, and 
 
 **After:** Agents represent roles with:
 - **System prompt** - Defines the agent's behavior and expertise
-- **Model settings** - Temperature, max_tokens, etc.
+- **Model settings** - Temperature, etc.
 - **Conversation history** - Maintained across model swaps
 - **Knowledge sources** - Tools and memory access
 - **Optional CoT flowchart** - Internal reasoning process

@@ -31,13 +31,12 @@ def test_dataset_config_defaults():
 
 def test_execution_config_from_dict():
     """Test ExecutionConfig creation from dictionary."""
-    data = {"rounds": 5, "num_retries": 2, "temperature": 0.5, "max_tokens": 1024}
+    data = {"rounds": 5, "num_retries": 2, "temperature": 0.5}
     config = ExecutionConfig.from_dict(data)
 
     assert config.rounds == 5
     assert config.num_retries == 2
     assert config.temperature == 0.5
-    assert config.max_tokens == 1024
 
 
 def test_execution_config_defaults():
@@ -47,7 +46,6 @@ def test_execution_config_defaults():
     assert config.rounds == 10
     assert config.num_retries == 3
     assert config.temperature == 0.0
-    assert config.max_tokens == 2048
 
 
 def test_output_config_from_dict():
@@ -116,7 +114,6 @@ def test_benchmark_config_backward_compatibility():
     hyperparams = config.answer_hyperparams
     assert hyperparams["num_retries"] == 2
     assert hyperparams["temperature"] == 0.3
-    assert hyperparams["max_tokens"] == 2048
 
     # Test SaveFolders object
     assert hasattr(config, "SaveFolders")

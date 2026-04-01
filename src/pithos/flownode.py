@@ -219,6 +219,12 @@ class FlowNode:
         for key, message in input_state.received_inputs.items():
             context[key] = message.data
 
+        # Alias the default input port as ``current_input`` so that prompt
+        # templates using ``{current_input}`` resolve correctly without
+        # requiring an explicit ``set`` mapping on every node.
+        if "default" in context and "current_input" not in context:
+            context["current_input"] = context["default"]
+
         # Apply extractions if configured
         if self.extraction and "default" in context:
             extracted = self.parse_extractions(str(context["default"]))
@@ -267,8 +273,11 @@ class FlowNode:
             for output_key in self.output_keys:
                 # Map common output keys
                 if output_key == "default":
-                    # Use formatted_prompt or current_input as default output
-                    data = result.get("formatted_prompt") or result.get("current_input")
+                    # Prefer current_input (the node's processed output, e.g.
+                    # an agent response) over formatted_prompt (the raw input).
+                    data = result.get("current_input")
+                    if data is None:
+                        data = result.get("formatted_prompt")
                 else:
                     data = result.get(output_key)
 

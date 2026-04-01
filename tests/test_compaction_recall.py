@@ -44,7 +44,6 @@ class TestCompactionConfig:
         assert cfg.keep_last == 6
         assert cfg.summary_model is None
         assert cfg.memory_category == "context_summaries"
-        assert cfg.summary_max_tokens == 512
 
     def test_custom(self):
         cfg = CompactionConfig(threshold=10, keep_last=2, summary_model="phi3")

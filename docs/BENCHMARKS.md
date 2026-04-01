@@ -78,7 +78,6 @@ execution:
   rounds: 10           # Number of rounds per model
   num_retries: 3       # Retries for failed questions
   temperature: 0       # Model temperature (0 = deterministic)
-  max_tokens: 2048     # Max tokens per response
 
 # Output configuration
 output:
@@ -116,7 +115,6 @@ The `execution` section controls how the benchmark runs:
 - **rounds**: Number of times to run each model through the entire dataset
 - **num_retries**: How many times to retry a question if the model returns invalid output
 - **temperature**: Sampling temperature for models (0.0 to 1.0)
-- **max_tokens**: Maximum tokens per model response
 
 #### Output Configuration
 
@@ -300,7 +298,6 @@ execution:
   rounds: 5
   num_retries: 3
   temperature: 0
-  max_tokens: 2048
 
 output:
   base_dir: "./results"

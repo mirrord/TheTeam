@@ -75,23 +75,17 @@ class TestCompactionConfigBoundaries:
         cfg = CompactionConfig(memory_category="my_archive")
         assert cfg.memory_category == "my_archive"
 
-    def test_summary_max_tokens_custom(self):
-        cfg = CompactionConfig(summary_max_tokens=1024)
-        assert cfg.summary_max_tokens == 1024
-
     def test_all_params_set_together(self):
         cfg = CompactionConfig(
             threshold=5,
             keep_last=1,
             summary_model="llama3",
             memory_category="archive",
-            summary_max_tokens=256,
         )
         assert cfg.threshold == 5
         assert cfg.keep_last == 1
         assert cfg.summary_model == "llama3"
         assert cfg.memory_category == "archive"
-        assert cfg.summary_max_tokens == 256
 
 
 # ===========================================================================
@@ -316,17 +310,6 @@ class TestGenerateSummaryDetails:
 
         options = mock_chat.call_args[1]["options"]
         assert options["temperature"] == 0.3
-
-    def test_num_predict_matches_config(self):
-        compactor = _make_compactor(summary_max_tokens=256)
-        agent = _make_agent()
-
-        with patch("ollama.chat") as mock_chat:
-            mock_chat.return_value.message.content = "Summary: ok\nEntities: none"
-            compactor._generate_summary(agent, [{"role": "user", "content": "hi"}])
-
-        options = mock_chat.call_args[1]["options"]
-        assert options["num_predict"] == 256
 
     def test_prompt_contains_message_history(self):
         compactor = _make_compactor()

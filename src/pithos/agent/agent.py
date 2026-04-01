@@ -15,6 +15,7 @@ import ollama
 
 from ..config_manager import ConfigManager
 from ..tools import ToolRegistry, ToolExecutor, MemoryOpRequest, MemoryOpExtractor
+from ..tools.flowchart_tool import FlowchartToolExecutor
 from ..context import Msg, UserMsg, AgentMsg, AgentContext
 from .history import ConversationStore, HistorySearchResult
 from .compaction import CompactionConfig, MemoryCompactor
@@ -46,19 +47,19 @@ class Agent(ABC):
         agent_name: Optional[str] = None,
         system_prompt: str = "",
         temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
     ):
         self.default_model = default_model
         self.agent_name = agent_name or default_model
         self.default_system_prompt = system_prompt
         self.temperature = temperature if temperature is not None else 0.7
-        self.max_tokens = max_tokens if max_tokens is not None else -1
+        self.max_tokens = -1
         self.contexts: dict[str, AgentContext] = {}
         self.current_context: Optional[str] = None
         # Tool calling support
         self.tools_enabled = False
         self.tool_registry: Optional[ToolRegistry] = None
         self.tool_executor: Optional[ToolExecutor] = None
+        self.flowchart_executor: Optional[FlowchartToolExecutor] = None
         self.tool_auto_loop = False
         self.tool_max_iterations = 5
         # Memory tool support
@@ -76,6 +77,10 @@ class Agent(ABC):
         # Automatic memory recall (optional, enabled via enable_recall())
         self.recall_enabled = False
         self._auto_recall: Optional[AutoRecall] = None
+        # Chain-of-thought inference flowchart (optional)
+        self.inference_flowchart: Optional[Any] = None
+        self._inference_config: Optional[Any] = None
+        self._running_inference: bool = False
         # Create default context
         self.create_context("default", system_prompt)
 
@@ -92,7 +97,6 @@ class Agent(ABC):
             config.get("name"),
             config.get("system_prompt", ""),
             config.get("temperature"),
-            config.get("max_tokens"),
         )
 
         # Load contexts
@@ -118,7 +122,6 @@ class Agent(ABC):
                 memory_category=compaction_cfg.get(
                     "memory_category", "context_summaries"
                 ),
-                summary_max_tokens=compaction_cfg.get("summary_max_tokens", 512),
             )
             agent.enable_compaction(cfg)
 
@@ -133,6 +136,11 @@ class Agent(ABC):
                 min_relevance=recall_cfg.get("min_relevance", 0.5),
             )
             agent.enable_recall(cfg_r)
+
+        # Load inference flowchart if present
+        inference_cfg = config.get("inference")
+        if inference_cfg is not None:
+            agent.set_inference_flowchart(inference_cfg, config_manager)
 
         return agent
 
@@ -173,6 +181,12 @@ class Agent(ABC):
                 contexts[ctx_name] = ctx.to_dict(with_history=True)
         if contexts:
             d["contexts"] = contexts
+
+        # Serialize inference flowchart config
+        if self._inference_config is not None:
+            d["inference"] = self._inference_config
+        elif self.inference_flowchart is not None:
+            d["inference"] = self.inference_flowchart.to_dict()
 
         return d
 
@@ -323,6 +337,63 @@ class Agent(ABC):
         self.recall_enabled = False
         self._auto_recall = None
 
+    def set_inference_flowchart(
+        self,
+        config: Any,
+        config_manager: Optional["ConfigManager"] = None,
+    ) -> None:
+        """Set an optional chain-of-thought flowchart for inference.
+
+        When set, each call to :meth:`send` runs the flowchart instead of a
+        single LLM round-trip.  The flowchart receives the user message as
+        ``initial_input`` and its final output becomes the assistant response.
+        PromptNodes inside the flowchart invoke the agent's underlying LLM
+        call automatically.
+
+        Args:
+            config: One of:
+
+                * A :class:`~pithos.flowchart.Flowchart` instance.
+                * A ``str`` naming a registered flowchart configuration.
+                * A ``dict`` with ``nodes``, ``edges``, ``start_node`` keys
+                  (inline flowchart definition).
+
+            config_manager: Required when *config* is a ``str`` or ``dict``.
+                Can be ``None`` when passing a pre-built ``Flowchart``.
+
+        Raises:
+            TypeError: If *config* is not a supported type.
+            ValueError: If a registered name cannot be resolved.
+        """
+        from ..flowchart import Flowchart
+
+        if isinstance(config, Flowchart):
+            self.inference_flowchart = config
+            self._inference_config = None
+        elif isinstance(config, str):
+            if config_manager is None:
+                raise ValueError(
+                    "config_manager is required to load a registered flowchart."
+                )
+            self.inference_flowchart = Flowchart.from_registered(config, config_manager)
+            self._inference_config = config
+        elif isinstance(config, dict):
+            if config_manager is None:
+                raise ValueError(
+                    "config_manager is required to build an inline flowchart."
+                )
+            self.inference_flowchart = Flowchart.from_dict(config, config_manager)
+            self._inference_config = config
+        else:
+            raise TypeError(
+                f"Unsupported inference flowchart config type: {type(config).__name__}"
+            )
+
+    def clear_inference_flowchart(self) -> None:
+        """Remove the chain-of-thought inference flowchart."""
+        self.inference_flowchart = None
+        self._inference_config = None
+
     def close(self) -> None:
         """Close all open database connections held by this agent.
 
@@ -431,13 +502,21 @@ class Agent(ABC):
 
         results = []
         for req in requests:
-            result = self.tool_executor.run(req.command, self.tool_registry)
+            parts = req.command.split(None, 1) if req.command else []
+            tool_name = parts[0] if parts else ""
+
+            if tool_name == "flowchart":
+                result = self._execute_flowchart_tool(
+                    parts[1] if len(parts) > 1 else ""
+                )
+            else:
+                result = self.tool_executor.run(req.command, self.tool_registry)
+
             # Record tool call metrics
             if self.metrics is not None:
                 try:
-                    tool_name = req.command.split()[0] if req.command else "unknown"
                     self.metrics.record_tool_call(
-                        tool_name=tool_name,
+                        tool_name=tool_name or "unknown",
                         success=result.success,
                         execution_time_ms=result.execution_time * 1000.0,
                     )
@@ -446,6 +525,65 @@ class Agent(ABC):
             results.append(self._format_tool_result(result))
 
         return "\n\n".join(results)
+
+    def _execute_flowchart_tool(self, args_str: str) -> Any:
+        """Run a flowchart invoked via the ``flowchart`` virtual tool.
+
+        Expected format: ``<flowchart_name> [input text ...]``
+
+        The calling agent is injected into the flowchart's agent dict under
+        every required agent name so single-agent flowcharts work
+        out-of-the-box.  For multi-agent flowcharts the caller is used as a
+        fallback for any unresolved agent name.
+        """
+        from ..tools.models import ToolResult
+
+        if not self.flowchart_executor:
+            return ToolResult(
+                success=False,
+                stdout="",
+                stderr="Flowchart tools are not enabled.",
+                exit_code=-1,
+                execution_time=0.0,
+                command=f"flowchart {args_str}",
+                error_hint="Enable flowcharts in tool_config.yaml under 'flowcharts.enabled: true'.",
+            )
+
+        parts = args_str.strip().split(None, 1)
+        if not parts:
+            available = self.flowchart_executor.list_flowcharts()
+            return ToolResult(
+                success=False,
+                stdout="",
+                stderr="No flowchart name provided.",
+                exit_code=-1,
+                execution_time=0.0,
+                command="flowchart",
+                error_hint=f"Usage: flowchart <name> [input]\nAvailable: {', '.join(available)}",
+            )
+
+        fc_name = parts[0]
+        fc_input = parts[1] if len(parts) > 1 else ""
+
+        # Build an agents dict: map every required agent name to *self* so
+        # that single-agent flowcharts (prompt nodes) just work.
+        from ..flowchart import Flowchart
+        from ..flownode import AgentPromptNode, GetHistoryNode, SetHistoryNode
+
+        try:
+            fc = Flowchart.from_registered(
+                fc_name, self.flowchart_executor.config_manager
+            )
+            required: set[str] = set()
+            for nid in fc.graph.nodes:
+                nobj = fc.graph.nodes[nid]["nodeobj"]
+                if isinstance(nobj, (AgentPromptNode, GetHistoryNode, SetHistoryNode)):
+                    required.add(nobj.agent)
+            agents_dict = {name: self for name in required}
+        except Exception:
+            agents_dict = {}
+
+        return self.flowchart_executor.run(fc_name, fc_input, agents_dict)
 
     def _format_tool_result(self, result) -> str:
         """Format a tool result with clear error feedback for the agent.
@@ -496,6 +634,15 @@ class Agent(ABC):
         self.tool_executor = ToolExecutor(timeout, max_output_size)
         self.tool_auto_loop = auto_loop
         self.tool_max_iterations = max_iterations
+
+        # Set up flowchart tool executor if flowcharts are enabled
+        fc_config = tool_config.get("flowcharts", {})
+        if fc_config.get("enabled", False):
+            self.flowchart_executor = FlowchartToolExecutor(
+                config_manager=config_manager,
+                timeout=fc_config.get("timeout", 120),
+                max_steps=fc_config.get("max_steps", 100),
+            )
 
         # Enhance system prompt with tool usage instructions
         self._add_tool_prompt_to_contexts()
@@ -944,6 +1091,13 @@ class OllamaAgent(Agent):
             except Exception as exc:
                 logger.warning("Auto-recall failed (non-fatal): %s", exc)
 
+        # If an inference flowchart is set and we are not already inside one,
+        # delegate to the chain-of-thought path instead of a single LLM call.
+        if self.inference_flowchart and not self._running_inference:
+            return self._inference_send(
+                content, ctx, context, workspace, verbose, model
+            )
+
         context.add_message(UserMsg(content))
 
         try:
@@ -1051,6 +1205,114 @@ class OllamaAgent(Agent):
 
         return response.message.content or ""
 
+    def _inference_send(
+        self,
+        content: str,
+        ctx: str,
+        context: AgentContext,
+        workspace: Optional[str],
+        verbose: bool,
+        model: Optional[str],
+    ) -> str:
+        """Run the chain-of-thought inference flowchart for a user message.
+
+        Executes the inference flowchart with *content* as initial input.
+        PromptNodes inside the flowchart invoke the agent's underlying LLM
+        call (the ``_running_inference`` guard prevents infinite recursion).
+
+        The user message and final response are recorded in the main
+        conversation context (*context*), but all intermediate flowchart
+        reasoning happens in a temporary context that is discarded
+        afterwards.
+
+        Args:
+            content: User message text.
+            ctx: Active context name.
+            context: Active :class:`AgentContext` instance.
+            workspace: Optional workspace string.
+            verbose: Verbose logging flag.
+            model: Model override (or ``None`` for default).
+
+        Returns:
+            The final response string produced by the flowchart.
+        """
+        # Add the user message to the main conversational context.
+        context.add_message(UserMsg(content))
+
+        # Create a disposable context for intermediate flowchart steps.
+        tmp_ctx_name = f"_cot_{uuid.uuid4().hex[:8]}"
+        self.create_context(tmp_ctx_name, self.default_system_prompt)
+        saved_current = ctx  # remember so we can restore later
+
+        self._running_inference = True
+        try:
+            fc = self.inference_flowchart
+            assert fc is not None  # guarded by caller
+            fc.reset()
+            fc._initialize_message_routing()
+
+            # Inject agent (singular) + supporting context into shared state
+            # so that PromptNodes can call agent.send().
+            fc.message_router.shared_context["agent"] = self
+            fc.message_router.shared_context["context_name"] = tmp_ctx_name
+            fc.message_router.shared_context["model"] = model or self.default_model
+            fc.message_router.shared_context["verbose"] = verbose
+
+            result = fc.run_message_based(initial_data=content)
+            response = ""
+            if result.get("messages"):
+                response = str(result["messages"][-1].data)
+        except Exception as exc:
+            logger.error("Inference flowchart failed: %s", exc)
+            # Remove the user message that was optimistically appended.
+            context.remove_last_message()
+            raise RuntimeError(f"Inference flowchart execution failed: {exc}") from exc
+        finally:
+            self._running_inference = False
+            # Discard the temporary context and restore the original one.
+            if tmp_ctx_name in self.contexts:
+                del self.contexts[tmp_ctx_name]
+            self.current_context = saved_current
+
+        # Commit the response to the main conversational context.
+        context.add_message(AgentMsg(response))
+
+        # Persist to conversation history if enabled.
+        if content:
+            self._history_persist(ctx, "user", content)
+        self._history_persist(ctx, "assistant", response, set_as_last=True)
+
+        # Tool calls post-processing on the final response.
+        if self.tools_enabled and self.tool_registry and self.tool_executor:
+            tool_requests = self._extract_tool_calls(response)
+            if tool_requests:
+                result_message = self._execute_tools(tool_requests)
+                context.add_message(Msg("system", result_message))
+                if self.tool_auto_loop:
+                    return self.send(
+                        "", context_name=ctx, workspace=workspace, verbose=verbose
+                    )
+
+        # Memory operations post-processing on the final response.
+        if self.memory_enabled and self.memory_store:
+            mem_ops = self._extract_memory_ops(response)
+            if mem_ops:
+                result_message = self._execute_memory_ops(mem_ops)
+                context.add_message(Msg("system", result_message))
+                if self.tool_auto_loop:
+                    return self.send(
+                        "", context_name=ctx, workspace=workspace, verbose=verbose
+                    )
+
+        # Auto-compaction.
+        if self.compaction_enabled and self._compactor:
+            try:
+                self._compactor.compact(agent=self, context=context, context_name=ctx)
+            except Exception as exc:
+                logger.warning("Auto-compaction failed (non-fatal): %s", exc)
+
+        return response
+
     def stream(
         self,
         content: str,
@@ -1086,6 +1348,16 @@ class OllamaAgent(Agent):
                 )
             except Exception as exc:
                 logger.warning("Auto-recall failed (non-fatal): %s", exc)
+
+        # If an inference flowchart is set and we are not already inside one,
+        # run it and yield the full result as a single chunk (flowchart
+        # execution is inherently non-streaming).
+        if self.inference_flowchart and not self._running_inference:
+            result = self._inference_send(
+                content, ctx, context, workspace, verbose, model
+            )
+            yield result
+            return
 
         context.add_message(UserMsg(content))
 

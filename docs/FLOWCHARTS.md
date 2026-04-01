@@ -929,6 +929,86 @@ See the `configs/flowcharts/` directory for real examples:
 - `teacher_student.yaml` - Two-agent interaction
 - `stepwise_reflect.yaml` - Incremental refinement
 
+## Flowcharts as Agent Inference Engines
+
+In addition to standalone execution, flowcharts can be attached directly to an agent as an **inference flowchart**. When set, every call to `agent.send()` is automatically routed through the flowchart, enabling structured chain-of-thought reasoning on every response.
+
+### How It Works
+
+1. User calls `agent.send("question")`
+2. The agent detects an attached inference flowchart and delegates to `_inference_send()`
+3. A disposable temporary context is created for the flowchart run
+4. The agent is injected into the flowchart's `shared_context` so that `PromptNode` nodes can call `agent.send()` directly
+5. A `_running_inference` flag prevents recursive re-entry — nested `send()` calls from PromptNodes go straight to the LLM
+6. The flowchart executes (e.g., Generate → Reflect → Refine)
+7. Only the **final output** is recorded in the agent's main conversation context
+8. Post-processing (tool calling, memory, compaction) runs on the final output as usual
+
+### Setting an Inference Flowchart
+
+```python
+from pithos import OllamaAgent, ConfigManager
+
+config_manager = ConfigManager()
+agent = OllamaAgent("glm-4.7-flash")
+
+# By registered name
+agent.set_inference_flowchart("simple_reflect", config_manager)
+
+# By inline dict
+agent.set_inference_flowchart({
+    "start_node": "generate",
+    "nodes": {
+        "generate": {"type": "prompt", "prompt": "Answer: {current_input}"},
+        "reflect": {"type": "prompt", "prompt": "Review and improve your answer."},
+    },
+    "edges": [
+        {"from": "generate", "to": "reflect", "condition": {"type": "AlwaysCondition"}},
+    ]
+}, config_manager)
+
+# By Flowchart instance
+flowchart = Flowchart.from_registered("simple_reflect", config_manager)
+agent.set_inference_flowchart(flowchart)
+
+# Remove it
+agent.clear_inference_flowchart()
+```
+
+### YAML Configuration
+
+Inference flowcharts can be configured directly in agent YAML configs:
+
+```yaml
+# configs/agents/structured-reflect.yaml
+default_model: glm-4.7-flash:latest
+system_prompt: "You are a careful, reflective assistant."
+
+inference:
+  start_node: Generate
+  nodes:
+    Generate:
+      type: prompt
+      prompt: "{current_input}"
+    Reflect:
+      type: prompt
+      prompt: |
+        Review your previous answer. Identify errors or improvements.
+        Provide a refined answer.
+  edges:
+    - from: Generate
+      to: Reflect
+      condition: { type: AlwaysCondition }
+      priority: 1
+```
+
+### Design Considerations
+
+- **Temporary context**: The flowchart runs in a disposable context (`_cot_<uuid>`) that is deleted after each call, so intermediate reasoning steps don't pollute the main conversation
+- **Recursion guard**: The `_running_inference` flag ensures PromptNodes inside the flowchart call the LLM directly without re-entering the flowchart
+- **Transparency**: The user sees only the final refined output; the intermediate reasoning steps are internal
+- **Composability**: Inference flowcharts work alongside tools, memory, compaction, and all other agent features
+
 ## Related Documentation
 
 - [Configuration Guide](CONFIG.md) - Flowchart YAML syntax

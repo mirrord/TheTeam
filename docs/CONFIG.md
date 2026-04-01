@@ -46,18 +46,58 @@ Agent configs define model settings, system prompts, and flowcharts.
 model: glm-4.7-flash:latest
 system_prompt: "You are a helpful assistant."
 temperature: 0.7  # Optional: Controls randomness (0.0-1.0). Default is 0.7.
-max_tokens: -1    # Optional: Maximum tokens to generate. -1 = unlimited (default).
 ```
-
-**NOTE**: While max_tokens is generally documented to be the maximum number of tokens per response, many models interpret this parameter as the maximum number of tokens allowed in the history *including* the response to be generated. As a result, setting this parameter to a small positive value can result in empty responses. For this reason, -1 is the default and generally recommended value for this parameter.
 
 ### Agent with Flowchart
 
+An agent can have an optional **inference flowchart** (chain-of-thought) that runs at each step of agent inference instead of a single LLM round-trip. This is useful for structured reasoning patterns like reflection, iterative refinement, or multi-step analysis.
+
+The `inference` field accepts either a registered flowchart name or an inline flowchart definition:
+
+**By registered name:**
 ```yaml
 model: glm-4.7-flash:latest
 system_prompt: "You are a reflective reasoner."
 inference: simple_reflect
 ```
+
+**Inline definition:**
+```yaml
+model: glm-4.7-flash:latest
+name: structured-reflect
+inference:
+  start_node: Generate
+  nodes:
+    Generate:
+      type: prompt
+      prompt: "{current_input}"
+      extraction: {}
+      set:
+        original_question: "{current_input}"
+    Reflect:
+      type: prompt
+      prompt: "Reflect on your previous answer and decide if you want to change it."
+      extraction: {}
+      set:
+        original_answer: "{current_input}"
+    Regenerate:
+      type: prompt
+      prompt: |
+        Answer the following question using the thought process below.
+        **QUESTION** {original_question}
+        <think>{original_answer} {current_input}</think>
+        Be sure to answer the question directly and concisely.
+      extraction: {}
+  edges:
+    - from: Generate
+      to: Reflect
+      condition: { type: AlwaysCondition }
+    - from: Reflect
+      to: Regenerate
+      condition: { type: AlwaysCondition }
+```
+
+When using an inference flowchart, PromptNodes inside the flowchart call the agent's underlying LLM automatically. The intermediate reasoning steps happen in a disposable context while only the final output is recorded in the main conversation history.
 
 ### Structured Output Agent
 
@@ -85,18 +125,16 @@ enable_tools: true
 ```yaml
 model: phi3:mini
 temperature: 0.3  # Lower temperature for more focused, deterministic responses
-max_tokens: 1024  # Limit response length
 system_prompt: |
   You are a careful reasoning assistant.
   Think step-by-step before answering.
-flowchart: refined_reflect
+inference: refined_reflect
 enable_tools: true
 contexts:
   - name: default
     system_prompt: "Default conversation mode"
   - name: coding
     system_prompt: "Code analysis and generation mode"
-    flowchart: systematic_backwards
 ```
 
 ### Model Parameters
@@ -113,31 +151,9 @@ The `temperature` parameter controls the randomness of model responses:
 Use lower temperatures for tasks requiring consistency (e.g., code generation, factual Q&A).
 Use higher temperatures for creative tasks (e.g., brainstorming, creative writing).
 
-#### Max Tokens Parameter
+#### Max Tokens
 
-The `max_tokens` parameter controls the maximum number of tokens the model will generate:
-
-- **-1** (default): Unlimited tokens - no maximum limit imposed. Use this for tasks where response length is unpredictable or when you want the model to fully complete its thoughts.
-- **512-1024**: Shorter, more concise responses. Good for brief answers or when you need to control costs/latency.
-- **2048**: Moderate length responses. Suitable for most conversational tasks with a reasonable limit.
-- **4096+**: Longer, more detailed responses (model-dependent). Use for complex explanations or detailed analysis.
-
-**Important:** When set to `-1`, the `num_predict` parameter is omitted from the Ollama API call, allowing the model to generate as many tokens as it needs without an artificial limit.
-
-Note: In Ollama, this is passed as `num_predict` in the options. When set to -1, the parameter is omitted entirely, allowing Ollama to use its default behavior (no limit).
-
-**Examples:**
-
-```python
-# Unlimited responses (default)
-agent = OllamaAgent("glm-4.7-flash")  # max_tokens=-1
-
-# Explicitly set unlimited
-agent = OllamaAgent("glm-4.7-flash", max_tokens=-1)
-
-# Limit to 1024 tokens
-agent = OllamaAgent("glm-4.7-flash", max_tokens=1024)
-```
+The `max_tokens` value is fixed at `-1` (unlimited). The `num_predict` parameter is not sent to the Ollama API, allowing the model to generate as many tokens as it needs.
 
 ### Loading Agent Configs
 

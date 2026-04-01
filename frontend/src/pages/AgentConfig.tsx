@@ -59,7 +59,6 @@ export default function AgentConfig() {
       model: 'glm-4.7-flash:latest',
       system_prompt: '',
       temperature: 0.7,
-      max_tokens: 2048,
       tools: [],
       flowchart: '',
       tool_auto_loop: false,
@@ -72,7 +71,6 @@ export default function AgentConfig() {
         keep_last: 6,
         summary_model: null,
         memory_category: 'context_summaries',
-        summary_max_tokens: 512,
       },
       recall: {
         enabled: false,
@@ -343,17 +341,6 @@ export default function AgentConfig() {
                           className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                         />
                       </div>
-                      
-                      <div>
-                        <label className="block text-sm font-medium mb-2">Max Tokens</label>
-                        <input
-                          type="number"
-                          value={editingConfig.max_tokens || 2048}
-                          onChange={(e) => updateConfig('max_tokens', parseInt(e.target.value))}
-                          className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                        />
-                        <p className="text-xs text-gray-500 mt-1">Use -1 for unlimited</p>
-                      </div>
                     </div>
                   </div>
                   
@@ -514,19 +501,6 @@ export default function AgentConfig() {
                             onChange={(e) => updateConfig('compaction', {
                               ...editingConfig.compaction,
                               memory_category: e.target.value
-                            })}
-                            className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                          />
-                        </div>
-                        
-                        <div>
-                          <label className="block text-sm font-medium mb-2">Summary Max Tokens</label>
-                          <input
-                            type="number"
-                            value={editingConfig.compaction?.summary_max_tokens || 512}
-                            onChange={(e) => updateConfig('compaction', {
-                              ...editingConfig.compaction,
-                              summary_max_tokens: parseInt(e.target.value)
                             })}
                             className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                           />

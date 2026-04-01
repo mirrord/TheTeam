@@ -223,9 +223,7 @@ class MemoryStore:
                 existing = self.list_categories()
                 suggestions = self._tag_suggester.suggest(content, existing)
                 if suggestions:
-                    entry_metadata["suggested_tags"] = [
-                        s.category for s in suggestions
-                    ]
+                    entry_metadata["suggested_tags"] = [s.category for s in suggestions]
                     entry_metadata["suggested_tags_confidence"] = [
                         round(s.confidence, 4) for s in suggestions
                     ]
@@ -341,10 +339,8 @@ class MemoryStore:
             for i, entry_id in enumerate(results["ids"][0]):
                 distance = results["distances"][0][i] if results["distances"] else 0.0
                 # Convert distance to relevance score (0.0 to 1.0, higher is better)
-                # Using exponential decay: score = e^(-distance)
-                import math
-
-                relevance_score = math.exp(-distance)
+                # Using inverse mapping: score = 1 / (1 + distance)
+                relevance_score = 1.0 / (1.0 + distance)
 
                 search_results.append(
                     SearchResult(
@@ -693,7 +689,9 @@ class MemoryStore:
             try:
                 entries = self.get_all_entries(category)
                 matches = [
-                    entry for entry in entries if text.lower() in entry["content"].lower()
+                    entry
+                    for entry in entries
+                    if text.lower() in entry["content"].lower()
                 ]
                 if matches:
                     results_by_category[category] = matches

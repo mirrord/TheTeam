@@ -20,7 +20,6 @@ Typical usage via the Agent API::
 """
 
 import hashlib
-import math
 import os
 import sqlite3
 from dataclasses import dataclass, field
@@ -438,7 +437,7 @@ class ConversationStore:
         results: list[HistorySearchResult] = []
         for record in records[:n_results]:
             distance = id_to_distance.get(record.id, 0.0)
-            relevance = math.exp(-distance)
+            relevance = 1.0 / (1.0 + distance)
             results.append(
                 HistorySearchResult(
                     message=record,

@@ -307,8 +307,22 @@ class ChatService:
                 default_model=model,
                 system_prompt=config.get("system_prompt") or "",
                 temperature=float(config.get("temperature", 0.7)),
-                max_tokens=int(config.get("max_tokens", -1)),
             )
+
+            # Apply inference flowchart if configured
+            inference_cfg = config.get("inference")
+            if inference_cfg is not None:
+                try:
+                    from pithos.config_manager import ConfigManager
+
+                    cm = ConfigManager()
+                    agent.set_inference_flowchart(inference_cfg, cm)
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to load inference flowchart for agent %s: %s",
+                        agent_id,
+                        exc,
+                    )
 
             # Pre-populate agent context with prior conversation history.
             # Exclude the last message (the current user message) because

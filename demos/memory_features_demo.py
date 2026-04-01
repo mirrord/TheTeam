@@ -104,7 +104,6 @@ def demo_compaction(model: str, tmpdir: str) -> None:
             keep_last=2,
             summary_model=model,
             memory_category="context_summaries",
-            summary_max_tokens=-1,
         )
     )
 

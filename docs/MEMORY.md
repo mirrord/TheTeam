@@ -525,7 +525,6 @@ compaction:
   keep_last: 6            # most-recent messages to leave untouched
   summary_model: null     # null = use agent's model
   memory_category: context_summaries
-  summary_max_tokens: 512
 ```
 
 ### CompactionConfig Reference
@@ -536,7 +535,6 @@ compaction:
 | `keep_last` | int | `6` | Most-recent compactable messages to preserve |
 | `summary_model` | str \| None | `None` | Ollama model for summarisation; falls back to agent's model |
 | `memory_category` | str | `"context_summaries"` | ChromaDB category for archived summaries |
-| `summary_max_tokens` | int | `512` | Max output tokens for the summary response |
 
 ### Summary Format
 

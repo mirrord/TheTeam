@@ -6,13 +6,14 @@ from typing import Optional
 
 @dataclass
 class ToolMetadata:
-    """Metadata for a CLI tool."""
+    """Metadata for a CLI tool or virtual tool (e.g. flowchart)."""
 
     name: str
     path: str
     description: str
     platform: str  # 'windows', 'unix', 'cross-platform'
     source: str  # 'system', 'manual', 'environment'
+    tool_type: str = "cli"  # 'cli', 'flowchart'
 
 
 @dataclass

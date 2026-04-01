@@ -233,6 +233,21 @@ class AgentService:
                 system_prompt=config.get("system_prompt", ""),
             )
 
+            # Apply inference flowchart if configured
+            inference_cfg = config.get("inference")
+            if inference_cfg is not None:
+                try:
+                    from pithos.config_manager import ConfigManager
+
+                    cm = ConfigManager()
+                    agent.set_inference_flowchart(inference_cfg, cm)
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to load inference flowchart for agent %s: %s",
+                        agent_id,
+                        exc,
+                    )
+
             # Generate response
             response = agent.send(prompt)
 

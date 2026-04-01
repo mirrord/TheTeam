@@ -7,6 +7,7 @@ from .extractor import ToolCallExtractor
 from .memory_ops import MemoryOpRequest, MemoryOpExtractor
 from .memory_tool import MemoryStore, MemoryEntry, SearchResult, CHROMADB_AVAILABLE
 from .tag_suggester import CategoryTagSuggester, TagSuggestion
+from .flowchart_tool import FlowchartToolExecutor
 from .cli import tool_cli_main, main
 
 __all__ = [
@@ -24,6 +25,7 @@ __all__ = [
     "SearchResult",
     "CategoryTagSuggester",
     "TagSuggestion",
+    "FlowchartToolExecutor",
     "tool_cli_main",
     "main",
     "CHROMADB_AVAILABLE",
