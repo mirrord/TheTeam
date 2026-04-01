@@ -60,6 +60,7 @@ pithos-tools = "pithos.tools:main"
 pithos-memory = "pithos.memory_tool:main"
 pithos-database = "pithos.database_manager:main"
 pithos-flowcharts = "pithos.flowchart_store:main"
+pithos-diagnostic = "pithos.diagnostic:main"
 pithos-benchmark = "benchmarks.easy_problems.main:main"
 theteam = "theteam.server:main"
 

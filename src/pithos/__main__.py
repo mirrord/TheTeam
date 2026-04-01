@@ -18,6 +18,9 @@ def main():
         "agent", help="Run agent interactions", add_help=False
     )
 
+    # Diagnostic command
+    subparsers.add_parser("diagnostic", help="Run environment and connectivity checks")
+
     # Tool command - execute tools with agent-formatted output
     tool_parser = subparsers.add_parser(
         "tool", help="Execute a tool and see agent-formatted output"
@@ -44,6 +47,12 @@ def main():
         # Put unknown args back for agent to parse
         sys.argv = [sys.argv[0]] + unknown
         agent_main()
+    elif args.command == "diagnostic":
+        from .diagnostic import run_diagnostics
+
+        verbose = "--verbose" in unknown or "-v" in unknown
+        ok = run_diagnostics(verbose=verbose)
+        sys.exit(0 if ok else 1)
     elif args.command == "tool":
         from .tools import tool_cli_main
 
