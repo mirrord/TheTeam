@@ -31,19 +31,30 @@ agent = OllamaAgent("glm-4.7-flash")
 # Enable tool calling
 agent.enable_tools(config_manager)
 
-# Now the agent can execute tools
+# Stream response live — tool calls are executed during the stream
+for token in agent.stream("What version of Python is installed?"):
+    print(token, end="", flush=True)
+print()
+
+# Or collect the full response at once (convenient wrapper)
 response = agent.send("What version of Python is installed?")
 ```
 
 ### Agent Tool Workflow
 
-When tools are enabled, the agent follows this pattern:
+Agents are **streaming-first**: tokens are yielded as they arrive.  When a
+complete tool invocation is detected mid-stream, the stream is interrupted
+transparently:
 
-1. **User request**: "What version of Python is installed?"
-2. **Agent response**: Uses any supported format (see below)
-3. **System executes**: Tool runs automatically with error handling
-4. **Result added**: Output or error feedback injected into conversation
-5. **Agent continues**: Even if tool fails, agent receives clear feedback and can retry
+1. **Model streams tokens**: live output is yielded to the caller
+2. **Tool call detected**: complete tool syntax found in the accumulated buffer
+3. **Stream interrupted**: partial response committed to context
+4. **Tool executed**: result captured with timeout and size limits
+5. **Result injected**: tool output added as a `system` message
+6. **Stream restarted**: model continues from where it left off, seeing its own output and the tool result
+7. **Caller sees**: an uninterrupted token stream — interruption is invisible
+
+If a tool fails, the agent still receives clear error feedback and can adapt.
 
 ## Tool Call Syntax
 
@@ -210,16 +221,22 @@ max_output_size: 102400  # 100 KB
 
 ### How Tools Are Executed
 
-When an agent outputs a tool call in any supported format, pithos:
+Tool detection and execution happen **during the streaming response**, not after
+it.  When an agent outputs a tool call, pithos:
 
-1. **Extracts** tool calls using multi-pattern matching
-2. **Parses** the command string
-3. **Validates** the tool is in the registry and not blocked
-4. **Executes** via subprocess with timeout
-5. **Captures** stdout and stderr
-6. **Generates feedback** with clear error hints if failures occur
-7. **Injects** result into conversation
-8. **Continues** agent processing with result (even on failure)
+1. **Accumulates tokens** as they arrive from the model
+2. **Scans** the accumulation with multi-pattern matching after each token
+3. **Detects** newly-complete tool calls (already-executed calls are skipped)
+4. **Commits** the partial response accumulated so far to context
+5. **Validates** the tool is in the registry and not blocked
+6. **Executes** via subprocess with timeout and output size limits
+7. **Injects** tool result as a `system` message
+8. **Restarts** the stream — the model sees its own partial output plus the
+   tool result and continues generating
+9. **Yields** the continuation tokens to the caller seamlessly
+
+From the caller's perspective the stream is uninterrupted; tool execution is
+an implementation detail hidden inside `stream()`.
 
 ### Execution Environment
 

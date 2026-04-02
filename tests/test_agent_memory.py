@@ -223,7 +223,7 @@ default_metadata:
         # Should show top results with scores
         assert "Score:" in result or "No relevant results" in result
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_memory_in_conversation_flow(
         self, mock_chat, agent, config_manager, temp_dir
     ):
@@ -231,11 +231,11 @@ default_metadata:
         agent.enable_memory(config_manager, persist_directory=temp_dir)
 
         # Mock LLM response with memory operation
-        mock_response = Mock()
-        mock_response.message.content = (
+        mock_chunk = Mock()
+        mock_chunk.message.content = (
             'I\'ll save that: storemem(facts, "The sky is blue")'
         )
-        mock_chat.return_value = mock_response
+        mock_chat.return_value = iter([mock_chunk])
 
         # Send a message
         response = agent.send("Remember that the sky is blue")

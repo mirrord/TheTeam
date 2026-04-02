@@ -223,8 +223,10 @@ def demo_agent_with_tools(cm: ConfigManager) -> None:
     header("Part 5 — Agent with Tools Enabled (Interactive)")
     info(
         "This creates an OllamaAgent with tools enabled (including "
-        "flowchart tools) and starts an interactive chat. The agent can "
-        "use RUN:/EXEC:/tool() to invoke any allowed tool. Try asking "
+        "flowchart tools) and starts an interactive streaming chat. "
+        "Tokens arrive live as the model generates them. Tool calls are "
+        "detected mid-stream: the stream pauses, the tool runs, the result "
+        "is injected, and the model continues — all transparently. Try asking "
         "it to run shell commands or flowcharts!"
     )
 
@@ -258,7 +260,9 @@ def demo_agent_with_tools(cm: ConfigManager) -> None:
     if len(ctx.get_system_prompt()) > 500:
         print(f"  {DIM}... (truncated){RESET}")
 
-    print(f"\n  {BOLD}Type 'quit' to exit.{RESET}\n")
+    print(
+        f"\n  {BOLD}Type 'quit' to exit.  Tokens stream live as they arrive.{RESET}\n"
+    )
 
     while True:
         try:
@@ -269,8 +273,10 @@ def demo_agent_with_tools(cm: ConfigManager) -> None:
             break
 
         try:
-            response = agent.send(user_input)
-            print(f"\n{BOLD}{CYAN}Agent:{RESET} {response}\n")
+            print(f"\n{BOLD}{CYAN}Agent:{RESET} ", end="", flush=True)
+            for token in agent.stream(user_input):
+                print(token, end="", flush=True)
+            print("\n")
         except Exception as exc:
             print(f"\n{RED}Error:{RESET} {exc}\n")
 

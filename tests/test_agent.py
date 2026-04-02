@@ -350,12 +350,12 @@ class TestOllamaAgent:
         with pytest.raises(ValueError, match="does not exist"):
             agent.delete_context("nonexistent")
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_send_message(self, mock_chat):
         """Test sending a message with mocked LLM."""
-        mock_response = Mock()
-        mock_response.message.content = "Response from LLM"
-        mock_chat.return_value = mock_response
+        mock_chunk = Mock()
+        mock_chunk.message.content = "Response from LLM"
+        mock_chat.return_value = iter([mock_chunk])
 
         agent = OllamaAgent("glm-4.7-flash")
         response = agent.send("Hello")
@@ -365,12 +365,12 @@ class TestOllamaAgent:
         assert agent.contexts["default"].message_history[0]["role"] == "user"
         assert agent.contexts["default"].message_history[1]["role"] == "assistant"
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_send_passes_temperature(self, mock_chat):
         """Test that send passes temperature to chat function."""
-        mock_response = Mock()
-        mock_response.message.content = "Response"
-        mock_chat.return_value = mock_response
+        mock_chunk = Mock()
+        mock_chunk.message.content = "Response"
+        mock_chat.return_value = iter([mock_chunk])
 
         agent = OllamaAgent("glm-4.7-flash", temperature=0.5)
         agent.send("Hello")
@@ -381,12 +381,12 @@ class TestOllamaAgent:
         assert "options" in call_kwargs
         assert call_kwargs["options"]["temperature"] == 0.5
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_send_passes_default_temperature(self, mock_chat):
         """Test that send passes default temperature when not specified."""
-        mock_response = Mock()
-        mock_response.message.content = "Response"
-        mock_chat.return_value = mock_response
+        mock_chunk = Mock()
+        mock_chunk.message.content = "Response"
+        mock_chat.return_value = iter([mock_chunk])
 
         agent = OllamaAgent("glm-4.7-flash")  # Should default to 0.7
         agent.send("Hello")
@@ -394,12 +394,12 @@ class TestOllamaAgent:
         call_kwargs = mock_chat.call_args[1]
         assert call_kwargs["options"]["temperature"] == 0.7
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_send_does_not_pass_num_predict(self, mock_chat):
         """Test that send does not pass num_predict since max_tokens is always -1."""
-        mock_response = Mock()
-        mock_response.message.content = "Response"
-        mock_chat.return_value = mock_response
+        mock_chunk = Mock()
+        mock_chunk.message.content = "Response"
+        mock_chat.return_value = iter([mock_chunk])
 
         agent = OllamaAgent("glm-4.7-flash")
         agent.send("Hello")
@@ -408,12 +408,12 @@ class TestOllamaAgent:
         assert "num_predict" not in call_kwargs["options"]
         assert call_kwargs["options"]["temperature"] == 0.7
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_send_message_to_specific_context(self, mock_chat):
         """Test sending to a specific context."""
-        mock_response = Mock()
-        mock_response.message.content = "Response"
-        mock_chat.return_value = mock_response
+        mock_chunk = Mock()
+        mock_chunk.message.content = "Response"
+        mock_chat.return_value = iter([mock_chunk])
 
         agent = OllamaAgent("glm-4.7-flash")
         agent.create_context("test")
@@ -423,12 +423,12 @@ class TestOllamaAgent:
         assert len(agent.contexts["test"].message_history) == 2
         assert len(agent.contexts["default"].message_history) == 0
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_send_creates_context_if_missing(self, mock_chat):
         """Test that send creates context if it doesn't exist."""
-        mock_response = Mock()
-        mock_response.message.content = "Response"
-        mock_chat.return_value = mock_response
+        mock_chunk = Mock()
+        mock_chunk.message.content = "Response"
+        mock_chat.return_value = iter([mock_chunk])
 
         agent = OllamaAgent("glm-4.7-flash")
         agent.send("Hello", context_name="new_context")
@@ -518,7 +518,7 @@ class TestOllamaAgent:
 class TestOllamaAgentStreaming:
     """Tests for OllamaAgent.stream() method."""
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_stream_yields_chunks(self, mock_chat):
         """stream() should yield each token as it arrives."""
         chunk1, chunk2, chunk3 = Mock(), Mock(), Mock()
@@ -532,7 +532,7 @@ class TestOllamaAgentStreaming:
 
         assert chunks == ["Hello", " world", "!"]
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_stream_calls_ollama_with_stream_true(self, mock_chat):
         """stream() must call ollama with stream=True."""
         mock_chat.return_value = iter([])
@@ -543,7 +543,7 @@ class TestOllamaAgentStreaming:
         call_kwargs = mock_chat.call_args[1]
         assert call_kwargs.get("stream") is True
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_stream_updates_context_after_exhaustion(self, mock_chat):
         """Context history is updated only after all chunks are consumed (generator is lazy)."""
         chunk = Mock()
@@ -565,7 +565,7 @@ class TestOllamaAgentStreaming:
         assert history[1]["role"] == "assistant"
         assert history[1]["content"] == "response"
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_stream_assembles_full_response(self, mock_chat):
         """The assembled text in context should equal the concatenation of all chunks."""
         chunks = [Mock(), Mock(), Mock()]
@@ -579,7 +579,7 @@ class TestOllamaAgentStreaming:
         content = agent.contexts["default"].message_history[-1]["content"]
         assert content == "foo bar"
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_stream_passes_temperature(self, mock_chat):
         """stream() should forward temperature in options."""
         mock_chat.return_value = iter([])
@@ -590,7 +590,7 @@ class TestOllamaAgentStreaming:
         call_kwargs = mock_chat.call_args[1]
         assert call_kwargs["options"]["temperature"] == 0.2
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_stream_omits_num_predict(self, mock_chat):
         """stream() must not include num_predict since max_tokens is always -1."""
         mock_chat.return_value = iter([])
@@ -601,7 +601,7 @@ class TestOllamaAgentStreaming:
         call_kwargs = mock_chat.call_args[1]
         assert "num_predict" not in call_kwargs["options"]
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_stream_handles_empty_chunk_content(self, mock_chat):
         """Chunks with None or empty content should not corrupt the output."""
         c1, c2, c3 = Mock(), Mock(), Mock()
@@ -617,7 +617,7 @@ class TestOllamaAgentStreaming:
         assembled = agent.contexts["default"].message_history[-1]["content"]
         assert assembled == "AB"
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_stream_removes_message_on_error(self, mock_chat):
         """If the Ollama call raises, the queued user message must be rolled back."""
         from ollama._types import ResponseError
@@ -630,26 +630,27 @@ class TestOllamaAgentStreaming:
 
         assert len(agent.contexts["default"].message_history) == 0
 
-    def test_base_agent_stream_default_fallback(self):
-        """The default Agent.stream() should yield the full send() response as one chunk."""
+    def test_send_collects_stream_into_string(self):
+        """send() must join all stream() chunks into a single string."""
 
         class _StubAgent(Agent):
-            """Minimal concrete agent that does NOT override stream()."""
+            """Minimal concrete agent that implements stream()."""
 
-            def send(
+            def stream(
                 self,
                 content,
                 context_name=None,
                 workspace=None,
                 verbose=False,
                 model=None,
-            ) -> str:
-                return "full reply"
+            ):
+                yield "chunk1"
+                yield " chunk2"
 
         agent = _StubAgent("stub-model")
-        chunks = list(agent.stream("Hello"))
+        result = agent.send("Hello")
 
-        assert chunks == ["full reply"]
+        assert result == "chunk1 chunk2"
 
 
 class TestAgentInferenceFlowchart:
@@ -846,7 +847,7 @@ class TestAgentInferenceFlowchart:
             assert agent.inference_flowchart is not None
             assert agent._inference_config == config["inference"]
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_send_uses_inference_flowchart(self, mock_chat):
         """When inference flowchart is set, send() should route through it."""
         from pithos.config_manager import ConfigManager
@@ -856,9 +857,9 @@ class TestAgentInferenceFlowchart:
         # The flowchart has a single PromptNode that calls the agent.
         # The agent.send() (with _running_inference=True) will call the
         # LLM directly. We mock to return a known response.
-        mock_response = Mock()
-        mock_response.message.content = "Reflected answer"
-        mock_chat.return_value = mock_response
+        mock_chunk = Mock()
+        mock_chunk.message.content = "Reflected answer"
+        mock_chat.return_value = iter([mock_chunk])
 
         with tempfile.TemporaryDirectory() as tmpdir:
             cm = ConfigManager(config_dir=tmpdir)
@@ -892,12 +893,12 @@ class TestAgentInferenceFlowchart:
             assert history[1]["role"] == "assistant"
             assert history[1]["content"] == "Reflected answer"
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_send_without_inference_flowchart_unchanged(self, mock_chat):
         """Without inference flowchart, send() behaves exactly as before."""
-        mock_response = Mock()
-        mock_response.message.content = "Direct response"
-        mock_chat.return_value = mock_response
+        mock_chunk = Mock()
+        mock_chunk.message.content = "Direct response"
+        mock_chat.return_value = iter([mock_chunk])
 
         agent = OllamaAgent("glm-4.7-flash")
         result = agent.send("Hello")
@@ -905,12 +906,12 @@ class TestAgentInferenceFlowchart:
         assert result == "Direct response"
         assert agent.inference_flowchart is None
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_inference_cleans_up_temp_context(self, mock_chat):
         """Temporary inference context should not leak."""
-        mock_response = Mock()
-        mock_response.message.content = "response"
-        mock_chat.return_value = mock_response
+        mock_chunk = Mock()
+        mock_chunk.message.content = "response"
+        mock_chat.return_value = iter([mock_chunk])
 
         from pithos.config_manager import ConfigManager
         from pithos.flowchart import Flowchart
@@ -944,7 +945,7 @@ class TestAgentInferenceFlowchart:
             # Current context should still be default
             assert agent.current_context == "default"
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_inference_resets_running_flag_on_error(self, mock_chat):
         """_running_inference flag resets even if flowchart fails."""
         mock_chat.side_effect = Exception("LLM down")
@@ -977,12 +978,12 @@ class TestAgentInferenceFlowchart:
             assert agent._running_inference is False
             assert agent.current_context == "default"
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_stream_with_inference_flowchart(self, mock_chat):
         """stream() should yield flowchart result as single chunk."""
-        mock_response = Mock()
-        mock_response.message.content = "streamed via cot"
-        mock_chat.return_value = mock_response
+        mock_chunk = Mock()
+        mock_chunk.message.content = "streamed via cot"
+        mock_chat.return_value = iter([mock_chunk])
 
         from pithos.config_manager import ConfigManager
         from pithos.flowchart import Flowchart
@@ -1009,16 +1010,16 @@ class TestAgentInferenceFlowchart:
             chunks = list(agent.stream("Hello"))
             assert chunks == ["streamed via cot"]
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_multi_step_inference_flowchart(self, mock_chat):
         """A multi-node inference flowchart should call LLM multiple times."""
         call_count = [0]
 
         def side_effect(**kwargs):
             call_count[0] += 1
-            resp = Mock()
-            resp.message.content = f"Step {call_count[0]} output"
-            return resp
+            chunk = Mock()
+            chunk.message.content = f"Step {call_count[0]} output"
+            return iter([chunk])
 
         mock_chat.side_effect = side_effect
 

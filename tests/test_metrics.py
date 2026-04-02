@@ -475,14 +475,14 @@ class TestAgentMetricsIntegration:
         c = MetricsCollector()
         agent.attach_metrics(c)
 
-        mock_response = MagicMock()
-        mock_response.message.content = "Hello"
+        mock_chunk = MagicMock()
+        mock_chunk.message.content = "Hello"
         mock_usage = MagicMock()
         mock_usage.prompt_tokens = 10
         mock_usage.completion_tokens = 5
-        mock_response.usage = mock_usage
+        mock_chunk.usage = mock_usage
 
-        with patch("pithos.agent.agent.chat", return_value=mock_response):
+        with patch("pithos.agent.ollama_agent.chat", return_value=[mock_chunk]):
             agent.send("Hi")
 
         snap = c.get_snapshot()
@@ -496,14 +496,14 @@ class TestAgentMetricsIntegration:
         c = MetricsCollector()
         agent.attach_metrics(c)
 
-        mock_response = MagicMock()
-        mock_response.message.content = "Hi"
+        mock_chunk = MagicMock()
+        mock_chunk.message.content = "Hi"
         mock_usage = MagicMock()
         mock_usage.prompt_tokens = 1
         mock_usage.completion_tokens = 1
-        mock_response.usage = mock_usage
+        mock_chunk.usage = mock_usage
 
-        with patch("pithos.agent.agent.chat", return_value=mock_response):
+        with patch("pithos.agent.ollama_agent.chat", return_value=[mock_chunk]):
             agent.send("test")
 
         snap = c.get_snapshot()
@@ -512,11 +512,11 @@ class TestAgentMetricsIntegration:
 
     def test_send_without_metrics_does_not_raise(self):
         agent = self._make_agent()
-        mock_response = MagicMock()
-        mock_response.message.content = "Hello"
-        mock_response.usage = None
+        mock_chunk = MagicMock()
+        mock_chunk.message.content = "Hello"
+        mock_chunk.usage = None
 
-        with patch("pithos.agent.agent.chat", return_value=mock_response):
+        with patch("pithos.agent.ollama_agent.chat", return_value=[mock_chunk]):
             result = agent.send("Hi")
         assert result == "Hello"
 

@@ -1,4 +1,8 @@
-from .agent import Agent, OllamaAgent, EXLAgent, LlamacppAgent, interactive_chat
+from .agent import Agent
+from .ollama_agent import OllamaAgent
+from .exl_agent import EXLAgent
+from .llamacpp_agent import LlamacppAgent
+from .cli import interactive_chat, main
 from .history import ConversationStore, HistorySearchResult, MessageRecord
 from .compaction import CompactionConfig, MemoryCompactor
 from .recall import RecallConfig, AutoRecall
@@ -21,4 +25,5 @@ __all__ = [
     "RecallConfig",
     "AutoRecall",
     "interactive_chat",
+    "main",
 ]
