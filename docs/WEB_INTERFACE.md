@@ -44,12 +44,16 @@ The backend is built with Flask and Flask-SocketIO, providing both REST API endp
 *Server → Client:*
 - `connection_established`: Connection confirmation
 - `pong`: Health check response
-- `message_response`: Chat response from agent
+- `message_processing`: Agent has started processing (fires before first token)
+- `stream_start`: Streaming is beginning; carries the new `message_id`
+- `stream_chunk`: One token chunk; fields: `conversation_id`, `message_id`, `chunk`
+- `stream_end`: Streaming complete; carries the final `message` dict so the client can replace the in-progress placeholder
+- `message_error`: Error during agent processing; fields: `conversation_id`, `error`
 - `execution_update`: Execution status update
 - `node_execution`: Individual node execution event
 - `node_complete`: Node finished with output
 - `execution_complete`: Workflow finished
-- `error`: Error message
+- `error`: Generic socket/server error
 
 ### Frontend (React + TypeScript)
 
