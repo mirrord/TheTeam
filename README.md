@@ -4,7 +4,6 @@ TheTeam is a local-first LLM agent coordination and development suite. It includ
 - **pithos**: An agentic LLM interaction framework for managing models, contexts, and flowchart-driven workflows
 - **TheTeam**: Modern web interface for agent coordination, drag-and-drop flowchart interaction, and real-time workflow execution
 
-TODO:
 [![PyPI - Version](https://img.shields.io/pypi/v/theteam.svg)](https://pypi.org/project/theteam)
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/theteam.svg)](https://pypi.org/project/theteam)
 

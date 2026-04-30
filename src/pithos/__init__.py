@@ -1,6 +1,9 @@
 """pithos - Agentic LLM interaction framework."""
 
-from .agent import Agent, OllamaAgent, EXLAgent, LlamacppAgent
+from .agent import Agent, OllamaAgent
+
+# EXLAgent / LlamacppAgent are stub backends (not yet implemented). Import them
+# explicitly via pithos.agent.exl_agent / pithos.agent.llamacpp_agent if needed.
 from .agent.history import ConversationStore, HistorySearchResult, MessageRecord
 from .agent.compaction import CompactionConfig, MemoryCompactor
 from .agent.recall import RecallConfig, AutoRecall
@@ -27,8 +30,6 @@ from .metrics import MetricsCollector
 __all__ = [
     "Agent",
     "OllamaAgent",
-    "EXLAgent",
-    "LlamacppAgent",
     "AgentContext",
     "Msg",
     "UserMsg",

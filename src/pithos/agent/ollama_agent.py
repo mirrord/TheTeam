@@ -6,7 +6,6 @@ import uuid
 
 from ollama import chat
 from ollama._types import ResponseError as OllamaResponseError
-import ollama
 
 from ..context import Msg, UserMsg, AgentMsg, AgentContext
 from .agent import Agent

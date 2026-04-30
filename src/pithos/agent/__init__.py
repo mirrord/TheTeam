@@ -1,7 +1,10 @@
 from .agent import Agent
 from .ollama_agent import OllamaAgent
-from .exl_agent import EXLAgent
-from .llamacpp_agent import LlamacppAgent
+
+# EXLAgent and LlamacppAgent are stub backends that raise NotImplementedError on
+# construction. They are intentionally not re-exported here so that callers must
+# opt in via an explicit submodule import (and acknowledge the stub status).
+# See docs/ARCHITECTURE.md → Roadmap.
 from .cli import interactive_chat, main
 from .history import ConversationStore, HistorySearchResult, MessageRecord
 from .compaction import CompactionConfig, MemoryCompactor
@@ -11,8 +14,6 @@ from ..context import Msg, UserMsg, AgentMsg, AgentContext
 __all__ = [
     "Agent",
     "OllamaAgent",
-    "EXLAgent",
-    "LlamacppAgent",
     "AgentContext",
     "Msg",
     "UserMsg",

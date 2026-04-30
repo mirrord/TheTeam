@@ -577,6 +577,17 @@ See the [GitHub Issues tracker](https://github.com/mirrord/theteam/issues) for t
 4. **Distributed Systems**: Network protocols for agent communication across machines
 5. **Plugin System**: External plugin architecture for custom node types
 
+## Roadmap — Planned Backends
+
+The following agent backends are scaffolded but not yet implemented. Their classes raise `NotImplementedError` on construction and are intentionally **not** re-exported from `pithos.agent`; they must be imported via their explicit submodule path so callers acknowledge the stub status.
+
+| Backend | Module | Status |
+|---|---|---|
+| **EXLAgent** (ExLlamaV2) | `pithos.agent.exl_agent` | Planned — fast GPU inference for quantized models |
+| **LlamacppAgent** (llama.cpp) | `pithos.agent.llamacpp_agent` | Planned — CPU/GPU inference via the llama.cpp runtime |
+
+For now, use `OllamaAgent` (the only fully-supported backend). When implementing one of the planned backends, follow the `OllamaAgent` contract in [src/pithos/agent/ollama_agent.py](../src/pithos/agent/ollama_agent.py) — primarily the `stream()` method and any `Agent` ABC methods.
+
 ## Related Documentation
 
 - [Configuration Guide](CONFIG.md) - How to configure agents, flowcharts, and tools
