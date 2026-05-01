@@ -57,6 +57,27 @@ TheTeam is a local-first LLM agent coordination and development suite. It includ
    pip install -e ".[benchmark]"
    ```
 
+6. **Install optional LLM backends (optional):**
+
+   The default install talks to a running [Ollama](https://ollama.ai) server.
+   Two additional in-process backends are available behind extras:
+
+   ```bash
+   pip install -e ".[llamacpp]"    # GGUF inference via llama-cpp-python
+   pip install -e ".[exllamav2]"   # Quantized GPU inference via ExLlamaV2
+   ```
+
+   Each backend's class is imported from its own submodule:
+
+   ```python
+   from pithos.agent import OllamaAgent                       # default
+   from pithos.agent.llamacpp_agent import LlamacppAgent       # extras: [llamacpp]
+   from pithos.agent.exl_agent import EXLAgent                 # extras: [exllamav2]
+   ```
+
+   Constructing one of the optional agents without its backend installed
+   raises `ImportError` with installation guidance.
+
 ### From PyPI (Coming Soon)
 
 ```bash

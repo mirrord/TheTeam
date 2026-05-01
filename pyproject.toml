@@ -50,6 +50,14 @@ benchmark = [
   "seaborn>=0.12.0",
   "tqdm>=4.65.0",
 ]
+llamacpp = [
+  "llama-cpp-python>=0.2.0",
+]
+exllamav2 = [
+  "exllamav2>=0.1.0",
+  "transformers>=4.40.0",
+  "jinja2>=3.0.0",
+]
 
 [project.scripts]
 pithos = "pithos.__main__:main"

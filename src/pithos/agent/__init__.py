@@ -1,10 +1,14 @@
 from .agent import Agent
 from .ollama_agent import OllamaAgent
 
-# EXLAgent and LlamacppAgent are stub backends that raise NotImplementedError on
-# construction. They are intentionally not re-exported here so that callers must
-# opt in via an explicit submodule import (and acknowledge the stub status).
-# See docs/ARCHITECTURE.md → Roadmap.
+# EXLAgent and LlamacppAgent are real backends gated on optional packages
+# (``exllamav2`` / ``llama-cpp-python``).  They are intentionally NOT
+# re-exported here so users must opt in via an explicit submodule import
+# (e.g. ``from pithos.agent.llamacpp_agent import LlamacppAgent``) and
+# accept responsibility for installing the heavyweight backend deps.
+# Importing the submodule itself always succeeds; instantiating the class
+# raises :class:`ImportError` with installation guidance when the backend
+# package is unavailable.
 from .cli import interactive_chat, main
 from .history import ConversationStore, HistorySearchResult, MessageRecord
 from .compaction import CompactionConfig, MemoryCompactor

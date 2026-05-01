@@ -634,18 +634,11 @@ class TestOllamaAgentStreaming:
         """send() must join all stream() chunks into a single string."""
 
         class _StubAgent(Agent):
-            """Minimal concrete agent that implements stream()."""
+            """Minimal concrete agent that implements _raw_stream()."""
 
-            def stream(
-                self,
-                content,
-                context_name=None,
-                workspace=None,
-                verbose=False,
-                model=None,
-            ):
-                yield "chunk1"
-                yield " chunk2"
+            def _raw_stream(self, messages, model, options):
+                yield "chunk1", None
+                yield " chunk2", None
 
         agent = _StubAgent("stub-model")
         result = agent.send("Hello")

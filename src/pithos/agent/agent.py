@@ -410,7 +410,63 @@ class Agent(ABC):
             except Exception:
                 pass
 
+    # ------------------------------------------------------------------
+    # Backend hooks (subclasses implement)
+    # ------------------------------------------------------------------
+
     @abstractmethod
+    def _raw_stream(
+        self,
+        messages: list[dict[str, Any]],
+        model: str,
+        options: dict[str, Any],
+    ) -> Iterator[tuple[str, Any]]:
+        """Yield ``(token, chunk_metadata)`` pairs from the backend.
+
+        Subclasses implement this to perform a single backend streaming
+        call with the supplied chat messages, model identifier and
+        ``options`` dict (containing ``temperature`` and optionally
+        ``num_predict`` / ``max_tokens``).
+
+        The base :meth:`stream` method handles all surrounding
+        orchestration (recall, tool detection, history, compaction,
+        metrics) — backends should focus solely on producing tokens.
+
+        For each emitted chunk yield a ``(text, raw_chunk)`` tuple.  The
+        ``raw_chunk`` of the *last* yielded item is passed to
+        :meth:`_extract_token_usage` for metric reporting; intermediate
+        ``raw_chunk`` values may be ``None``.
+        """
+
+    def _extract_token_usage(self, last_chunk: Any) -> tuple[int, int]:
+        """Return ``(prompt_tokens, completion_tokens)`` for the final chunk.
+
+        Default implementation reads ``usage.prompt_tokens`` /
+        ``usage.completion_tokens`` from a chunk-like object (Ollama
+        format).  Backends with a different shape should override.
+        """
+        try:
+            usage = getattr(last_chunk, "usage", None) if last_chunk else None
+            prompt_tok = getattr(usage, "prompt_tokens", 0) or 0
+            completion_tok = getattr(usage, "completion_tokens", 0) or 0
+            return int(prompt_tok), int(completion_tok)
+        except Exception:
+            return 0, 0
+
+    def _wrap_backend_error(self, exc: BaseException) -> BaseException:
+        """Translate a backend exception into a user-facing error.
+
+        Return the exception to ``raise from exc``.  Default implementation
+        wraps in a generic :class:`RuntimeError`.  Backends that have
+        domain-specific errors (e.g. Ollama's ``ResponseError``) should
+        override and re-raise those untouched while wrapping anything else.
+        """
+        return RuntimeError(f"Backend communication failed: {exc}")
+
+    # ------------------------------------------------------------------
+    # Public streaming + send (backend-agnostic orchestration)
+    # ------------------------------------------------------------------
+
     def stream(
         self,
         content: str,
@@ -419,16 +475,18 @@ class Agent(ABC):
         verbose: bool = False,
         model: Optional[str] = None,
     ) -> Iterator[str]:
-        """Stream response tokens one chunk at a time.
+        """Stream response tokens with mid-stream tool execution.
 
-        This is the primary method that subclasses must implement.  Yields
-        each token/chunk as it is produced by the backend.  The full
-        response is committed to context history only after the iterator is
-        exhausted, so callers MUST consume it completely for side-effects
-        (context update, tool/memory processing, compaction) to take place.
+        Yields chunks as they arrive.  When a complete tool call is detected
+        in the accumulated output the stream is interrupted: the partial
+        response is committed to context, the tool is executed and its
+        result injected as a system message, then a new continuation
+        stream is started transparently.
 
-        Tool calls encountered during streaming are executed mid-stream and
-        the results injected before the model continues generating.
+        Memory operations (STORE / RETRIEVE) and auto-compaction are
+        performed after the *final* continuation exits.  Callers MUST
+        consume the iterator to completion for all side-effects to take
+        place.
 
         Args:
             content: The message to send.
@@ -438,8 +496,230 @@ class Agent(ABC):
             model: Model to use (uses default_model if None).
 
         Yields:
-            Text chunks of the response.
+            Text chunks produced by the model.
         """
+        import time as _time
+
+        ctx = context_name or self.current_context
+        if not ctx:
+            raise ValueError("No context selected.")
+        if ctx not in self.contexts:
+            self.create_context(ctx)
+
+        context = self.contexts[ctx]
+
+        # Auto-recall: inject relevant memories before the user message.
+        if self.recall_enabled and self._auto_recall:
+            try:
+                self._auto_recall.inject_recall(
+                    agent=self, context=context, content=content, model=model
+                )
+            except Exception as exc:
+                logger.warning("Auto-recall failed (non-fatal): %s", exc)
+
+        # Inference flowchart short-circuit (single-chunk yield).
+        if self.inference_flowchart and not self._running_inference:
+            from ..context import UserMsg as _UserMsg  # local import to avoid cycles
+
+            _ = _UserMsg  # silence unused
+            result = self._inference_send(
+                content, ctx, context, workspace, verbose, model
+            )
+            yield result
+            return
+
+        from ..context import UserMsg, AgentMsg, Msg
+
+        context.add_message(UserMsg(content))
+
+        try:
+            messages = context.get_messages(workspace)
+            if verbose:
+                logger.debug(">>> STREAM: %s", content)
+
+            options: dict[str, Any] = {"temperature": self.temperature}
+            if self.max_tokens != -1:
+                options["num_predict"] = self.max_tokens
+                options["max_tokens"] = self.max_tokens
+
+            model_to_use = model or self.default_model
+
+            accumulated = ""
+            _t0 = _time.monotonic()
+            _last_chunk: Any = None
+            # Hashes of raw_text for tool calls already executed this turn.
+            _seen_raw: set[str] = set()
+
+            for token, raw_chunk in self._raw_stream(messages, model_to_use, options):
+                token = token or ""
+                accumulated += token
+                if verbose:
+                    logger.debug("%s", token)
+                if raw_chunk is not None:
+                    _last_chunk = raw_chunk
+                yield token
+
+                # Mid-stream tool detection: only execute newly-seen complete calls.
+                if self.tools_enabled and self.tool_registry and self.tool_executor:
+                    all_calls = self._extract_tool_calls(accumulated)
+                    new_calls = [c for c in all_calls if c.raw_text not in _seen_raw]
+                    if new_calls:
+                        for c in new_calls:
+                            _seen_raw.add(c.raw_text)
+                        context.add_message(AgentMsg(accumulated))
+                        result_msg = self._execute_tools(new_calls)
+                        context.add_message(Msg("system", result_msg))
+                        if content:
+                            self._history_persist(ctx, "user", content)
+                        yield from self.stream(
+                            "",
+                            context_name=ctx,
+                            workspace=workspace,
+                            verbose=verbose,
+                            model=model,
+                        )
+                        return
+
+            _response_ms = (_time.monotonic() - _t0) * 1000.0
+
+            if verbose:
+                logger.debug("-" * 40)
+
+            # Record token usage from the final chunk.
+            if self.metrics is not None:
+                try:
+                    prompt_tok, completion_tok = self._extract_token_usage(_last_chunk)
+                    self.metrics.record_token_usage(
+                        model=model_to_use,
+                        prompt_tokens=prompt_tok,
+                        completion_tokens=completion_tok,
+                        response_time_ms=_response_ms,
+                    )
+                except Exception:
+                    pass
+
+        except Exception as exc:
+            context.remove_last_message()
+            wrapped = self._wrap_backend_error(exc)
+            if wrapped is exc:
+                raise
+            raise wrapped from exc
+
+        # No tool interruption occurred — commit the full response.
+        context.add_message(AgentMsg(accumulated))
+
+        # Persist to history (skip empty content = continuation turns).
+        if content:
+            self._history_persist(ctx, "user", content)
+        self._history_persist(ctx, "assistant", accumulated, set_as_last=True)
+
+        # Memory operations post-stream.
+        if self.memory_enabled and self.memory_store:
+            mem_ops = self._extract_memory_ops(accumulated)
+            if mem_ops:
+                result_msg = self._execute_memory_ops(mem_ops)
+                context.add_message(Msg("system", result_msg))
+
+        # Auto-compaction.
+        if self.compaction_enabled and self._compactor:
+            try:
+                self._compactor.compact(agent=self, context=context, context_name=ctx)
+            except Exception as exc:
+                logger.warning("Auto-compaction failed (non-fatal): %s", exc)
+
+    # ------------------------------------------------------------------
+    # Inference flowchart path (non-streaming; yields a single chunk)
+    # ------------------------------------------------------------------
+
+    def _inference_send(
+        self,
+        content: str,
+        ctx: str,
+        context: AgentContext,
+        workspace: Optional[str],
+        verbose: bool,
+        model: Optional[str],
+    ) -> str:
+        """Run the chain-of-thought inference flowchart for a user message.
+
+        Executes the inference flowchart with *content* as initial input.
+        PromptNodes inside the flowchart invoke the agent's underlying LLM
+        call (the ``_running_inference`` guard prevents infinite recursion).
+
+        The user message and final response are recorded in the main
+        conversation context (*context*); intermediate flowchart reasoning
+        happens in a temporary context that is discarded afterwards.
+        """
+        from ..context import UserMsg, AgentMsg, Msg
+
+        context.add_message(UserMsg(content))
+
+        tmp_ctx_name = f"_cot_{uuid.uuid4().hex[:8]}"
+        self.create_context(tmp_ctx_name, self.default_system_prompt)
+        saved_current = ctx
+
+        self._running_inference = True
+        try:
+            fc = self.inference_flowchart
+            assert fc is not None
+            fc.reset()
+            fc._initialize_message_routing()
+
+            fc.message_router.shared_context["agent"] = self
+            fc.message_router.shared_context["context_name"] = tmp_ctx_name
+            fc.message_router.shared_context["model"] = model or self.default_model
+            fc.message_router.shared_context["verbose"] = verbose
+
+            result = fc.run_message_based(initial_data=content)
+            response = ""
+            if result.get("messages"):
+                response = str(result["messages"][-1].data)
+        except Exception as exc:
+            logger.error("Inference flowchart failed: %s", exc)
+            context.remove_last_message()
+            raise RuntimeError(f"Inference flowchart execution failed: {exc}") from exc
+        finally:
+            self._running_inference = False
+            if tmp_ctx_name in self.contexts:
+                del self.contexts[tmp_ctx_name]
+            self.current_context = saved_current
+
+        context.add_message(AgentMsg(response))
+
+        if content:
+            self._history_persist(ctx, "user", content)
+        self._history_persist(ctx, "assistant", response, set_as_last=True)
+
+        # Tool calls post-processing on the final response.
+        if self.tools_enabled and self.tool_registry and self.tool_executor:
+            tool_requests = self._extract_tool_calls(response)
+            if tool_requests:
+                result_msg = self._execute_tools(tool_requests)
+                context.add_message(Msg("system", result_msg))
+                if self.tool_auto_loop:
+                    return self.send(
+                        "", context_name=ctx, workspace=workspace, verbose=verbose
+                    )
+
+        # Memory operations post-processing.
+        if self.memory_enabled and self.memory_store:
+            mem_ops = self._extract_memory_ops(response)
+            if mem_ops:
+                result_msg = self._execute_memory_ops(mem_ops)
+                context.add_message(Msg("system", result_msg))
+                if self.tool_auto_loop:
+                    return self.send(
+                        "", context_name=ctx, workspace=workspace, verbose=verbose
+                    )
+
+        # Auto-compaction.
+        if self.compaction_enabled and self._compactor:
+            try:
+                self._compactor.compact(agent=self, context=context, context_name=ctx)
+            except Exception as exc:
+                logger.warning("Auto-compaction failed (non-fatal): %s", exc)
+
+        return response
 
     def send(
         self,

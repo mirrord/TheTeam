@@ -18,8 +18,8 @@ theteam/
 │   │   ├── agent/             # Agent classes and core LLM interaction logic
 │   │   │   ├── agent.py       # Agent ABC — context mgmt, tools, memory, history
 │   │   │   ├── ollama_agent.py  # OllamaAgent — streaming-first Ollama backend
-│   │   │   ├── exl_agent.py   # EXLAgent stub (planned)
-│   │   │   ├── llamacpp_agent.py  # LlamacppAgent stub (planned)
+│   │   │   ├── exl_agent.py   # EXLAgent (optional: pip install theteam[exllamav2])
+│   │   │   ├── llamacpp_agent.py  # LlamacppAgent (optional: pip install theteam[llamacpp])
 │   │   │   ├── cli.py         # interactive_chat() and pithos-agent CLI entry point
 │   │   │   ├── compaction.py  # CompactionConfig, MemoryCompactor
 │   │   │   ├── history.py     # ConversationStore, HistorySearchResult
@@ -577,16 +577,31 @@ See the [GitHub Issues tracker](https://github.com/mirrord/theteam/issues) for t
 4. **Distributed Systems**: Network protocols for agent communication across machines
 5. **Plugin System**: External plugin architecture for custom node types
 
-## Roadmap — Planned Backends
+## Backends
 
-The following agent backends are scaffolded but not yet implemented. Their classes raise `NotImplementedError` on construction and are intentionally **not** re-exported from `pithos.agent`; they must be imported via their explicit submodule path so callers acknowledge the stub status.
+Three LLM backends are supported.  Only `OllamaAgent` is part of the
+default install; the others are gated behind optional dependency extras
+so that installing TheTeam does not pull in heavyweight GPU/quantization
+runtimes by default.
 
-| Backend | Module | Status |
-|---|---|---|
-| **EXLAgent** (ExLlamaV2) | `pithos.agent.exl_agent` | Planned — fast GPU inference for quantized models |
-| **LlamacppAgent** (llama.cpp) | `pithos.agent.llamacpp_agent` | Planned — CPU/GPU inference via the llama.cpp runtime |
+| Backend | Module | Install | Notes |
+|---|---|---|---|
+| **OllamaAgent** | `pithos.agent.ollama_agent` | bundled | Default backend. Talks to a running Ollama server. |
+| **LlamacppAgent** | `pithos.agent.llamacpp_agent` | `pip install theteam[llamacpp]` | In-process GGUF inference via `llama-cpp-python`. `default_model` is a path to a `.gguf` file; `backend_options` are forwarded to `Llama(...)`. |
+| **EXLAgent** | `pithos.agent.exl_agent` | `pip install theteam[exllamav2]` | In-process quantized GPU inference via `exllamav2`. `default_model` is the model directory; chat templating uses the embedded HF tokenizer. |
 
-For now, use `OllamaAgent` (the only fully-supported backend). When implementing one of the planned backends, follow the `OllamaAgent` contract in [src/pithos/agent/ollama_agent.py](../src/pithos/agent/ollama_agent.py) — primarily the `stream()` method and any `Agent` ABC methods.
+The optional backends are intentionally **not** re-exported from
+`pithos.agent`; import them explicitly from their submodule.  Importing
+the submodule always succeeds, but constructing the agent without the
+backend package installed raises `ImportError` with installation
+guidance.
+
+All three backends share the same orchestration layer (streaming,
+mid-stream tool calls, recall, history, compaction, metrics) implemented
+in `Agent.stream()`.  Subclasses only implement the
+`_raw_stream(messages, model, options)` hook plus an optional
+`_wrap_backend_error()` and `_extract_token_usage()` override.  When
+adding a new backend, follow this same pattern.
 
 ## Related Documentation
 
