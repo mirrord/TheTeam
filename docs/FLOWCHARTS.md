@@ -1009,6 +1009,50 @@ inference:
 - **Transparency**: The user sees only the final refined output; the intermediate reasoning steps are internal
 - **Composability**: Inference flowcharts work alongside tools, memory, compaction, and all other agent features
 
+## Coding Workflow Nodes
+
+For software-engineering loops (read repo, propose edits, run tests, iterate
+to green) `pithos.coding_nodes` provides a small set of dedicated node types
+on top of the core primitives.  All of them work with the standard
+message-driven runtime and validate via `pithos.validation`.
+
+| Node type        | Purpose                                                    | Required fields              |
+| ---------------- | ---------------------------------------------------------- | ---------------------------- |
+| `router`         | Branch to one of several named output ports based on a token / regex match against a state variable. | `routes`, `default_route` |
+| `jsonparse`      | Extract a JSON object/array from agent output (fenced or loose) and optionally validate against a minimal schema. | (none) |
+| `listfiles`      | Enumerate files beneath one or more roots using include / exclude globs. | `roots` |
+| `editfile`       | Apply a list of edits (`replace`, `create`, `insert_at_line`, `patch`) under an `allowed_root`. Auto-writes `.bak` snapshots; rejects binary files and paths that escape the root. | `allowed_root` |
+| `git`            | Run a whitelisted `git` subcommand inside `repo_root`. Destructive subcommands (`reset`, `clean`, `push`, `rebase`, `merge`) require `allow_destructive: true`. | `subcommand`, `repo_root` |
+
+Two complementary additions extend the existing primitives:
+
+- **`ToolCallNode` now emits `success` and `failure` ports** in addition to
+  the historical `default` port, so a `pytest` step can branch on exit code
+  with a plain `AlwaysCondition` on the correct port.
+- **`PredicateCondition`** evaluates a safe expression DSL (comparisons,
+  `and / or / not`, `in`, indexing) against `shared_context` — no `eval`.
+  Example: `condition: { type: PredicateCondition, expression: "step < 3 and review['decision'] == 'REVISE'" }`.
+- **`CustomNode.allow_modules`** opts a node into a whitelist of stdlib
+  modules (`json`, `re`, `math`, `pathlib`, `difflib`, `textwrap`,
+  `datetime`).  Import statements remain AST-blocked; the modules are
+  pre-bound into sandbox globals so glue code can write
+  `context['parsed'] = json.loads(context['raw'])` directly.
+
+### Example: `configs/flowcharts/general_coding.yaml`
+
+A multi-agent coding loop (`planner` → `coder` → `editfile` → `pytest` →
+`repairer` or `reviewer` → `git commit`) is provided as a reference
+configuration.  It expects four agents in `state['agents']`
+(`planner`, `coder`, `reviewer`, `repairer` — see `configs/agents/*.yaml`)
+and the following initial state:
+
+- `repo_root`   – absolute path to the repository to operate on
+- `test_target` – pytest target (file or directory) inside `repo_root`
+- `task`        – free-text task description
+
+The flowchart bounds the repair loop with `CountCondition(limit: 3)` and
+the revision loop with another `CountCondition(limit: 3)`.
+
 ## Related Documentation
 
 - [Configuration Guide](CONFIG.md) - Flowchart YAML syntax

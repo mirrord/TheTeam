@@ -192,6 +192,17 @@ class FlowNode:
         # Execute node logic
         result = self._execute(context)
 
+        # Persist save_to outputs into shared context so downstream nodes can
+        # reference them by name in prompt templates without explicit wiring.
+        if (
+            isinstance(result, dict)
+            and message_router is not None
+            and hasattr(message_router, "shared_context")
+        ):
+            save_to = getattr(self, "save_to", None)
+            if save_to and save_to in result:
+                message_router.shared_context[save_to] = result[save_to]
+
         # Convert result to output messages
         messages = self._create_output_messages(result, context)
 
@@ -326,7 +337,14 @@ class FlowNode:
         """
         if isinstance(x, str):
             needed_vars = re.findall(r"\{(.*?)\}", x)
-            filtered_state = {k: v for k, v in state.items() if k in needed_vars}
+            # Strip indexing / attribute access so that ``{x[y]}`` and
+            # ``{x.attr}`` both contribute ``x`` to the membership test.
+            needed_keys = set()
+            for v in needed_vars:
+                key = re.split(r"[.\[!:]", v, 1)[0].strip()
+                if key:
+                    needed_keys.add(key)
+            filtered_state = {k: v for k, v in state.items() if k in needed_keys}
             return x.format(**filtered_state) if filtered_state else x
         return x
 
@@ -518,11 +536,22 @@ class CustomNode(FlowNode):
 
     _DEFAULT_TIMEOUT: float = 30.0
 
+    # Whitelist of standard-library modules that may be pre-bound into the
+    # sandbox via the ``allow_modules`` constructor argument.  Each module is
+    # imported once at node construction time and exposed by its short name
+    # (e.g. ``json``, ``re``, ``pathlib``).  Anything not listed here is
+    # rejected so YAML configs cannot smuggle in dangerous modules like
+    # ``os`` or ``subprocess``.
+    _ALLOWED_MODULES: frozenset[str] = frozenset(
+        {"json", "re", "math", "pathlib", "difflib", "textwrap", "datetime"}
+    )
+
     def __init__(
         self,
         extraction: dict[str, str],
         custom_code: str,
         timeout: float = _DEFAULT_TIMEOUT,
+        allow_modules: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> None:
         """Initialize CustomNode.
@@ -531,15 +560,34 @@ class CustomNode(FlowNode):
             extraction: Regex patterns for extracting values.
             custom_code: Python code to execute with 'context' available.
             timeout: Maximum allowed execution time in seconds (default 30).
+            allow_modules: Optional list of stdlib module names to pre-bind
+                into the sandbox.  Only names in
+                :attr:`CustomNode._ALLOWED_MODULES` may be requested.
             **kwargs: Additional arguments passed to FlowNode.
 
         Raises:
-            ValueError: If *custom_code* contains disallowed constructs.
+            ValueError: If *custom_code* contains disallowed constructs, or
+                if *allow_modules* contains an unsupported name.
         """
         _check_code_safety(custom_code)
         super().__init__(extraction, **kwargs)
         self.custom_code = custom_code
         self.timeout = timeout
+
+        requested = list(allow_modules or [])
+        bad = [m for m in requested if m not in self._ALLOWED_MODULES]
+        if bad:
+            raise ValueError(
+                f"CustomNode allow_modules contains unsupported module(s): {bad}. "
+                f"Allowed: {sorted(self._ALLOWED_MODULES)}"
+            )
+        self.allow_modules = requested
+        self._preloaded_modules: dict[str, Any] = {}
+        if requested:
+            import importlib
+
+            for name in requested:
+                self._preloaded_modules[name] = importlib.import_module(name)
 
     def _execute(self, context: dict[str, Any]) -> Any:
         """Execute custom code inside the sandbox.
@@ -558,6 +606,11 @@ class CustomNode(FlowNode):
             "__builtins__": _SAFE_BUILTINS_DICT,
             "context": context,
         }
+        # Pre-bound stdlib modules (opt-in via allow_modules).  These names
+        # appear in the sandbox as ordinary locals, so user code can write
+        # e.g. ``context['parsed'] = json.loads(context['raw'])`` without
+        # needing an import statement (which is still blocked).
+        sandbox_globals.update(self._preloaded_modules)
 
         exc_holder: list[Optional[BaseException]] = [None]
 
@@ -656,8 +709,21 @@ class ToolCallNode(FlowNode):
             if not result.success and self.error_handling == "stop":
                 raise RuntimeError(f"Tool execution failed: {result.stderr}")
 
-        # Return result with save_to key
-        return {self.save_to: tool_result, "current_input": tool_result}
+        # Build the output dict. The base ``_create_output_messages`` only
+        # emits messages on ports declared in ``self.output_keys``, so it is
+        # safe to populate both ``success`` and ``failure`` here -- the user
+        # opts into the new ports by listing them in the node's ``outputs``.
+        # When neither is declared (the historical default of ``["default"]``)
+        # behaviour is unchanged.
+        output: dict[str, Any] = {
+            self.save_to: tool_result,
+            "current_input": tool_result,
+        }
+        if tool_result.get("success"):
+            output["success"] = tool_result
+        else:
+            output["failure"] = tool_result
+        return output
 
 
 class TextParseNode(FlowNode):
@@ -1152,6 +1218,23 @@ def create_node(node_type: str, data: dict[str, Any]) -> Optional[FlowNode]:
         "fileoutput": FileOutputNode,
         "fileoutputnode": FileOutputNode,
     }
+    # Lazy import to avoid a circular dependency: coding_nodes -> flownode.
+    from . import coding_nodes as _coding
+
+    node_classes.update(
+        {
+            "router": _coding.RouterNode,
+            "routernode": _coding.RouterNode,
+            "jsonparse": _coding.JsonParseNode,
+            "jsonparsenode": _coding.JsonParseNode,
+            "listfiles": _coding.ListFilesNode,
+            "listfilesnode": _coding.ListFilesNode,
+            "editfile": _coding.EditFileNode,
+            "editfilenode": _coding.EditFileNode,
+            "git": _coding.GitNode,
+            "gitnode": _coding.GitNode,
+        }
+    )
     node_class = node_classes.get(node_type.replace("_", "").lower(), None)
     if not node_class:
         raise ValueError(f"Unknown node type: {node_type}")

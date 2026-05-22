@@ -367,7 +367,7 @@ class TestFlowchartValidator:
             {
                 "from": "node2",
                 "to": "node1",
-                "condition": {"type": "CountCondition", "count": 3},
+                "condition": {"type": "CountCondition", "limit": 3},
             },
         ]
 
@@ -386,7 +386,7 @@ class TestFlowchartValidator:
             {
                 "from": "loop_node",
                 "to": "loop_node",
-                "condition": {"type": "CountCondition", "count": 5},
+                "condition": {"type": "CountCondition", "limit": 5},
             }
         ]
 
@@ -471,7 +471,7 @@ class TestFlowchartValidator:
         assert any("input_key" in w for w in validator.warnings)
 
     def test_count_condition_missing_count_parameter(self):
-        """Test that CountCondition without count parameter is detected."""
+        """Test that CountCondition without limit parameter is detected."""
         nodes = {
             "node1": {"type": "prompt", "prompt": "Test"},
             "node2": {"type": "prompt", "prompt": "Test"},
@@ -482,7 +482,7 @@ class TestFlowchartValidator:
                 "to": "node2",
                 "condition": {
                     "type": "CountCondition",
-                    # Missing 'count' parameter
+                    # Missing 'limit' parameter
                 },
             }
         ]
@@ -492,7 +492,7 @@ class TestFlowchartValidator:
         with pytest.raises(ValidationError) as exc_info:
             validator.validate_flowchart(nodes, edges, start_node="node1")
 
-        assert "missing 'count' parameter" in str(exc_info.value).lower()
+        assert "missing 'limit' parameter" in str(exc_info.value).lower()
 
     def test_condition_not_dict(self):
         """Test that non-dict condition fields are detected."""

@@ -1,0 +1,327 @@
+# General-purpose coding workflow
+#
+# Demonstrates the coding-focused node types from `pithos.coding_nodes`:
+#   * listfiles   -- enumerate the target repository
+#   * jsonparse   -- read structured agent output into state
+#   * editfile    -- apply edits safely under an allowed_root
+#   * router      -- branch on the reviewer's decision token
+#   * git         -- whitelisted commit at the end of the run
+#
+# Requires the following in state['agents']:
+#   - planner
+#   - coder
+#   - reviewer
+#   - repairer
+#
+# Required initial state variables:
+#   - repo_root    : absolute path to the repository to operate on
+#   - test_target  : pytest target (file or directory) inside repo_root
+#   - task         : free-text task description (also accepted as current_input)
+#
+# Optional initial state variables:
+#   - commit_message : override for the auto-generated commit message
+
+nodes:
+  ScanRepo:
+    type: listfiles
+    roots: ["{repo_root}"]
+    include: ["**/*.py", "**/*.md", "**/*.yaml", "**/*.yml", "**/*.txt"]
+    exclude: [".git/**", "**/__pycache__/**", "**/*.pyc", "**/.venv/**"]
+    max_files: 500
+    save_to: "files"
+    inputs: [default]
+    outputs: [default]
+
+  Plan:
+    type: agentprompt
+    agent: planner
+    prompt: |
+      TASK
+      ----
+      {task}
+
+      REPOSITORY FILES
+      ----------------
+      {files}
+
+      Decompose this task into a JSON plan as specified in your system
+      prompt.  Make sure target_files lists every file you intend to modify.
+    extraction: {}
+    inputs: [default]
+    outputs: [default]
+
+  ParsePlan:
+    type: jsonparse
+    save_to: "plan"
+    schema:
+      type: "object"
+      required: ["summary", "target_files", "steps"]
+    on_error: "raise"
+    inputs: [default]
+    outputs: [default]
+
+  Code:
+    type: agentprompt
+    agent: coder
+    prompt: |
+      TASK
+      ----
+      {task}
+
+      PLAN
+      ----
+      {plan}
+
+      TARGET FILES (relative to repo_root)
+      ------------------------------------
+      {plan[target_files]}
+
+      Produce the JSON array of edits as specified in your system prompt.
+    extraction: {}
+    inputs: [default]
+    outputs: [default]
+
+  ParseEdits:
+    type: jsonparse
+    save_to: "edits"
+    schema:
+      type: "array"
+    on_error: "raise"
+    inputs: [default]
+    outputs: [default]
+
+  ApplyEdits:
+    type: editfile
+    allowed_root: "{repo_root}"
+    edits_from: "edits"
+    backup: true
+    inputs: [default]
+    outputs: [default]
+
+  RunTests:
+    type: toolcall
+    command: "python -m pytest {test_target} -q"
+    save_to: "test_result"
+    error_handling: "continue"
+    extraction: {}
+    set: {}
+    inputs: [default]
+    outputs: [default, success, failure]
+
+  Repair:
+    type: agentprompt
+    agent: repairer
+    prompt: |
+      TASK
+      ----
+      {task}
+
+      PLAN
+      ----
+      {plan}
+
+      PREVIOUS EDITS
+      --------------
+      {edit_result}
+
+      TEST OUTPUT
+      -----------
+      exit_code: {test_result[exit_code]}
+      stdout:
+      {test_result[stdout]}
+      stderr:
+      {test_result[stderr]}
+
+      Produce a fresh JSON array of edits that fixes the failure.
+    extraction: {}
+    inputs: [default]
+    outputs: [default]
+
+  Review:
+    type: agentprompt
+    agent: reviewer
+    prompt: |
+      TASK
+      ----
+      {task}
+
+      PLAN
+      ----
+      {plan}
+
+      EDITS APPLIED
+      -------------
+      {edit_result}
+
+      TEST RESULT
+      -----------
+      exit_code: {test_result[exit_code]}
+      stdout:
+      {test_result[stdout]}
+
+      Decide APPROVE or REVISE per your system prompt.
+    extraction: {}
+    inputs: [default]
+    outputs: [default]
+
+  ParseReview:
+    type: jsonparse
+    save_to: "review"
+    schema:
+      type: "object"
+      required: ["decision"]
+    on_error: "raise"
+    inputs: [default]
+    outputs: [default]
+
+  DecisionRouter:
+    type: router
+    source: "review"
+    match_mode: "token"
+    routes:
+      approve: "APPROVE"
+    default_route: "revise"
+    inputs: [default]
+    outputs: [approve, revise]
+
+  GitAdd:
+    type: git
+    subcommand: "add"
+    repo_root: "{repo_root}"
+    args: ["-A"]
+    save_to: "git_add_result"
+    inputs: [default]
+    outputs: [default]
+
+  GitCommit:
+    type: git
+    subcommand: "commit"
+    repo_root: "{repo_root}"
+    args: ["-m", "auto: {plan[summary]}"]
+    save_to: "git_commit_result"
+    inputs: [default]
+    outputs: [default]
+
+  Done:
+    type: chatoutput
+    inputs: [default]
+    outputs: []
+
+edges:
+  - from: ScanRepo
+    to: Plan
+    condition:
+      type: AlwaysCondition
+    priority: 9
+
+  - from: Plan
+    to: ParsePlan
+    condition:
+      type: AlwaysCondition
+    priority: 9
+
+  - from: ParsePlan
+    to: Code
+    condition:
+      type: AlwaysCondition
+    priority: 9
+
+  - from: Code
+    to: ParseEdits
+    condition:
+      type: AlwaysCondition
+    priority: 9
+
+  - from: ParseEdits
+    to: ApplyEdits
+    condition:
+      type: AlwaysCondition
+    priority: 9
+
+  - from: ApplyEdits
+    to: RunTests
+    condition:
+      type: AlwaysCondition
+    priority: 9
+
+  # On test failure, send to repairer (bounded by CountCondition).
+  - from: RunTests
+    to: Repair
+    output_key: failure
+    condition:
+      type: CountCondition
+      limit: 3
+    priority: 1
+
+  # If we've exhausted the repair budget, give up by routing to review with
+  # whatever the latest failing test_result is.
+  - from: RunTests
+    to: Review
+    output_key: failure
+    condition:
+      type: AlwaysCondition
+    priority: 9
+
+  - from: RunTests
+    to: Review
+    output_key: success
+    condition:
+      type: AlwaysCondition
+    priority: 9
+
+  - from: Repair
+    to: ParseEdits
+    condition:
+      type: AlwaysCondition
+    priority: 9
+
+  - from: Review
+    to: ParseReview
+    condition:
+      type: AlwaysCondition
+    priority: 9
+
+  - from: ParseReview
+    to: DecisionRouter
+    condition:
+      type: AlwaysCondition
+    priority: 9
+
+  - from: DecisionRouter
+    to: GitAdd
+    output_key: approve
+    condition:
+      type: AlwaysCondition
+    priority: 9
+
+  # On REVISE, loop back to the coder with the reviewer's feedback in state
+  # (bounded by CountCondition to keep the run finite).
+  - from: DecisionRouter
+    to: Code
+    output_key: revise
+    condition:
+      type: CountCondition
+      limit: 3
+    priority: 1
+
+  # Fallback when revision budget is exhausted: commit what we have.
+  - from: DecisionRouter
+    to: GitAdd
+    output_key: revise
+    condition:
+      type: AlwaysCondition
+    priority: 9
+
+  - from: GitAdd
+    to: GitCommit
+    condition:
+      type: AlwaysCondition
+    priority: 9
+
+  - from: GitCommit
+    to: Done
+    condition:
+      type: AlwaysCondition
+    priority: 9
+
+start_node: ScanRepo

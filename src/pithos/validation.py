@@ -38,6 +38,16 @@ class FlowchartValidator:
         "fileinputnode": ["file_path"],
         "fileoutput": ["file_path", "source"],
         "fileoutputnode": ["file_path", "source"],
+        "router": ["routes", "default_route"],
+        "routernode": ["routes", "default_route"],
+        "jsonparse": [],
+        "jsonparsenode": [],
+        "listfiles": ["roots"],
+        "listfilesnode": ["roots"],
+        "editfile": ["allowed_root"],
+        "editfilenode": ["allowed_root"],
+        "git": ["subcommand", "repo_root"],
+        "gitnode": ["subcommand", "repo_root"],
     }
 
     def __init__(self, strict: bool = True):
@@ -372,9 +382,9 @@ class FlowchartValidator:
 
         # Type-specific validation
         if cond_type == "CountCondition":
-            if "count" not in condition:
+            if "limit" not in condition:
                 self.errors.append(
-                    f"{edge_id} CountCondition is missing 'count' parameter"
+                    f"{edge_id} CountCondition is missing 'limit' parameter"
                 )
 
     def _check_reachability(

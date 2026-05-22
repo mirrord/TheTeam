@@ -203,6 +203,48 @@ context['sum'] = context['a'] + context['b']
         assert node.custom_code == "state['x'] = 1"
 
     # ------------------------------------------------------------------
+    # allow_modules opt-in
+    # ------------------------------------------------------------------
+
+    def test_allow_modules_default_unchanged(self):
+        node = CustomNode(extraction={}, custom_code="context['x']=1")
+        assert node.allow_modules == []
+
+    def test_allow_modules_pre_binds_json(self):
+        code = "context['parsed'] = json.loads(context['raw'])"
+        node = CustomNode(
+            extraction={},
+            custom_code=code,
+            allow_modules=["json"],
+            inputs=["default"],
+            outputs=["default"],
+        )
+        router = MessageRouter()
+        router.shared_context["raw"] = '{"a": 1}'
+        state = NodeInputState(node_id="t", required_inputs=["default"])
+        state.receive_message(Message(data="", input_key="default"))
+        ctx = node._build_context_from_messages(state, router)
+        result = node._execute(ctx)
+        assert result["parsed"] == {"a": 1}
+
+    def test_allow_modules_rejects_unknown(self):
+        with pytest.raises(ValueError, match="unsupported module"):
+            CustomNode(
+                extraction={},
+                custom_code="context['x']=1",
+                allow_modules=["os"],
+            )
+
+    def test_allow_modules_imports_still_blocked(self):
+        # Even when json is whitelisted, an `import` statement is rejected.
+        with pytest.raises(ValueError, match="Import"):
+            CustomNode(
+                extraction={},
+                custom_code="import json",
+                allow_modules=["json"],
+            )
+
+    # ------------------------------------------------------------------
     # Sandbox security tests
     # ------------------------------------------------------------------
 

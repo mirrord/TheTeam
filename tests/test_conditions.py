@@ -291,3 +291,67 @@ class TestConditionIntegration:
         restored = CountCondition.from_dict(data)
         assert restored.limit == original.limit
         assert restored._counter == 0
+
+
+class TestPredicateCondition:
+    """Tests for PredicateCondition (safe-AST expression evaluator over state)."""
+
+    def _cond(self, expr, **kw):
+        from pithos.conditions import PredicateCondition
+
+        return PredicateCondition(expression=expr, **kw)
+
+    def test_simple_equality(self):
+        c = self._cond("status == 'ok'")
+        assert c.is_open({"status": "ok"}) is True
+        assert c.is_open({"status": "fail"}) is False
+
+    def test_numeric_comparison(self):
+        c = self._cond("count > 3")
+        assert c.is_open({"count": 5}) is True
+        assert c.is_open({"count": 1}) is False
+
+    def test_boolean_and_or_not(self):
+        c = self._cond("ok and not failed")
+        assert c.is_open({"ok": True, "failed": False}) is True
+        assert c.is_open({"ok": True, "failed": True}) is False
+
+    def test_in_operator(self):
+        c = self._cond("'apply' in tags")
+        assert c.is_open({"tags": ["apply", "x"]}) is True
+        assert c.is_open({"tags": ["other"]}) is False
+
+    def test_subscript_access(self):
+        c = self._cond("result['code'] == 0")
+        assert c.is_open({"result": {"code": 0}}) is True
+        assert c.is_open({"result": {"code": 1}}) is False
+
+    def test_missing_key_returns_false(self):
+        c = self._cond("missing_var == 1")
+        assert c.is_open({}) is False
+
+    def test_blocks_function_calls(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="not allowed"):
+            self._cond("__import__('os')")
+
+    def test_blocks_attribute_access(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="not allowed"):
+            self._cond("x.__class__")
+
+    def test_from_dict(self):
+        from pithos.conditions import PredicateCondition
+
+        c = PredicateCondition.from_dict({"expression": "n > 0"})
+        assert c.is_open({"n": 5}) is True
+
+    def test_registered_via_condition_manager(self):
+        from pithos.conditions import ConditionManager, PredicateCondition
+        from unittest.mock import MagicMock
+
+        mgr = ConditionManager(MagicMock())
+        assert "PredicateCondition" in mgr.static_conditions
+        assert mgr.static_conditions["PredicateCondition"] is PredicateCondition

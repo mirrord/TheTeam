@@ -248,6 +248,240 @@ class RegexCondition(Condition):
         return RegexCondition(condition_dict["regex"])
 
 
+# ---------------------------------------------------------------------------
+# PredicateCondition
+# ---------------------------------------------------------------------------
+
+
+import ast as _ast  # local alias to avoid touching module-level imports above
+
+
+class _SafeExpressionEvaluator(_ast.NodeVisitor):
+    """Evaluate a tiny, side-effect-free expression language over a state dict.
+
+    Supported nodes: Expression, BoolOp, UnaryOp, BinOp (arithmetic),
+    Compare, Constant, Name, Subscript, Index (py<3.9), Tuple, List.
+    Everything else -- including function calls, attribute access,
+    comprehensions and lambdas -- is rejected.
+    """
+
+    _ALLOWED = (
+        _ast.Expression,
+        _ast.BoolOp,
+        _ast.And,
+        _ast.Or,
+        _ast.Not,
+        _ast.UnaryOp,
+        _ast.USub,
+        _ast.UAdd,
+        _ast.BinOp,
+        _ast.Add,
+        _ast.Sub,
+        _ast.Mult,
+        _ast.Div,
+        _ast.FloorDiv,
+        _ast.Mod,
+        _ast.Compare,
+        _ast.Eq,
+        _ast.NotEq,
+        _ast.Lt,
+        _ast.LtE,
+        _ast.Gt,
+        _ast.GtE,
+        _ast.In,
+        _ast.NotIn,
+        _ast.Is,
+        _ast.IsNot,
+        _ast.Constant,
+        _ast.Name,
+        _ast.Load,
+        _ast.Subscript,
+        _ast.Tuple,
+        _ast.List,
+        _ast.Index,  # py<3.9 wrapper (no-op on newer)
+    )
+
+    def __init__(self, state: dict[str, Any]) -> None:
+        self.state = state
+
+    @classmethod
+    def validate(cls, tree: _ast.AST) -> None:
+        for node in _ast.walk(tree):
+            if not isinstance(node, cls._ALLOWED):
+                raise ValueError(
+                    f"PredicateCondition: AST node {type(node).__name__} is not allowed"
+                )
+
+    def visit(self, node: _ast.AST) -> Any:  # type: ignore[override]
+        method = "v_" + type(node).__name__
+        fn = getattr(self, method, None)
+        if fn is None:
+            raise ValueError(
+                f"PredicateCondition: AST node {type(node).__name__} is not allowed"
+            )
+        return fn(node)
+
+    # -- node handlers -----------------------------------------------------
+
+    def v_Expression(self, node: _ast.Expression) -> Any:
+        return self.visit(node.body)
+
+    def v_Constant(self, node: _ast.Constant) -> Any:
+        return node.value
+
+    def v_Name(self, node: _ast.Name) -> Any:
+        return self.state.get(node.id)
+
+    def v_Tuple(self, node: _ast.Tuple) -> tuple:
+        return tuple(self.visit(e) for e in node.elts)
+
+    def v_List(self, node: _ast.List) -> list:
+        return [self.visit(e) for e in node.elts]
+
+    def v_BoolOp(self, node: _ast.BoolOp) -> Any:
+        if isinstance(node.op, _ast.And):
+            result = True
+            for v in node.values:
+                result = self.visit(v)
+                if not result:
+                    return result
+            return result
+        if isinstance(node.op, _ast.Or):
+            result = False
+            for v in node.values:
+                result = self.visit(v)
+                if result:
+                    return result
+            return result
+        raise ValueError("PredicateCondition: unsupported BoolOp")
+
+    def v_UnaryOp(self, node: _ast.UnaryOp) -> Any:
+        operand = self.visit(node.operand)
+        if isinstance(node.op, _ast.Not):
+            return not operand
+        if isinstance(node.op, _ast.USub):
+            return -operand
+        if isinstance(node.op, _ast.UAdd):
+            return +operand
+        raise ValueError("PredicateCondition: unsupported UnaryOp")
+
+    def v_BinOp(self, node: _ast.BinOp) -> Any:
+        left = self.visit(node.left)
+        right = self.visit(node.right)
+        op = node.op
+        if isinstance(op, _ast.Add):
+            return left + right
+        if isinstance(op, _ast.Sub):
+            return left - right
+        if isinstance(op, _ast.Mult):
+            return left * right
+        if isinstance(op, _ast.Div):
+            return left / right
+        if isinstance(op, _ast.FloorDiv):
+            return left // right
+        if isinstance(op, _ast.Mod):
+            return left % right
+        raise ValueError("PredicateCondition: unsupported BinOp")
+
+    def v_Compare(self, node: _ast.Compare) -> bool:
+        left = self.visit(node.left)
+        for op, comparator in zip(node.ops, node.comparators):
+            right = self.visit(comparator)
+            if not self._cmp(left, op, right):
+                return False
+            left = right
+        return True
+
+    @staticmethod
+    def _cmp(left: Any, op: _ast.cmpop, right: Any) -> bool:
+        if isinstance(op, _ast.Eq):
+            return left == right
+        if isinstance(op, _ast.NotEq):
+            return left != right
+        if isinstance(op, _ast.Lt):
+            return left < right
+        if isinstance(op, _ast.LtE):
+            return left <= right
+        if isinstance(op, _ast.Gt):
+            return left > right
+        if isinstance(op, _ast.GtE):
+            return left >= right
+        if isinstance(op, _ast.In):
+            return left in right
+        if isinstance(op, _ast.NotIn):
+            return left not in right
+        if isinstance(op, _ast.Is):
+            return left is right
+        if isinstance(op, _ast.IsNot):
+            return left is not right
+        raise ValueError(
+            f"PredicateCondition: unsupported comparator {type(op).__name__}"
+        )
+
+    def v_Subscript(self, node: _ast.Subscript) -> Any:
+        container = self.visit(node.value)
+        slice_node = node.slice
+        if isinstance(slice_node, _ast.Index):  # py<3.9
+            key = self.visit(slice_node.value)  # type: ignore[attr-defined]
+        else:
+            key = self.visit(slice_node)
+        try:
+            return container[key]
+        except (KeyError, IndexError, TypeError):
+            return None
+
+
+class PredicateCondition(Condition):
+    """Boolean condition expressed as a safe Python-like expression string.
+
+    The expression is evaluated against the flowchart's shared state dict.
+    Only a tiny subset of Python is permitted (boolean, comparison and
+    container operators, plus name/index lookup).  Function calls,
+    attribute access, lambdas and comprehensions are all rejected at
+    parse time.
+    """
+
+    def __init__(
+        self,
+        expression: str,
+        *args: Any,
+        registered_name: Optional[str] = None,
+        **kwargs: Any,
+    ) -> None:
+        if not expression or not expression.strip():
+            raise ValueError("PredicateCondition expression cannot be empty")
+        try:
+            tree = _ast.parse(expression, mode="eval")
+        except SyntaxError as exc:
+            raise ValueError(
+                f"PredicateCondition: syntax error in expression: {exc}"
+            ) from exc
+        _SafeExpressionEvaluator.validate(tree)
+
+        super().__init__(
+            None,  # type: ignore[arg-type]
+            registered_name=registered_name or "PredicateCondition",
+        )
+        self.expression = expression
+        self._tree = tree
+
+    def is_open(self, state: dict[str, Any]) -> bool:
+        try:
+            value = _SafeExpressionEvaluator(state).visit(self._tree)
+        except Exception:
+            return False
+        return bool(value)
+
+    @classmethod
+    def from_dict(cls, condition_dict: dict[str, Any]) -> "PredicateCondition":
+        if "expression" not in condition_dict:
+            raise KeyError("Missing required 'expression' key in condition_dict")
+        return cls(expression=condition_dict["expression"])
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"type": "PredicateCondition", "expression": self.expression}
+
+
 class ConditionManager:
     """Manages built-in and registered conditions."""
 
