@@ -1,0 +1,35 @@
+[
+  {
+    "seed_prompts": ["Please remember: my favourite colour is teal."],
+    "recall_prompt": "What is my favourite colour?",
+    "expected_recall": "teal"
+  },
+  {
+    "seed_prompts": ["My dog is named Pepper and she is a border collie."],
+    "recall_prompt": "What breed is my dog?",
+    "expected_recall": "border collie"
+  },
+  {
+    "seed_prompts": ["The launch code for project Aurora is 7741-X."],
+    "recall_prompt": "Tell me the project Aurora launch code.",
+    "expected_recall": "7741-x"
+  },
+  {
+    "seed_prompts": [
+      "I live in Reykjavik.",
+      "I work as a marine biologist."
+    ],
+    "recall_prompt": "Where do I live and what do I do for work?",
+    "expected_recall": "reykjavik"
+  },
+  {
+    "seed_prompts": ["Remember the password is 'pithos-rules'."],
+    "recall_prompt": "Repeat the password you were given.",
+    "expected_recall": "pithos-rules"
+  },
+  {
+    "seed_prompts": ["The meeting with Dr. Singh is on Tuesday at 4pm."],
+    "recall_prompt": "When is the meeting with Dr. Singh?",
+    "expected_recall": "tuesday"
+  }
+]

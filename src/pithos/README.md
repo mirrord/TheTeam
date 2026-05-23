@@ -65,7 +65,7 @@ print(
 agent.send("Wow! How cool is that??")
 ```
 
-## Benchmarking
+## Evaluation
 
-The command `pithos-benchmark` will execute the benchmarking tool, which current just runs the easy-questions-llms-get-wrong benchmark against configured agents. Configure this tool via the config.py under benchmarks/easy_problems (yuck!)
+The command `pithos-eval` runs the unified evaluation suite (multi-round, resumable runs with trajectory analyzers and the C.L.A.S.S. report). Configure runs via YAML under `configs/eval/`. See [docs/EVALUATION.md](../../docs/EVALUATION.md) for full documentation.
 

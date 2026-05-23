@@ -1,0 +1,31 @@
+# Default model price table for pithos.eval CostAnalyzer.
+#
+# Prices are USD per 1k tokens. Local / Ollama models default to 0.
+# Override or extend by passing `price_map` to the CostAnalyzer config
+# or as part of `AnalyzerContext.price_map` in the runner.
+
+# --- Common Ollama / local models (free at runtime) ---
+llama3:
+  prompt_per_1k: 0.0
+  completion_per_1k: 0.0
+llama3.1:
+  prompt_per_1k: 0.0
+  completion_per_1k: 0.0
+mistral:
+  prompt_per_1k: 0.0
+  completion_per_1k: 0.0
+qwen2.5:
+  prompt_per_1k: 0.0
+  completion_per_1k: 0.0
+glm-4.7-flash:
+  prompt_per_1k: 0.0
+  completion_per_1k: 0.0
+
+# --- Example cloud prices (illustrative only) ---
+# Uncomment and adjust to your contract before using.
+# gpt-4o:
+#   prompt_per_1k: 0.005
+#   completion_per_1k: 0.015
+# claude-3-5-sonnet:
+#   prompt_per_1k: 0.003
+#   completion_per_1k: 0.015

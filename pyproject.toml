@@ -44,12 +44,6 @@ test = [
 dev = [
   "mypy>=1.0.0",
 ]
-benchmark = [
-  "pandas>=2.0.0",
-  "matplotlib>=3.7.0",
-  "seaborn>=0.12.0",
-  "tqdm>=4.65.0",
-]
 llamacpp = [
   "llama-cpp-python>=0.2.0",
 ]
@@ -69,7 +63,7 @@ pithos-memory = "pithos.memory_tool:main"
 pithos-database = "pithos.database_manager:main"
 pithos-flowcharts = "pithos.flowchart_store:main"
 pithos-diagnostic = "pithos.diagnostic:main"
-pithos-benchmark = "benchmarks.easy_problems.main:main"
+pithos-eval = "pithos.eval.cli:main"
 theteam = "theteam.server:main"
 
 [project.urls]
