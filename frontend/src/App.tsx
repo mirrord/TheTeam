@@ -6,6 +6,7 @@ import ChatInterface from './pages/ChatInterface'
 import AgentConfig from './pages/AgentConfig'
 import DatabaseAdmin from './pages/DatabaseAdmin'
 import EdgeDebugger from './pages/EdgeDebugger'
+import Benchmarks from './pages/Benchmarks'
 import { useSocketStore } from './store/socketStore'
 import { ReactFlowProvider } from 'reactflow'
 
@@ -42,6 +43,7 @@ function App() {
           <Route path="chat/:id" element={<ChatInterface />} />
           <Route path="agents" element={<AgentConfig />} />
           <Route path="databases" element={<DatabaseAdmin />} />
+          <Route path="benchmarks" element={<Benchmarks />} />
         </Route>
         <Route
           path="/debug/edges"

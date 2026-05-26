@@ -53,6 +53,8 @@ class Agent(ABC):
         self.tool_registry: Optional[ToolRegistry] = None
         self.tool_executor: Optional[ToolExecutor] = None
         self.flowchart_executor: Optional[FlowchartToolExecutor] = None
+        # Web-research virtual tool executor (set by enable_tools when enabled)
+        self.web_research_executor: Optional[Any] = None
         self.tool_auto_loop = False
         self.tool_max_iterations = 5
         # Memory tool support
@@ -785,6 +787,10 @@ class Agent(ABC):
                 result = self._execute_flowchart_tool(
                     parts[1] if len(parts) > 1 else ""
                 )
+            elif tool_name == "web-research":
+                result = self._execute_web_research_tool(
+                    parts[1] if len(parts) > 1 else ""
+                )
             else:
                 result = self.tool_executor.run(req.command, self.tool_registry)
 
@@ -861,6 +867,30 @@ class Agent(ABC):
 
         return self.flowchart_executor.run(fc_name, fc_input, agents_dict)
 
+    def _execute_web_research_tool(self, args_str: str) -> Any:
+        """Run a research pass via the ``web-research`` virtual tool.
+
+        Expected format: ``<inquiry text...>``.
+        """
+        from ..tools.models import ToolResult
+
+        if not self.web_research_executor:
+            return ToolResult(
+                success=False,
+                stdout="",
+                stderr="Web research tool is not enabled.",
+                exit_code=-1,
+                execution_time=0.0,
+                command=f"web-research {args_str}",
+                error_hint=(
+                    "Enable it under 'web_research.enabled: true' in tool_config.yaml "
+                    "and install the optional web deps: pip install .[web]"
+                ),
+            )
+
+        inquiry = (args_str or "").strip()
+        return self.web_research_executor.run(inquiry)
+
     def _format_tool_result(self, result) -> str:
         """Format a tool result with clear error feedback for the agent.
 
@@ -919,6 +949,24 @@ class Agent(ABC):
                 timeout=fc_config.get("timeout", 120),
                 max_steps=fc_config.get("max_steps", 100),
             )
+
+        # Set up web-research virtual tool executor when enabled.
+        wr_config = tool_config.get("web_research", {})
+        if wr_config.get("enabled", False):
+            try:
+                from ..tools.web_researcher import (
+                    WEB_RESEARCH_AVAILABLE,
+                    WebResearcherToolExecutor,
+                )
+
+                if WEB_RESEARCH_AVAILABLE:
+                    self.web_research_executor = WebResearcherToolExecutor(
+                        config_manager=config_manager
+                    )
+            except Exception:
+                # Optional feature - if deps are missing, the tool simply
+                # remains unavailable; the agent continues to work.
+                self.web_research_executor = None
 
         # Enhance system prompt with tool usage instructions
         self._add_tool_prompt_to_contexts()

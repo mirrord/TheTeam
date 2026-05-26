@@ -122,6 +122,7 @@ pithos-agent chat glm-4.7-flash:latest --flowchart simple_reflect
 - **Flowchart Execution**: Guide agent reasoning through configurable flowcharts
 - **Message-Based Routing**: Advanced data flow with explicit message passing between nodes
 - **Tool Calling**: Enable agents to execute CLI commands dynamically
+- **Web Research Tool**: Subagent-driven web crawler (`web-research`) restricted to a configurable domain whitelist, with deduplicated excerpt storage and a cited summary report
 - **Conditions**: Define conditional logic for flowchart branching
 - **Configuration**: YAML-based configuration for agents, flowcharts, and conditions
 - **Serialization**: Save and load agent states, contexts, and flowcharts
@@ -661,6 +662,29 @@ pithos-tools test <tool_name> <args>
 # Refresh tool cache
 pithos-tools refresh
 ```
+
+### pithos-research
+
+Subagent-driven web research CLI. Requires the optional `web` extra: `pip install -e ".[web]"`.
+
+```bash
+# Ask a question; results constrained to the configured domain whitelist
+pithos-research "What are the major changes in HTTP/3?"
+
+# Override whitelisted domains for this run
+pithos-research "Difference between SSE and WebSockets" \
+    --domains developer.mozilla.org --domains en.wikipedia.org
+
+# Seed the crawl with specific URLs
+pithos-research "Trafilatura extraction pipeline" \
+    --seed-url https://github.com/adbar/trafilatura
+
+# Machine-readable JSON output (summary + sources + stats)
+pithos-research "Python GIL removal status" --json
+```
+
+See [docs/WEB_RESEARCH.md](docs/WEB_RESEARCH.md) for architecture, configuration,
+and the in-flowchart `webresearch` node.
 
 ### pithos-memory
 

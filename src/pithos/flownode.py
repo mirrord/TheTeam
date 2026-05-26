@@ -726,6 +726,98 @@ class ToolCallNode(FlowNode):
         return output
 
 
+class WebResearchNode(FlowNode):
+    """Node that runs the WebResearcher tool on an inquiry.
+
+    The inquiry template is formatted from the current execution context
+    (so ``{current_input}`` and other state variables are supported). The
+    resulting :class:`ResearchReport` is stored under ``save_to`` as a
+    dict and the rendered Markdown summary becomes the ``current_input``
+    for downstream nodes.
+    """
+
+    def __init__(
+        self,
+        inquiry: str = "{current_input}",
+        save_to: str = "research_report",
+        domains: Optional[list[str]] = None,
+        seed_urls: Optional[list[str]] = None,
+        error_handling: str = "continue",
+        extraction: Optional[dict[str, str]] = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(extraction, **kwargs)
+        self.inquiry = inquiry
+        self.save_to = save_to
+        self.domains = list(domains) if domains else None
+        self.seed_urls = list(seed_urls) if seed_urls else None
+        self.error_handling = error_handling
+
+    def _execute(self, context: dict[str, Any]) -> Any:
+        """Run a research pass and return the report payload."""
+        inquiry_text = self._stateful_format(self.inquiry, context)
+
+        researcher = context.get("web_researcher")
+        config_manager = context.get("config_manager")
+
+        if researcher is None and config_manager is not None:
+            try:
+                from .tools.web_researcher import (
+                    WEB_RESEARCH_AVAILABLE,
+                    WebResearcher,
+                )
+
+                if WEB_RESEARCH_AVAILABLE:
+                    researcher = WebResearcher(config_manager)
+            except Exception as exc:
+                if self.error_handling == "stop":
+                    raise RuntimeError(f"web research unavailable: {exc}") from exc
+                researcher = None
+
+        if researcher is None:
+            err = {
+                "summary": "Web research is not available in this flowchart context.",
+                "sources": [],
+                "errors": ["web_researcher not configured"],
+                "stats": {},
+            }
+            if self.error_handling == "stop":
+                raise RuntimeError("Web research is not available")
+            return {self.save_to: err, "current_input": err["summary"]}
+
+        from .tools.web_researcher.models import WebResearchRequest
+
+        request = WebResearchRequest(
+            inquiry=inquiry_text,
+            domains_override=self.domains,
+            extra_seed_urls=self.seed_urls or [],
+        )
+
+        try:
+            report = researcher.research(request)
+        except Exception as exc:
+            if self.error_handling == "stop":
+                raise
+            err = {
+                "summary": f"Web research failed: {exc}",
+                "sources": [],
+                "errors": [str(exc)],
+                "stats": {},
+            }
+            return {self.save_to: err, "current_input": err["summary"]}
+
+        payload = {
+            "inquiry": report.inquiry,
+            "summary": report.summary,
+            "markdown": report.to_markdown(),
+            "sources": list(report.sources),
+            "excerpt_count": len(report.excerpts),
+            "stats": dict(report.stats),
+            "errors": list(report.errors),
+        }
+        return {self.save_to: payload, "current_input": payload["markdown"]}
+
+
 class TextParseNode(FlowNode):
     """Node that parses and extracts information from text input.
 
@@ -1201,6 +1293,8 @@ def create_node(node_type: str, data: dict[str, Any]) -> Optional[FlowNode]:
         "customnode": CustomNode,
         "toolcall": ToolCallNode,
         "toolcallnode": ToolCallNode,
+        "webresearch": WebResearchNode,
+        "webresearchnode": WebResearchNode,
         "textparse": TextParseNode,
         "textparsenode": TextParseNode,
         "agentprompt": AgentPromptNode,

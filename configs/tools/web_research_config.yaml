@@ -1,0 +1,42 @@
+# WebResearcher tool configuration
+#
+# Lists the trusted source domains the crawler is allowed to visit. Edit
+# the `domains` block to suit your own research needs. The crawler will
+# refuse to fetch URLs whose hostname is not an exact match or subdomain
+# of an entry in this list. ``robots.txt`` is honoured by default.
+
+enabled: true
+
+# --- Whitelisted source domains -------------------------------------------
+domains:
+  - en.wikipedia.org
+  - developer.mozilla.org
+  - docs.python.org
+  - arxiv.org
+  - github.com
+
+# --- Crawl budget ---------------------------------------------------------
+max_pages: 20                # hard cap on pages fetched per research run
+max_iterations: 8            # subagent rounds before forced stop
+search_results_per_domain: 5 # initial seed search results per domain
+
+# --- HTTP behaviour -------------------------------------------------------
+request_timeout: 15.0        # seconds
+per_domain_rps: 1.0          # max requests per second per host
+max_page_bytes: 2000000      # 2 MiB cap; pages larger than this are skipped
+user_agent: "TheTeam-WebResearcher/1.0 (+https://github.com/mirrord/theteam)"
+respect_robots: true
+
+# --- Extraction -----------------------------------------------------------
+chunk_size: 600              # approx characters per stored excerpt
+chunk_overlap: 80            # overlap between adjacent chunks
+
+# --- Dedup / storage ------------------------------------------------------
+dedup_similarity: 0.92       # cosine-similarity threshold for semantic dedup
+persist_directory: "./data/research"
+keep_collection: false       # drop the per-run collection after summarizing
+
+# --- Subagent -------------------------------------------------------------
+subagent_config_name: "web_researcher"  # configs/agents/web_researcher.yaml
+subagent_model: null         # null = use the value from the agent config
+summarizer_model: null       # null = same as subagent_model

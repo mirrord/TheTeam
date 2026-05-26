@@ -89,6 +89,21 @@ runcommand('git status')
 
 **All formats work identically** - use whichever is most natural for your agent or workflow.
 
+## Virtual Tools
+
+In addition to CLI binaries, pithos ships two **virtual tools** that are
+dispatched in-process rather than as subprocesses:
+
+- **`flowchart`** — invokes a saved flowchart as if it were a tool.
+- **`web-research`** — subagent-driven web crawler over a configurable
+  domain whitelist. See [WEB_RESEARCH.md](WEB_RESEARCH.md). Requires the
+  optional `web` extra (`pip install -e ".[web]"`).
+
+Virtual tools appear in `pithos-tools list` alongside CLI tools and use
+the same call syntax (`RUN: web-research <inquiry>`). They are gated in
+`configs/tools/tool_config.yaml` and skipped if their optional
+dependencies are not installed.
+
 ## Tool Discovery
 
 Tools are automatically discovered from your system PATH.

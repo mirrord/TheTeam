@@ -52,6 +52,11 @@ exllamav2 = [
   "transformers>=4.40.0",
   "jinja2>=3.0.0",
 ]
+web = [
+  "requests>=2.31.0",
+  "beautifulsoup4>=4.12.0",
+  "trafilatura>=1.6.0",
+]
 
 [project.scripts]
 pithos = "pithos.__main__:main"
@@ -64,6 +69,7 @@ pithos-database = "pithos.database_manager:main"
 pithos-flowcharts = "pithos.flowchart_store:main"
 pithos-diagnostic = "pithos.diagnostic:main"
 pithos-eval = "pithos.eval.cli:main"
+pithos-research = "pithos.tools.web_researcher.cli:main"
 theteam = "theteam.server:main"
 
 [project.urls]
