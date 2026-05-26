@@ -15,10 +15,23 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+import xml.etree.ElementTree as ET
 from typing import Callable, Optional
 from urllib.parse import quote, urlencode
 
 logger = logging.getLogger(__name__)
+
+
+# arxiv abs URL pattern, used by both the search backend and the
+# /pdf/ -> /html/ rewriter below.
+_ARXIV_ABS_RE = re.compile(
+    r"^https?://(?:www\.)?arxiv\.org/abs/(?P<id>[^?#\s]+)", re.IGNORECASE
+)
+_ARXIV_PDF_RE = re.compile(
+    r"^(https?://(?:www\.)?arxiv\.org)/pdf/(?P<id>[^?#\s]+?)(?:\.pdf)?(?P<tail>[?#].*)?$",
+    re.IGNORECASE,
+)
 
 
 def _wikipedia_search(domain: str, query: str, fetcher, n: int) -> list[str]:
@@ -89,10 +102,88 @@ def _mdn_search(domain: str, query: str, fetcher, n: int) -> list[str]:
     return out
 
 
+def _arxiv_search(domain: str, query: str, fetcher, n: int) -> list[str]:
+    """Use the arxiv Atom export API (no auth, no anti-bot).
+
+    The API lives at ``export.arxiv.org/api/query`` and returns Atom XML.
+    Each ``<entry>`` has an ``<id>`` of the form
+    ``http://arxiv.org/abs/<paper_id>v<version>``. We return the matching
+    ``https://arxiv.org/html/<paper_id>v<version>`` URLs so the crawler
+    grabs the HTML rendition of the paper rather than the PDF (PDF
+    parsing is intentionally out of scope for this tool).
+    """
+    params = urlencode(
+        {
+            "search_query": f"all:{query}",
+            "start": "0",
+            "max_results": str(max(1, n)),
+            "sortBy": "relevance",
+            "sortOrder": "descending",
+        }
+    )
+    # The export host is the documented public API; the user-facing
+    # arxiv.org host is rate-limited far more aggressively. We have to
+    # add it to the whitelist temporarily because Fetcher's whitelist
+    # gate runs before any per-host policy.
+    api_host = "export.arxiv.org"
+    added = False
+    if api_host not in [h.lower() for h in getattr(fetcher, "whitelist", [])]:
+        fetcher.whitelist = list(fetcher.whitelist) + [api_host]
+        added = True
+    try:
+        url = f"https://{api_host}/api/query?{params}"
+        result = fetcher.fetch(url, bypass_robots=True, allow_non_html=True)
+    finally:
+        if added:
+            fetcher.whitelist = [h for h in fetcher.whitelist if h.lower() != api_host]
+    if not result.ok:
+        logger.debug("arxiv search failed: %s", result.error)
+        return []
+
+    try:
+        root = ET.fromstring(result.html)
+    except ET.ParseError as exc:
+        logger.debug("arxiv search returned non-XML: %s", exc)
+        return []
+
+    # Atom namespace; ElementTree requires the full URI in tag names.
+    ns = "{http://www.w3.org/2005/Atom}"
+    out: list[str] = []
+    for entry in root.findall(f"{ns}entry"):
+        id_el = entry.find(f"{ns}id")
+        if id_el is None or not id_el.text:
+            continue
+        m = _ARXIV_ABS_RE.match(id_el.text.strip())
+        if not m:
+            continue
+        paper_id = m.group("id")
+        out.append(f"https://arxiv.org/html/{paper_id}")
+        if len(out) >= n:
+            break
+    return out
+
+
+def arxiv_pdf_to_html(url: str) -> str:
+    """Rewrite ``https://arxiv.org/pdf/<id>`` -> ``.../html/<id>``.
+
+    Returns ``url`` unchanged when it isn't an arxiv PDF URL. The query
+    string / fragment is preserved. This is a pure string transform so
+    it's safe to call on every URL before fetch.
+    """
+    m = _ARXIV_PDF_RE.match(url or "")
+    if not m:
+        return url
+    base = m.group(1)
+    paper_id = m.group("id")
+    tail = m.group("tail") or ""
+    return f"{base}/html/{paper_id}{tail}"
+
+
 # Registry: domain suffix -> handler. Longest match wins.
 _NATIVE_BACKENDS: list[tuple[str, Callable[[str, str, object, int], list[str]]]] = [
     ("wikipedia.org", _wikipedia_search),
     ("developer.mozilla.org", _mdn_search),
+    ("arxiv.org", _arxiv_search),
 ]
 
 

@@ -8,6 +8,7 @@ from typing import Any
 from .extractor import chunk_text, extract_main_text, filter_outlinks
 from .fetcher import Fetcher, host_of, in_whitelist
 from .models import Excerpt, WebResearchConfig
+from .native_search import arxiv_pdf_to_html
 from .parser import ResearchAction, extract_actions
 from .search import DuckDuckGoSearch
 from .store import ExcerptStore
@@ -188,6 +189,9 @@ class ResearchLoop:
                 self.candidates.append(url)
 
     def _do_fetch(self, url: str) -> None:
+        # arxiv: PDFs are out of scope for this tool's HTML-only extractor;
+        # rewrite to the /html/<id> rendition so we get parseable content.
+        url = arxiv_pdf_to_html(url)
         if url in self.visited:
             return
         self.visited.add(url)
