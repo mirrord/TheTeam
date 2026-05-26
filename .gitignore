@@ -156,3 +156,4 @@ results/
 *.gif
 .github/copilot-instructions.md
 data/conversations
+data/research
