@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import re
 from typing import Optional
-from urllib.parse import parse_qs, quote_plus, unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -50,11 +50,34 @@ class DuckDuckGoSearch:
             fetcher.whitelist = list(fetcher.whitelist) + ["duckduckgo.com"]
 
     def query(self, domain: str, query: str, n: Optional[int] = None) -> list[str]:
-        """Return up to ``n`` URLs from ``domain`` matching ``query``."""
+        """Return up to ``n`` URLs from ``domain`` matching ``query``.
+
+        Routing: domains with a native backend (Wikipedia API, MDN, etc.)
+        use that backend first because it's much more reliable than DDG's
+        HTML endpoint, which aggressively anomaly-blocks automated
+        clients. DDG is used as a universal fallback for everything else
+        and as a secondary source when a native backend returns nothing.
+        """
+        from .native_search import native_search
+
         n = n or self.results_per_domain
+
+        # 1) Try the native backend for this domain (if any).
+        native = native_search(domain, query, self._fetcher, n)
+        if native:
+            return native[:n]
+
+        # 2) Fall back to DDG. POST + bypass robots: the HTML endpoint's
+        # robots.txt is Disallow:/ and the endpoint only returns useful
+        # results to form-encoded POSTs. Robots is still enforced for
+        # every content page we actually scrape.
         q = f"site:{domain} {query}".strip()
-        url = f"{_DDG_HTML_URL}?q={quote_plus(q)}"
-        result = self._fetcher.fetch(url)
+        result = self._fetcher.fetch(
+            _DDG_HTML_URL,
+            bypass_robots=True,
+            method="POST",
+            data={"q": q},
+        )
         if not result.ok:
             logger.debug("DDG search failed: %s", result.error)
             return []

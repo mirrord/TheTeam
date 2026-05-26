@@ -125,16 +125,31 @@ class Fetcher:
             return False
         return True
 
-    def fetch(self, url: str) -> FetchResult:
+    def fetch(
+        self,
+        url: str,
+        bypass_robots: bool = False,
+        method: str = "GET",
+        data: Optional[dict] = None,
+        allow_non_html: bool = False,
+    ) -> FetchResult:
         """Fetch ``url`` and return a :class:`FetchResult`.
 
         Errors (whitelist rejection, robots disallow, redirect-out, timeout,
         non-HTML content, size cap) are reported via :attr:`FetchResult.error`
         rather than raising, so the calling loop can record and continue.
+
+        ``bypass_robots`` skips the robots.txt check for this single call;
+        callers should only set it for internal infrastructure requests
+        (e.g. search-engine queries), never for content pages. ``method``
+        and ``data`` let callers issue a POST (DDG's HTML search endpoint
+        only returns useful results to form-encoded POSTs).
+        ``allow_non_html`` disables the text/html content-type guard so
+        callers can fetch JSON APIs (e.g. native domain search backends).
         """
         if not in_whitelist(url, self.whitelist):
             return FetchResult(url, url, 0, "", "", error="rejected: not in whitelist")
-        if self.respect_robots and not self._robots_allow(url):
+        if self.respect_robots and not bypass_robots and not self._robots_allow(url):
             return FetchResult(url, url, 0, "", "", error="rejected: robots.txt")
 
         try:
@@ -149,14 +164,24 @@ class Fetcher:
         try:
             # Manual redirect handling so we can enforce the whitelist on every hop.
             current_url = url
-            for _ in range(6):
-                resp = session.get(
-                    current_url,
-                    headers={"User-Agent": self.user_agent, "Accept": "text/html,*/*"},
-                    timeout=self.timeout,
-                    allow_redirects=False,
-                    stream=True,
-                )
+            verb = (method or "GET").upper()
+            for hop in range(6):
+                request_kwargs = {
+                    "headers": {
+                        "User-Agent": self.user_agent,
+                        "Accept": "text/html,*/*",
+                    },
+                    "timeout": self.timeout,
+                    "allow_redirects": False,
+                    "stream": True,
+                }
+                # POST body only goes out on the first hop; redirects fall
+                # back to GET to match standard browser behaviour and avoid
+                # re-submitting form data to an unrelated endpoint.
+                if verb == "POST" and hop == 0:
+                    resp = session.post(current_url, data=data or {}, **request_kwargs)
+                else:
+                    resp = session.get(current_url, **request_kwargs)
                 status = getattr(resp, "status_code", 0)
                 if status in (301, 302, 303, 307, 308):
                     loc = resp.headers.get("Location") or resp.headers.get("location")
@@ -182,7 +207,11 @@ class Fetcher:
                             "",
                             error=f"redirect leaves whitelist: {next_url}",
                         )
-                    if self.respect_robots and not self._robots_allow(next_url):
+                    if (
+                        self.respect_robots
+                        and not bypass_robots
+                        and not self._robots_allow(next_url)
+                    ):
                         return FetchResult(
                             url,
                             next_url,
@@ -203,10 +232,14 @@ class Fetcher:
             content_type = (
                 (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
             )
-            if content_type and not (
-                content_type.startswith("text/")
-                or "html" in content_type
-                or "xml" in content_type
+            if (
+                content_type
+                and not allow_non_html
+                and not (
+                    content_type.startswith("text/")
+                    or "html" in content_type
+                    or "xml" in content_type
+                )
             ):
                 return FetchResult(
                     url,
