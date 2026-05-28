@@ -14,15 +14,13 @@ Bug 2 — Windows PermissionError on temp-dir cleanup (WinError 32):
 
 import shutil
 import tempfile
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pithos.agent.agent import OllamaAgent
-from pithos.agent.compaction import CompactionConfig, MemoryCompactor
-from pithos.agent.recall import RecallConfig, AutoRecall
-from pithos.context import AgentContext
-
+from pithos.agent.ollama_agent import OllamaAgent
+from pithos.agent.compaction import CompactionConfig
+from pithos.agent.recall import RecallConfig
 
 # ---------------------------------------------------------------------------
 # Helpers

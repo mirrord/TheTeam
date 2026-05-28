@@ -57,6 +57,15 @@ web = [
   "beautifulsoup4>=4.12.0",
   "trafilatura>=1.6.0",
 ]
+talos = [
+  "rich>=13.0.0",
+  "numpy>=1.24.0",
+  "sounddevice>=0.4.6",
+  "openai-whisper>=20231117",
+  "torch>=2.0.0",
+  "kokoro-onnx>=0.5.0",
+  "python-telegram-bot>=21.0",
+]
 
 [project.scripts]
 pithos = "pithos.__main__:main"
@@ -71,6 +80,7 @@ pithos-diagnostic = "pithos.diagnostic:main"
 pithos-eval = "pithos.eval.cli:main"
 pithos-research = "pithos.tools.web_researcher.cli:main"
 theteam = "theteam.server:main"
+talos = "talos.__main__:main"
 
 [project.urls]
 Documentation = "https://github.com/mirrord/theteam#readme"
