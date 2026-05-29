@@ -7,7 +7,7 @@ name = "theteam"
 dynamic = ["version"]
 description = "Local-first LLM agent coordination and development suite"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 license = "MIT"
 keywords = ["llm", "agent", "ai", "workflow", "coordination"]
 authors = [
