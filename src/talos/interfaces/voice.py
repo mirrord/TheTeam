@@ -19,6 +19,7 @@ import time
 import string
 from queue import Queue
 from typing import Any
+from pathlib import Path
 
 from pithos.agent import Agent
 
@@ -33,10 +34,10 @@ VOICE_PROMPT_PREFIX = "Respond in 20 words or less. "
 # Whisper expects 16 kHz mono int16 audio.
 SAMPLE_RATE = 16_000
 
-# Notification tone parameters (generated programmatically — no asset file needed).
-_TONE_FREQ_HZ = 440.0
-_TONE_DURATION_S = 0.3
-_TONE_AMPLITUDE = 0.5
+# read from mp3 file
+_BEEP_MP3_BYTES = open(
+    Path(__file__).parent.parent / "assets" / "beep.mp3", "rb"
+).read()
 
 
 def _require(module: str, extra: str = "talos") -> None:
@@ -66,7 +67,8 @@ class VoiceInterface:
         if VOICE_CONTEXT_NAME in agent.contexts:
             agent.contexts[VOICE_CONTEXT_NAME].set_system_prompt(prefix_prompt)
         else:
-            agent.create_context(VOICE_CONTEXT_NAME, system_prompt=prefix_prompt)
+            agent.copy_context(agent.current_context, VOICE_CONTEXT_NAME)
+            agent.prefix_system_prompt(prefix_prompt)
 
     # ------------------------------------------------------------------
     # Lazy loaders
@@ -108,14 +110,17 @@ class VoiceInterface:
     # ------------------------------------------------------------------
 
     def _play_tone(self) -> None:
-        """Play a short sine-wave beep to signal that recording has begun."""
+        """Play MP3 bytes directly from memory using sounddevice."""
+        import io
+        from pydub import AudioSegment  # type: ignore
+
         np = self._np
-        n_samples = int(_TONE_DURATION_S * SAMPLE_RATE)
-        t = np.linspace(0.0, _TONE_DURATION_S, n_samples, endpoint=False)
-        tone = (_TONE_AMPLITUDE * np.sin(2.0 * np.pi * _TONE_FREQ_HZ * t)).astype(
-            np.float32
+        audio = AudioSegment.from_file(io.BytesIO(_BEEP_MP3_BYTES), format="mp3")
+        samples = (
+            audio.set_frame_rate(SAMPLE_RATE).set_channels(1).get_array_of_samples()
         )
-        self._sd.play(tone, SAMPLE_RATE)
+        float_audio = np.array(samples).astype(np.float32) / 32768.0
+        self._sd.play(float_audio, SAMPLE_RATE)
         self._sd.wait()
 
     def _record_until_silence(self) -> Any:

@@ -65,6 +65,7 @@ talos = [
   "torch>=2.0.0",
   "kokoro-onnx>=0.5.0",
   "python-telegram-bot>=21.0",
+  "pydub>=0.25.0",
 ]
 
 [project.scripts]

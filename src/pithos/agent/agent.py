@@ -252,6 +252,22 @@ class Agent(ABC):
         """Get the name of the current context."""
         return self.current_context
 
+    def prefix_system_prompt(self, prefix: str) -> None:
+        """Prefix the current system prompt with additional text."""
+        if not self.current_context:
+            raise ValueError("No context selected.")
+        ctx = self.contexts[self.current_context]
+        new_prompt = prefix + "\n\n" + ctx.system_prompt.content
+        ctx.set_system_prompt(new_prompt)
+
+    def suffix_system_prompt(self, suffix: str) -> None:
+        """Suffix the current system prompt with additional text."""
+        if not self.current_context:
+            raise ValueError("No context selected.")
+        ctx = self.contexts[self.current_context]
+        new_prompt = ctx.system_prompt.content + "\n\n" + suffix
+        ctx.set_system_prompt(new_prompt)
+
     def set_system_prompt(self, system_prompt: str) -> None:
         """Set the system prompt for the current context."""
         if not self.current_context:
