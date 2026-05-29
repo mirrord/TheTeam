@@ -89,6 +89,8 @@ include:
   - uname
   # --- Flowcharts (virtual tool) ---
   - flowchart
+  # --- Web research (virtual tool) ---
+  - web-research
 
 # List of tools to exclude (used when mode is 'exclude' or 'all')
 # These are dangerous commands that should never be allowed
@@ -117,6 +119,12 @@ flowcharts:
   timeout: 120
   # Maximum steps per flowchart execution
   max_steps: 100
+
+# Web research virtual tool configuration
+# When enabled, the agent can invoke `web-research <inquiry>` to spin up the
+# subagent-driven crawler. Full settings live in web_research_config.yaml.
+web_research:
+  enabled: true
 
 # Manual tool descriptions (override auto-discovered descriptions)
 descriptions:
@@ -183,3 +191,4 @@ descriptions:
   date: "Display or set the system date"
   uname: "Display system information (Unix)"
   flowchart: "Run a registered pithos flowchart. Usage: flowchart <name> [input text]"
+  web-research: "Subagent-driven web research over whitelisted domains. Usage: web-research <inquiry text>"

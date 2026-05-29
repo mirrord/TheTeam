@@ -96,7 +96,15 @@ def create_app(config=None):
     )
 
     # Register blueprints
-    from theteam.api import agents, flowcharts, chat, system, database, tools
+    from theteam.api import (
+        agents,
+        flowcharts,
+        chat,
+        system,
+        database,
+        tools,
+        eval as eval_api,
+    )
 
     app.register_blueprint(agents.bp)
     app.register_blueprint(flowcharts.bp)
@@ -104,6 +112,7 @@ def create_app(config=None):
     app.register_blueprint(system.bp)
     app.register_blueprint(database.bp)
     app.register_blueprint(tools.bp)
+    app.register_blueprint(eval_api.bp)
 
     # Register SocketIO handlers
     from theteam.api import socketio_handlers

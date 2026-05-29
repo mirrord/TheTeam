@@ -140,6 +140,7 @@ export const useFlowchartStore = create<FlowchartState>((set, get) => ({
             transform: node.transform,
             type: node.type || 'prompt',
             isStartNode,
+            static_inputs: node.static_inputs,
           },
           style: isStartNode ? {
             border: '3px solid #22c55e',

@@ -27,10 +27,18 @@ def get_tool_registry():
 
 @bp.route("/", methods=["GET"])
 def list_tools():
-    """List all available CLI tools."""
+    """List all available CLI tools with metadata."""
     try:
         registry = get_tool_registry()
-        tools = [tool.name for tool in registry.tools.values()]
+        tools = [
+            {
+                "name": tool.name,
+                "description": tool.description,
+                "platform": tool.platform,
+                "source": tool.source,
+            }
+            for tool in registry.tools.values()
+        ]
         return jsonify({"tools": tools}), 200
     except Exception as e:
         logger.error(f"Error listing tools: {e}", exc_info=True)

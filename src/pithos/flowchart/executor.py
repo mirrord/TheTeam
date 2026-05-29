@@ -319,6 +319,19 @@ class FlowchartExecutor:
         for neighbor in neighbors:
             for edge in self._graph[source_node][neighbor].values():
                 condition = edge["traversal_condition"]
+                edge_output_key = edge.get("output_key", "default")
+                edge_input_key = edge.get("input_key", "default")
+
+                # Only forward messages that were emitted on this edge's
+                # ``output_key`` port.  This makes multi-port routing
+                # (e.g. ToolCallNode's ``success``/``failure`` ports) work
+                # exclusively -- the failure edge no longer fires when only
+                # ``success`` messages were produced.
+                edge_messages = [
+                    msg for msg in messages if msg.input_key == edge_output_key
+                ]
+                if not edge_messages:
+                    continue
 
                 if condition.is_open(state):
                     self._node_route_info[neighbor] = EdgeInfo(
@@ -326,16 +339,16 @@ class FlowchartExecutor:
                         to_node=neighbor,
                         condition_type=condition.__class__.__name__,
                         priority=edge.get("priority", 1),
-                        output_key=edge.get("output_key", "default"),
-                        input_key=edge.get("input_key", "default"),
+                        output_key=edge_output_key,
+                        input_key=edge_input_key,
                     )
 
-                    for msg in messages:
+                    for msg in edge_messages:
                         routed_msg = Message(
                             data=msg.data,
                             source_node=source_node,
                             target_node=neighbor,
-                            input_key=msg.input_key,
+                            input_key=edge_input_key,
                             metadata=msg.metadata.copy(),
                         )
                         self._router.send_message(routed_msg)

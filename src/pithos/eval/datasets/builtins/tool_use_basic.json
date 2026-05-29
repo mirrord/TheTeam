@@ -1,0 +1,43 @@
+[
+  {
+    "prompt": "Read the file README.md and summarise its first paragraph.",
+    "expected_tools": ["read_file"],
+    "category": "single_tool"
+  },
+  {
+    "prompt": "List the files in the current directory.",
+    "expected_tools": ["list_dir"],
+    "category": "single_tool"
+  },
+  {
+    "prompt": "Search the codebase for the function named 'main'.",
+    "expected_tools": ["grep_search"],
+    "category": "single_tool"
+  },
+  {
+    "prompt": "Find every Python file under src/ and report how many there are.",
+    "expected_tools": ["file_search"],
+    "category": "single_tool"
+  },
+  {
+    "prompt": "Open requirements.txt, then list the directory it lives in.",
+    "expected_tools": ["read_file", "list_dir"],
+    "category": "multi_tool"
+  },
+  {
+    "prompt": "Store the note 'project uses Flask' in long-term memory.",
+    "expected_tools": ["memory_add"],
+    "category": "memory"
+  },
+  {
+    "prompt": "Recall any memory entries about Flask.",
+    "expected_tools": ["memory_search"],
+    "category": "memory"
+  },
+  {
+    "prompt": "Without any tools, just answer: what is 2 + 2?",
+    "expected_tools": [],
+    "category": "no_tool",
+    "penalize_extras": true
+  }
+]

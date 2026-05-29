@@ -99,15 +99,30 @@ def send_message(conversation_id):
 
 @bp.route("/conversations/<conversation_id>/agent", methods=["PUT"])
 def update_conversation_agent(conversation_id):
-    """Update the agent for a conversation."""
-    try:
-        data = request.get_json()
-        if not data or "agent_id" not in data:
-            return jsonify({"error": "No agent_id provided"}), 400
+    """Update the agent (or base model) for a conversation.
 
-        success = chat_service.update_conversation_agent(
-            conversation_id, data["agent_id"]
-        )
+    Accepts one of:
+    - ``{"agent_id": "<id>"}``  — switch to a configured agent.
+    - ``{"base_model": "<model>"}`` — switch to base-model mode using
+      the given Ollama model with no system prompt or tools.
+    """
+    try:
+        data = request.get_json() or {}
+        agent_id = data.get("agent_id")
+        base_model = data.get("base_model")
+
+        if base_model and not agent_id:
+            success = chat_service.update_conversation_base_model(
+                conversation_id, base_model
+            )
+            if not success:
+                return jsonify({"error": "Conversation not found"}), 404
+            return jsonify({"message": "Base model updated"}), 200
+
+        if not agent_id:
+            return jsonify({"error": "No agent_id or base_model provided"}), 400
+
+        success = chat_service.update_conversation_agent(conversation_id, agent_id)
         if not success:
             return jsonify({"error": "Conversation not found"}), 404
 
@@ -116,4 +131,29 @@ def update_conversation_agent(conversation_id):
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         logger.error(f"Error updating agent for {conversation_id}: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/conversations/<conversation_id>/tools", methods=["PUT"])
+def update_conversation_tools(conversation_id):
+    """Set the per-conversation enabled-tools allow-list.
+
+    Body: ``{"enabled_tools": ["git", "python"]}`` to allow-list,
+    ``{"enabled_tools": []}`` to disable all tools, or
+    ``{"enabled_tools": null}`` to clear the override.
+    """
+    try:
+        data = request.get_json() or {}
+        if "enabled_tools" not in data:
+            return jsonify({"error": "No enabled_tools provided"}), 400
+        tools = data["enabled_tools"]
+        if tools is not None and not isinstance(tools, list):
+            return jsonify({"error": "enabled_tools must be a list or null"}), 400
+
+        success = chat_service.update_conversation_tools(conversation_id, tools)
+        if not success:
+            return jsonify({"error": "Conversation not found"}), 404
+        return jsonify({"message": "Tools updated"}), 200
+    except Exception as e:
+        logger.error(f"Error updating tools for {conversation_id}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500

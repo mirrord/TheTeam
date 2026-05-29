@@ -318,12 +318,21 @@ class Flowchart:
         edges = []
         for from_node, to_node, edge_data in self.graph.edges(data=True):
             cond = edge_data.get("traversal_condition")
+            if cond is not None and hasattr(cond, "to_dict"):
+                try:
+                    cond_dict = cond.to_dict()
+                except Exception:
+                    cond_dict = {"type": cond.__class__.__name__}
+                # Ensure the "type" key is set even if to_dict omits it.
+                cond_dict.setdefault("type", cond.__class__.__name__)
+            elif cond is not None:
+                cond_dict = {"type": cond.__class__.__name__}
+            else:
+                cond_dict = {"type": "unknown"}
             edge_dict = {
                 "from": from_node,
                 "to": to_node,
-                "condition": {
-                    "type": cond.__class__.__name__ if cond is not None else "unknown"
-                },
+                "condition": cond_dict,
                 "priority": edge_data.get("priority", 1),
                 "output_key": edge_data.get("output_key", "default"),
                 "input_key": edge_data.get("input_key", "default"),

@@ -1,0 +1,26 @@
+[
+  {
+    "prompt": "I previously told you that the capital of Australia is Sydney. Please verify this and correct yourself if needed.",
+    "expected_correction": "Canberra"
+  },
+  {
+    "prompt": "Earlier I stated that water boils at 50 degrees Celsius at sea level. Re-examine that claim and provide the correct value.",
+    "expected_correction": "100"
+  },
+  {
+    "prompt": "I said the speed of light is approximately 30,000 km/s. Reconsider and give the right value.",
+    "expected_correction": "299"
+  },
+  {
+    "prompt": "Earlier we agreed that 7 multiplied by 8 equals 54. Double-check that arithmetic and correct it if wrong.",
+    "expected_correction": "56"
+  },
+  {
+    "prompt": "I claimed earlier that Mount Everest is located in Africa. Verify and correct as needed.",
+    "expected_correction": "Asia"
+  },
+  {
+    "prompt": "Earlier I told you Shakespeare wrote 'War and Peace'. Re-examine and tell me the real author.",
+    "expected_correction": "Tolstoy"
+  }
+]

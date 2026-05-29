@@ -1,5 +1,5 @@
 import { Outlet, Link, useLocation } from 'react-router-dom'
-import { MessageSquare, Network, Settings, Activity } from 'lucide-react'
+import { MessageSquare, Network, Settings, Activity, Database, BarChart2 } from 'lucide-react'
 import ConnectionStatus from './ConnectionStatus'
 import { ToastContainer } from './ToastContainer'
 
@@ -10,6 +10,8 @@ export default function Layout() {
     { path: '/flowcharts', icon: Network, label: 'Flowcharts' },
     { path: '/chat', icon: MessageSquare, label: 'Chat' },
     { path: '/agents', icon: Settings, label: 'Agents' },
+    { path: '/databases', icon: Database, label: 'Databases' },
+    { path: '/benchmarks', icon: BarChart2, label: 'Benchmarks' },
   ]
   
   return (

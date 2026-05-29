@@ -165,15 +165,20 @@ exclude: []
         assert "Test output" in result_text
         assert "Success" in result_text or "✓" in result_text
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_agent_send_with_tool_calls(self, mock_chat, agent, config_manager):
         """Test agent send with tool calling."""
         agent.enable_tools(config_manager)
 
-        # Mock the LLM response with a tool call
-        mock_response = Mock()
-        mock_response.message.content = 'Let me check: runcommand("python --version")'
-        mock_chat.return_value = mock_response
+        # First stream: LLM emits a tool call mid-response.
+        mock_tool_chunk = Mock()
+        mock_tool_chunk.message.content = (
+            'Let me check: runcommand("python --version")\n'
+        )
+        # Continuation stream after tool result injected.
+        mock_cont_chunk = Mock()
+        mock_cont_chunk.message.content = "The Python version is 3.10.0."
+        mock_chat.side_effect = [iter([mock_tool_chunk]), iter([mock_cont_chunk])]
 
         # Mock tool execution
         mock_result = ToolResult(
@@ -209,15 +214,15 @@ exclude: []
         calls = agent._extract_tool_calls('runcommand("test")')
         assert isinstance(calls, list)
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_agent_send_no_tool_calls(self, mock_chat, agent, config_manager):
         """Test agent send without tool calls."""
         agent.enable_tools(config_manager)
 
         # Mock the LLM response without tool calls
-        mock_response = Mock()
-        mock_response.message.content = "Just a regular response"
-        mock_chat.return_value = mock_response
+        mock_chunk = Mock()
+        mock_chunk.message.content = "Just a regular response"
+        mock_chat.return_value = iter([mock_chunk])
 
         # Send message
         response = agent.send("Tell me something", verbose=False)

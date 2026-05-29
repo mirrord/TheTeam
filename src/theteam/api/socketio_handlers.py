@@ -102,6 +102,9 @@ def register_handlers(socketio):
         client_id = request.sid
         conversation_id = data.get("conversation_id")
         message = data.get("message")
+        # Optional per-request tool override (None = use conversation/agent
+        # default; [] = disable all; list = explicit allow-list).
+        enabled_tools = data.get("enabled_tools", None)
 
         if not conversation_id or not message:
             emit("error", {"message": "Missing conversation_id or message"})
@@ -113,6 +116,7 @@ def register_handlers(socketio):
                 message=message,
                 client_id=client_id,
                 socketio=socketio,
+                enabled_tools=enabled_tools,
             )
 
             # Immediate acknowledgment
@@ -216,6 +220,79 @@ def register_handlers(socketio):
             "subscribed",
             {"execution_id": execution_id, "timestamp": datetime.now().isoformat()},
         )
+
+    @socketio.on("start_benchmark")
+    def handle_start_benchmark(data):
+        """Start a benchmark run via SocketIO for real-time progress events."""
+        from flask import request  # noqa: PLC0415
+        from theteam.api.eval import eval_service  # noqa: PLC0415
+
+        client_id = request.sid
+        config_data = data.get("config")
+        options = data.get("options") or {}
+
+        if not config_data:
+            emit("error", {"message": "Missing config"})
+            return
+
+        try:
+            run_id = eval_service.start_run(config_data, options, client_id, socketio)
+            room = f"benchmark_{run_id}"
+            join_room(room)
+            if client_id in active_connections:
+                active_connections[client_id]["rooms"].add(room)
+            emit(
+                "benchmark_run_id",
+                {"run_id": run_id, "timestamp": datetime.now().isoformat()},
+            )
+        except Exception as exc:
+            logger.error("Error starting benchmark: %s", exc, exc_info=True)
+            emit("error", {"message": str(exc)})
+
+    @socketio.on("subscribe_benchmark")
+    def handle_subscribe_benchmark(data):
+        """Subscribe to live progress events for an existing run."""
+        from flask import request  # noqa: PLC0415
+
+        client_id = request.sid
+        run_id = data.get("run_id")
+
+        if not run_id:
+            emit("error", {"message": "Missing run_id"})
+            return
+
+        room = f"benchmark_{run_id}"
+        join_room(room)
+        if client_id in active_connections:
+            active_connections[client_id]["rooms"].add(room)
+
+        emit(
+            "subscribed_benchmark",
+            {"run_id": run_id, "timestamp": datetime.now().isoformat()},
+        )
+
+    @socketio.on("stop_benchmark")
+    def handle_stop_benchmark(data):
+        """Signal a running benchmark to stop."""
+        from theteam.api.eval import eval_service  # noqa: PLC0415
+
+        run_id = data.get("run_id")
+        if not run_id:
+            emit("error", {"message": "Missing run_id"})
+            return
+
+        try:
+            success = eval_service.stop_run(run_id)
+            if success:
+                emit(
+                    "benchmark_stop_ack",
+                    {"run_id": run_id, "timestamp": datetime.now().isoformat()},
+                )
+            else:
+                emit("error", {"message": "Run not found"})
+        except Exception as exc:
+            logger.error("Error stopping benchmark %s: %s", run_id, exc, exc_info=True)
+            emit("error", {"message": str(exc)})
 
     @socketio.on("error")
     def handle_error(error):

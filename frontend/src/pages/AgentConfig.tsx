@@ -3,6 +3,65 @@ import { useAgentStore, Agent, AgentConfig as AgentConfigType } from '../store/a
 import { useFlowchartStore } from '../store/flowchartStore'
 import { Plus, Edit2, Trash2, Play, Save, X } from 'lucide-react'
 
+/**
+ * Normalize a raw agent config (from YAML or the API) into the shape
+ * expected by the edit form.
+ *
+ * The on-disk YAML format stores tool settings as a nested object:
+ *   tools: { enabled, auto_loop, max_iterations }
+ * The edit form instead expects a flat structure:
+ *   tools: string[]          – list of selected tool names
+ *   tool_auto_loop: boolean
+ *   tool_max_iterations: number
+ * This function handles both the legacy object form and the newer flat form.
+ */
+function normalizeAgentConfig(agentId: string, raw: any): AgentConfigType {
+  let tools: string[] = []
+  let tool_auto_loop: boolean = false
+  let tool_max_iterations: number = 5
+
+  if (Array.isArray(raw.tools)) {
+    tools = raw.tools
+    tool_auto_loop = raw.tool_auto_loop ?? false
+    tool_max_iterations = raw.tool_max_iterations ?? 5
+  } else if (raw.tools && typeof raw.tools === 'object') {
+    // Legacy YAML format: tools: { enabled, auto_loop, max_iterations }
+    tool_auto_loop = raw.tools.auto_loop ?? false
+    tool_max_iterations = raw.tools.max_iterations ?? 5
+    tools = []
+  }
+
+  return {
+    id: agentId,
+    name: raw.name ?? agentId,
+    model: raw.model ?? '',
+    system_prompt: raw.system_prompt ?? '',
+    temperature: raw.temperature ?? 0.7,
+    tools,
+    tool_auto_loop,
+    tool_max_iterations,
+    memory_enabled: raw.memory_enabled ?? false,
+    current_context: raw.current_context ?? 'default',
+    flowchart: raw.flowchart ?? '',
+    save_to_file: raw.save_to_file ?? false,
+    compaction: {
+      enabled: raw.compaction?.enabled ?? false,
+      threshold: raw.compaction?.threshold ?? 20,
+      keep_last: raw.compaction?.keep_last ?? 6,
+      summary_model: raw.compaction?.summary_model ?? null,
+      memory_category: raw.compaction?.memory_category ?? 'context_summaries',
+    },
+    recall: {
+      enabled: raw.recall?.enabled ?? false,
+      sources: raw.recall?.sources ?? ['memory', 'history'],
+      n_results: raw.recall?.n_results ?? 5,
+      recall_model: raw.recall?.recall_model ?? null,
+      categories: raw.recall?.categories ?? [],
+      min_relevance: raw.recall?.min_relevance ?? 0.5,
+    },
+  }
+}
+
 export default function AgentConfig() {
   const { agents, fetchAgents, createAgent, updateAgent, deleteAgent, testAgent, loading } = useAgentStore()
   const { flowcharts, fetchFlowcharts } = useFlowchartStore()
@@ -86,11 +145,16 @@ export default function AgentConfig() {
   const handleEdit = (agent: Agent) => {
     setSelectedAgent(agent)
     setIsEditing(true)
-    setAgentType('base_model') // Default to base_model type
-    // Fetch full config
+    setIsCreating(false)
+    setAgentType('base_model')
+    setEditingConfig(null) // Clear previous config while loading
     fetch(`/api/v1/agents/${agent.id}`)
-      .then(res => res.json())
-      .then(data => setEditingConfig(data.agent.config))
+      .then(res => {
+        if (!res.ok) throw new Error(`Failed to load agent (${res.status})`)
+        return res.json()
+      })
+      .then(data => setEditingConfig(normalizeAgentConfig(agent.id, data.agent.config)))
+      .catch(err => console.error('Error fetching agent config:', err))
   }
   
   const handleSave = async () => {
@@ -246,7 +310,11 @@ export default function AgentConfig() {
             
             {/* Configuration form */}
             <div className="flex-1 overflow-y-auto p-6 bg-gray-900">
-              {isEditing && editingConfig ? (
+              {isEditing && !editingConfig ? (
+                <div className="flex items-center justify-center h-32 text-gray-400">
+                  Loading configuration…
+                </div>
+              ) : isEditing && editingConfig ? (
                 <div className="max-w-2xl space-y-6">
                   {/* Basic Info Section */}
                   <div className="space-y-4">

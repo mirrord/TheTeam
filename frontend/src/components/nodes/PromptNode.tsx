@@ -1,6 +1,6 @@
-import { Handle, Position } from 'reactflow'
+import { Handle, Position, useEdges, useReactFlow, NodeProps } from 'reactflow'
 import { MessageSquare, Play, Flag, Edit } from 'lucide-react'
-import { useMemo, useState, Fragment } from 'react'
+import { useMemo, useState, Fragment, useCallback } from 'react'
 
 export interface PromptNodeData {
   label: string
@@ -9,11 +9,14 @@ export interface PromptNodeData {
   isStartNode?: boolean
   isEndNode?: boolean
   onEdit?: () => void
+  static_inputs?: Record<string, string>
 }
 
-export function PromptNode({ data }: { data: PromptNodeData }) {
+export function PromptNode({ id, data }: NodeProps<PromptNodeData>) {
   const [isHovered, setIsHovered] = useState(false)
-  
+  const edges = useEdges()
+  const { setNodes } = useReactFlow()
+
   // Extract variables from prompt template (e.g., {var_name})
   const inputVariables = useMemo(() => {
     if (!data.prompt) return []
@@ -26,13 +29,33 @@ export function PromptNode({ data }: { data: PromptNodeData }) {
     return Array.from(vars)
   }, [data.prompt])
 
-  // Calculate minimum height based on number of input variables
-  // Need at least 40px per handle, plus padding
-  const minHeight = Math.max(100, (inputVariables.length + 2) * 40)
+  const isVariableConnected = useCallback((varName: string) => {
+    return edges.some(e => e.target === id && e.targetHandle === varName)
+  }, [edges, id])
+
+  const handleStaticInputChange = useCallback((varName: string, value: string) => {
+    setNodes(nds => nds.map(node => {
+      if (node.id === id) {
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            static_inputs: { ...(node.data.static_inputs || {}), [varName]: value },
+          },
+        }
+      }
+      return node
+    }))
+  }, [id, setNodes])
+
+  const unconnectedVars = inputVariables.filter(v => !isVariableConnected(v))
+
+  // Calculate minimum height: base handles + extra rows for unconnected var inputs
+  const minHeight = Math.max(100, (inputVariables.length + 2) * 40 + unconnectedVars.length * 28)
   
   return (
     <div 
-      className="px-4 py-3 shadow-lg rounded-lg border-2 border-blue-500 bg-gray-800 min-w-[200px] transition-all hover:shadow-xl hover:border-blue-400 relative"
+      className="px-4 py-3 shadow-lg rounded-lg border-2 border-blue-500 bg-gray-800 min-w-[260px] transition-all hover:shadow-xl hover:border-blue-400 relative"
       style={{ minHeight: `${minHeight}px` }}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
@@ -63,9 +86,10 @@ export function PromptNode({ data }: { data: PromptNodeData }) {
         title="input (default)"
       />
       
-      {/* Additional input handles for each variable (for advanced routing) */}
+      {/* Input handles for each template variable */}
       {inputVariables.map((varName, index) => {
         const handleTop = `${((index + 2) * 100) / (inputVariables.length + 2)}%`
+        const isConnected = isVariableConnected(varName)
         return (
           <Fragment key={varName}>
             <Handle
@@ -74,19 +98,17 @@ export function PromptNode({ data }: { data: PromptNodeData }) {
               id={varName}
               style={{
                 top: handleTop,
-                background: '#60a5fa',
+                background: isConnected ? '#60a5fa' : '#93c5fd',
               }}
               title={varName}
             />
-            {/* Show variable name aligned with handle on hover */}
-            {isHovered && (
-              <div 
-                className="absolute left-0 -translate-x-full pr-2"
+            {/* Connected: show label outside on hover */}
+            {isHovered && isConnected && (
+              <div
+                className="absolute left-0 pr-2"
                 style={{ top: handleTop, transform: 'translate(-100%, -50%)' }}
               >
-                <div className="text-xs text-blue-400 whitespace-nowrap">
-                  {varName}
-                </div>
+                <div className="text-xs text-blue-400 whitespace-nowrap">{varName}</div>
               </div>
             )}
           </Fragment>
@@ -110,8 +132,27 @@ export function PromptNode({ data }: { data: PromptNodeData }) {
         )}
       </div>
 
+      {/* Static inputs for unconnected variable handles */}
+      {unconnectedVars.length > 0 && (
+        <div className="mt-2 space-y-1.5">
+          {unconnectedVars.map(varName => (
+            <div key={varName} className="flex items-center gap-1.5">
+              <span className="text-xs text-blue-400 shrink-0 font-mono">{varName}:</span>
+              <input
+                type="text"
+                value={(data.static_inputs || {})[varName] || ''}
+                placeholder="static value"
+                onChange={e => handleStaticInputChange(varName, e.target.value)}
+                onMouseDown={e => e.stopPropagation()}
+                className="flex-1 min-w-0 text-xs bg-gray-700 border border-gray-600 rounded px-1.5 py-0.5 text-gray-200 focus:outline-none focus:border-blue-500 placeholder-gray-500"
+              />
+            </div>
+          ))}
+        </div>
+      )}
+
       {data.prompt && (
-        <div className="text-xs text-gray-400 mt-2 max-w-[200px] truncate">
+        <div className="text-xs text-gray-400 mt-2 max-w-[230px] truncate">
           {data.prompt}
         </div>
       )}

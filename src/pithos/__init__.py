@@ -1,6 +1,9 @@
 """pithos - Agentic LLM interaction framework."""
 
-from .agent import Agent, OllamaAgent, EXLAgent, LlamacppAgent
+from .agent import Agent, OllamaAgent
+
+# EXLAgent / LlamacppAgent are stub backends (not yet implemented). Import them
+# explicitly via pithos.agent.exl_agent / pithos.agent.llamacpp_agent if needed.
 from .agent.history import ConversationStore, HistorySearchResult, MessageRecord
 from .agent.compaction import CompactionConfig, MemoryCompactor
 from .agent.recall import RecallConfig, AutoRecall
@@ -19,7 +22,20 @@ from .flownode import (
     FileInputNode,
     FileOutputNode,
 )
-from .conditions import Condition, CountCondition, RegexCondition, AlwaysCondition
+from .coding_nodes import (
+    RouterNode,
+    JsonParseNode,
+    ListFilesNode,
+    EditFileNode,
+    GitNode,
+)
+from .conditions import (
+    Condition,
+    CountCondition,
+    RegexCondition,
+    AlwaysCondition,
+    PredicateCondition,
+)
 from .config_manager import ConfigManager
 from .message import Message, MessageRouter, NodeInputState
 from .metrics import MetricsCollector
@@ -27,8 +43,6 @@ from .metrics import MetricsCollector
 __all__ = [
     "Agent",
     "OllamaAgent",
-    "EXLAgent",
-    "LlamacppAgent",
     "AgentContext",
     "Msg",
     "UserMsg",
@@ -47,10 +61,16 @@ __all__ = [
     "ChatOutputNode",
     "FileInputNode",
     "FileOutputNode",
+    "RouterNode",
+    "JsonParseNode",
+    "ListFilesNode",
+    "EditFileNode",
+    "GitNode",
     "Condition",
     "CountCondition",
     "RegexCondition",
     "AlwaysCondition",
+    "PredicateCondition",
     "ConfigManager",
     "Message",
     "MessageRouter",

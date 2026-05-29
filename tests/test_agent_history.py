@@ -488,14 +488,15 @@ class TestAgentSearchHistory:
 
 @pytest.fixture
 def mock_ollama_response():
-    """Fake ChatResponse returned by ollama.chat."""
-    response = MagicMock()
-    response.message.content = "Mocked agent response"
-    return response
+    """Fake streaming response returned by ollama.chat (list of chunks)."""
+    chunk = MagicMock()
+    chunk.message.content = "Mocked agent response"
+    # Return a list so it can be iterated safely for multiple send() calls.
+    return [chunk]
 
 
 class TestAgentSendHistoryIntegration:
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_send_persists_user_and_agent_messages(
         self, mock_chat, agent, tmp_dir, mock_ollama_response
     ):
@@ -508,7 +509,7 @@ class TestAgentSendHistoryIntegration:
         assert "user" in roles
         assert "assistant" in roles
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_send_sets_last_history_message_id(
         self, mock_chat, agent, tmp_dir, mock_ollama_response
     ):
@@ -517,7 +518,7 @@ class TestAgentSendHistoryIntegration:
         agent.send("Hello")
         assert agent._last_history_message_id is not None
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_tag_current_message_after_send(
         self, mock_chat, agent, tmp_dir, mock_ollama_response
     ):
@@ -533,7 +534,7 @@ class TestAgentSendHistoryIntegration:
         assert "important" in tagged.tags
         assert "bug-fix" in tagged.tags
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_search_history_after_send(
         self, mock_chat, agent, tmp_dir, mock_ollama_response
     ):
@@ -544,7 +545,7 @@ class TestAgentSendHistoryIntegration:
         results = agent.search_history("authentication error", semantic=False)
         assert len(results) > 0
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_send_without_history_works_normally(
         self, mock_chat, agent, mock_ollama_response
     ):
@@ -553,7 +554,7 @@ class TestAgentSendHistoryIntegration:
         response = agent.send("Hello")
         assert response == "Mocked agent response"
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_history_failure_does_not_break_send(
         self, mock_chat, agent, tmp_dir, mock_ollama_response
     ):
@@ -574,7 +575,7 @@ class TestAgentSendHistoryIntegration:
 
 
 class TestAgentStreamHistoryIntegration:
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_stream_persists_after_exhaustion(self, mock_chat, agent, tmp_dir):
         """History is written only after the iterator is fully consumed."""
 
@@ -594,7 +595,7 @@ class TestAgentStreamHistoryIntegration:
         assert "user" in roles
         assert "assistant" in roles
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_stream_sets_last_history_message_id(self, mock_chat, agent, tmp_dir):
         def _chunk(text):
             c = MagicMock()
@@ -606,7 +607,7 @@ class TestAgentStreamHistoryIntegration:
         list(agent.stream("Stream tagging test"))
         assert agent._last_history_message_id is not None
 
-    @patch("pithos.agent.agent.chat")
+    @patch("pithos.agent.ollama_agent.chat")
     def test_tag_after_stream(self, mock_chat, agent, tmp_dir):
         def _chunk(text):
             c = MagicMock()

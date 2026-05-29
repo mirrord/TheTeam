@@ -141,6 +141,30 @@ class ToolRegistry:
 
         # Discover flowcharts as virtual tools
         self._discover_flowcharts(manual_descriptions)
+        # Discover the web-research virtual tool
+        self._discover_web_research(manual_descriptions)
+
+    def _discover_web_research(self, manual_descriptions: dict[str, str]) -> None:
+        """Register the ``web-research`` virtual tool when enabled in config."""
+        wr_config = self.config.get("web_research", {})
+        if not wr_config.get("enabled", False):
+            return
+        if not self.is_allowed("web-research"):
+            return
+
+        description = manual_descriptions.get(
+            "web-research",
+            "Subagent-controlled web research over whitelisted domains. "
+            "Usage: web-research <inquiry text>",
+        )
+        self.tools["web-research"] = ToolMetadata(
+            name="web-research",
+            path="",
+            description=description,
+            platform="cross-platform",
+            source="virtual",
+            tool_type="web_research",
+        )
 
     def _discover_flowcharts(self, manual_descriptions: dict[str, str]) -> None:
         """Register each available flowchart as a virtual tool.
@@ -401,6 +425,7 @@ class ToolRegistry:
 
         cli_lines: list[str] = []
         flowchart_lines: list[str] = []
+        web_research_lines: list[str] = []
 
         for tool_name in sorted(self.tools.keys()):
             tool = self.tools[tool_name]
@@ -412,6 +437,8 @@ class ToolRegistry:
                 else:
                     short = tool_name.removeprefix("flowchart:")
                     flowchart_lines.append(f"      {short}")
+            elif tool.tool_type == "web_research":
+                web_research_lines.append(f"  - {tool_name}: {tool.description}")
             else:
                 cli_lines.append(f"  - {tool_name}: {tool.description}")
 
@@ -423,5 +450,7 @@ class ToolRegistry:
                 "Flowchart tools (use: flowchart <name> [input]):\n"
                 + "\n".join(flowchart_lines)
             )
+        if web_research_lines:
+            sections.append("Web research:\n" + "\n".join(web_research_lines))
 
         return "\n\n".join(sections)

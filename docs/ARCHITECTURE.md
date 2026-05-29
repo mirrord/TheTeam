@@ -15,8 +15,15 @@ This document provides a high-level overview of the architecture, key components
 theteam/
 ├── src/
 │   ├── pithos/              # Core agent framework
-│   │   ├── agent/             # Agent class and core LLM interaction logic
-│   │   │   └── agent.py       # Agent, OllamaAgent, EXLAgent, LlamacppAgent
+│   │   ├── agent/             # Agent classes and core LLM interaction logic
+│   │   │   ├── agent.py       # Agent ABC — context mgmt, tools, memory, history
+│   │   │   ├── ollama_agent.py  # OllamaAgent — streaming-first Ollama backend
+│   │   │   ├── exl_agent.py   # EXLAgent (optional: pip install theteam[exllamav2])
+│   │   │   ├── llamacpp_agent.py  # LlamacppAgent (optional: pip install theteam[llamacpp])
+│   │   │   ├── cli.py         # interactive_chat() and pithos-agent CLI entry point
+│   │   │   ├── compaction.py  # CompactionConfig, MemoryCompactor
+│   │   │   ├── history.py     # ConversationStore, HistorySearchResult
+│   │   │   └── recall.py      # RecallConfig, AutoRecall
 │   │   ├── team/              # Multi-agent coordination
 │   │   │   └── agent_manager.py  # AgentTeam, TeamContext
 │   │   ├── tools/             # Structured tool calling system
@@ -71,23 +78,41 @@ theteam/
 
 ### Layer 1: LLM Interface
 
-The foundation is the `OllamaAgent` class that wraps the Ollama Python client:
+The agent module is split into one file per class.  `OllamaAgent` is the primary
+concrete implementation and follows a **streaming-first** design:
 
 ```
-┌─────────────────────────────────┐
-│     OllamaAgent                 │
-│  - default_model                │
-│  - inference_flowchart          │
-│  - send()                       │
-│  - set_inference_flowchart()    │
-│  - enable_tools()               │
-└─────────────────────────────────┘
+┌─────────────────────────────────────────────┐
+│     Agent  (ABC — agent.py)                 │
+│  - default_model                            │
+│  - contexts: dict[str, AgentContext]        │
+│  - stream()   ← abstract, must implement   │
+│  - send()     ← calls ""join(stream(...))  │
+│  - enable_tools() / enable_memory() / …    │
+└─────────────────────────────────────────────┘
+              ▲
+┌─────────────────────────────────────────────┐
+│     OllamaAgent  (ollama_agent.py)          │
+│  - stream()   ← primary LLM call           │
+│    • yields tokens as they arrive           │
+│    • detects tool calls mid-stream          │
+│    • interrupts, executes tool, continues   │
+│  - _inference_send()  ← chain-of-thought   │
+└─────────────────────────────────────────────┘
 ```
+
+**Streaming-First Design:**
+- `stream()` is the **abstract method** that every backend must implement.
+- `send()` is a **concrete convenience wrapper**: `"".join(self.stream(...))`.
+- Tool calls are detected and executed **during streaming**, not after it:
+  the partial response is committed, the tool result is injected as a `system`
+  message, and a continuation stream is started transparently so callers see
+  an uninterrupted token sequence.
 
 **Key Responsibilities:**
-- Communicate with local Ollama models
+- Communicate with local Ollama models via streaming chat API
 - Manage multiple conversation contexts
-- Handle tool calling integration
+- Handle tool calling integration (mid-stream interruption)
 - Manage optional inference flowchart (chain-of-thought)
 - Serialize/deserialize agent state
 
@@ -222,16 +247,30 @@ User Input
 └─────────────────┘
     │
     v
-┌─────────────────┐
-│  OllamaAgent    │
-│   send()        │
-└─────────────────┘
+┌──────────────────────────────────────┐
+│  OllamaAgent.stream()                │
+│  (primary — yields tokens live)      │
+│  OllamaAgent.send()                  │
+│  (wrapper — joins stream chunks)     │
+└──────────────────────────────────────┘
     │
     v
 ┌─────────────────┐
 │  Ollama API     │
-│  chat()         │
+│  chat(stream=T) │
 └─────────────────┘
+    │   (tokens arrive one by one)
+    v
+┌──────────────────────────────────────┐
+│  Tool scan on each token             │
+│  ──────────────────────────────────  │
+│  tool call detected?                 │
+│    ├─ yes → commit partial response  │
+│    │        execute tool             │
+│    │        inject result            │
+│    │        restart stream           │
+│    └─ no  → yield token to caller   │
+└──────────────────────────────────────┘
     │
     v
 ┌─────────────────┐
@@ -246,7 +285,7 @@ Response to User
 ### Chain-of-Thought Guided Inference
 
 When an agent has an inference flowchart attached via `set_inference_flowchart()`,
-every call to `send()` is automatically routed through the flowchart:
+every call to `stream()` / `send()` is automatically routed through the flowchart:
 
 ```
 User Input
@@ -329,34 +368,47 @@ User Input
 └──────────────────┘
 ```
 
-### Tool Calling Flow
+### Tool Calling Flow (Mid-Stream)
 
 ```
 User: "What version of Python is installed?"
     │
     v
-Agent Response: runcommand("python --version")
+┌──────────────────────────────────────┐
+│  OllamaAgent.stream()                │
+│  Ollama API streams tokens …         │
+└──────────────────────────────────────┘
+    │  token by token …
+    v
+┌──────────────────────────────────────┐
+│  Tool call detected mid-stream       │
+│  e.g. RUN: python --version          │
+└──────────────────────────────────────┘
     │
     v
 ┌──────────────────┐
-│  Tool Parsing    │
-│  Extract command │
+│  Commit partial  │
+│  response to ctx │
 └──────────────────┘
     │
     v
 ┌──────────────────┐
-│ ToolExecutor     │
-│ execute()        │
+│  ToolExecutor    │
+│  execute()       │
 └──────────────────┘
     │
     v
 ┌──────────────────┐
-│ System Execution │
-│ (subprocess)     │
+│  Inject result   │
+│  as system msg   │
 └──────────────────┘
     │
     v
-Result added to conversation
+┌──────────────────────────────────────┐
+│  Restart stream() (continuation)     │
+│  Model sees its output + tool result │
+│  and continues responding            │
+└──────────────────────────────────────┘
     │
     v
 Agent sees result & responds naturally
@@ -524,6 +576,32 @@ See the [GitHub Issues tracker](https://github.com/mirrord/theteam/issues) for t
 3. **Advanced Security**: Sandboxed code execution for custom nodes
 4. **Distributed Systems**: Network protocols for agent communication across machines
 5. **Plugin System**: External plugin architecture for custom node types
+
+## Backends
+
+Three LLM backends are supported.  Only `OllamaAgent` is part of the
+default install; the others are gated behind optional dependency extras
+so that installing TheTeam does not pull in heavyweight GPU/quantization
+runtimes by default.
+
+| Backend | Module | Install | Notes |
+|---|---|---|---|
+| **OllamaAgent** | `pithos.agent.ollama_agent` | bundled | Default backend. Talks to a running Ollama server. |
+| **LlamacppAgent** | `pithos.agent.llamacpp_agent` | `pip install theteam[llamacpp]` | In-process GGUF inference via `llama-cpp-python`. `default_model` is a path to a `.gguf` file; `backend_options` are forwarded to `Llama(...)`. |
+| **EXLAgent** | `pithos.agent.exl_agent` | `pip install theteam[exllamav2]` | In-process quantized GPU inference via `exllamav2`. `default_model` is the model directory; chat templating uses the embedded HF tokenizer. |
+
+The optional backends are intentionally **not** re-exported from
+`pithos.agent`; import them explicitly from their submodule.  Importing
+the submodule always succeeds, but constructing the agent without the
+backend package installed raises `ImportError` with installation
+guidance.
+
+All three backends share the same orchestration layer (streaming,
+mid-stream tool calls, recall, history, compaction, metrics) implemented
+in `Agent.stream()`.  Subclasses only implement the
+`_raw_stream(messages, model, options)` hook plus an optional
+`_wrap_backend_error()` and `_extract_token_usage()` override.  When
+adding a new backend, follow this same pattern.
 
 ## Related Documentation
 

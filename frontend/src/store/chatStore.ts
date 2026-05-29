@@ -15,6 +15,8 @@ export interface Conversation {
   id: string
   title: string
   agent_id?: string
+  base_model?: string | null
+  enabled_tools?: string[] | null
   created_at: string
   updated_at: string
   message_count: number
@@ -41,6 +43,8 @@ interface ChatState {
   deleteConversation: (id: string) => Promise<void>
   sendMessage: (conversationId: string, message: string) => Promise<void>
   updateAgent: (conversationId: string, agent_id: string) => Promise<void>
+  updateBaseModel: (conversationId: string, base_model: string) => Promise<void>
+  updateEnabledTools: (conversationId: string, enabled_tools: string[] | null) => Promise<void>
   setCurrentConversation: (conversation: ConversationDetail | null) => void
   addMessage: (message: Message) => void
   setProcessing: (conversationId: string, processing: boolean) => void
@@ -151,7 +155,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const current = get().currentConversation
       if (current && current.id === conversationId) {
         set({
-          currentConversation: { ...current, agent_id },
+          currentConversation: { ...current, agent_id, base_model: null },
           loading: false,
         })
       } else {
@@ -159,6 +163,49 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     } catch (error: any) {
       set({ error: error.message, loading: false })
+      throw error
+    }
+  },
+
+  updateBaseModel: async (conversationId: string, base_model: string) => {
+    set({ loading: true, error: null })
+    try {
+      const response = await fetch(`/api/v1/chat/conversations/${conversationId}/agent`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ base_model }),
+      })
+      if (!response.ok) throw new Error('Failed to update base model')
+
+      const current = get().currentConversation
+      if (current && current.id === conversationId) {
+        set({
+          currentConversation: { ...current, agent_id: undefined, base_model },
+          loading: false,
+        })
+      } else {
+        set({ loading: false })
+      }
+    } catch (error: any) {
+      set({ error: error.message, loading: false })
+      throw error
+    }
+  },
+
+  updateEnabledTools: async (conversationId: string, enabled_tools: string[] | null) => {
+    try {
+      const response = await fetch(`/api/v1/chat/conversations/${conversationId}/tools`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled_tools }),
+      })
+      if (!response.ok) throw new Error('Failed to update tools')
+      const current = get().currentConversation
+      if (current && current.id === conversationId) {
+        set({ currentConversation: { ...current, enabled_tools } })
+      }
+    } catch (error: any) {
+      set({ error: error.message })
       throw error
     }
   },

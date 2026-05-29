@@ -3,7 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useChatStore, Message } from '../store/chatStore'
 import { useAgentStore } from '../store/agentStore'
 import { useSocketStore } from '../store/socketStore'
-import { Send, Plus, Trash2, Settings } from 'lucide-react'
+import { Send, Plus, Trash2, Settings, Wrench } from 'lucide-react'
+import ToolsSidebar, { ToolInfo } from '../components/ToolsSidebar'
 
 export default function ChatInterface() {
   const { id } = useParams()
@@ -16,6 +17,8 @@ export default function ChatInterface() {
     createConversation,
     deleteConversation,
     updateAgent,
+    updateBaseModel,
+    updateEnabledTools,
     addMessage,
     sending,
     processing,
@@ -35,13 +38,38 @@ export default function ChatInterface() {
   const [availableModels, setAvailableModels] = useState<string[]>([])
   const [showAgentSelector, setShowAgentSelector] = useState(false)
   const [isBaseModelMode, setIsBaseModelMode] = useState(false)
+  // Tools sidebar state
+  const [showToolsSidebar, setShowToolsSidebar] = useState(false)
+  const [availableTools, setAvailableTools] = useState<ToolInfo[]>([])
+  const [enabledTools, setEnabledTools] = useState<string[]>([])
+  // Live agent status (drives the "Thinking / Using tool ..." indicator)
+  const [agentStatus, setAgentStatus] = useState<
+    { status: string; detail?: string | null } | null
+  >(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   
   useEffect(() => {
     fetchConversations()
     fetchAgents()
     fetchModels()
+    fetchTools()
   }, [])
+
+  const fetchTools = async () => {
+    try {
+      const response = await fetch('/api/v1/tools/')
+      if (response.ok) {
+        const data = await response.json()
+        // Backend returns an array of {name, description, platform, source}
+        const tools: ToolInfo[] = (data.tools || []).map((t: any) =>
+          typeof t === 'string' ? { name: t } : t
+        )
+        setAvailableTools(tools)
+      }
+    } catch (error) {
+      console.error('Error fetching tools:', error)
+    }
+  }
   
   const fetchModels = async () => {
     try {
@@ -67,8 +95,34 @@ export default function ChatInterface() {
   useEffect(() => {
     if (currentConversation) {
       setSelectedAgent(currentConversation.agent_id)
+      // Detect base-model mode from persisted conversation state
+      const baseModel = (currentConversation as any).base_model as string | undefined
+      if (baseModel) {
+        setIsBaseModelMode(true)
+        setSelectedModel(baseModel)
+      } else {
+        setIsBaseModelMode(false)
+      }
+      // Initialize enabled tools: persisted override > agent's tools > all available
+      const persisted = (currentConversation as any).enabled_tools as
+        | string[]
+        | null
+        | undefined
+      if (persisted !== undefined && persisted !== null) {
+        setEnabledTools(persisted)
+      } else if (currentConversation.agent_id) {
+        const agent = agents.find((a) => a.id === currentConversation.agent_id)
+        const agentTools = (agent as any)?.tools as string[] | undefined
+        if (Array.isArray(agentTools)) {
+          setEnabledTools(agentTools)
+        } else {
+          setEnabledTools(availableTools.map((t) => t.name))
+        }
+      } else {
+        setEnabledTools(availableTools.map((t) => t.name))
+      }
     }
-  }, [currentConversation])
+  }, [currentConversation, agents, availableTools])
   
   // Auto-scroll to bottom whenever messages or streaming content change
   const activeStreaming = currentConversation ? streamingMessages[currentConversation.id] : null
@@ -120,6 +174,13 @@ export default function ChatInterface() {
       console.log('🏁 stream_end received:', data)
       if (currentConversation && data.conversation_id === currentConversation.id) {
         finalizeStreaming(data.conversation_id, data.message)
+        setAgentStatus(null)
+      }
+    }
+
+    const handleAgentStatus = (data: any) => {
+      if (currentConversation && data.conversation_id === currentConversation.id) {
+        setAgentStatus({ status: data.status, detail: data.detail })
       }
     }
     
@@ -129,6 +190,7 @@ export default function ChatInterface() {
     on('stream_start', handleStreamStart)
     on('stream_chunk', handleStreamChunk)
     on('stream_end', handleStreamEnd)
+    on('agent_status', handleAgentStatus)
     
     console.log('✅ Socket handlers registered')
     
@@ -140,6 +202,7 @@ export default function ChatInterface() {
       off('stream_start', handleStreamStart)
       off('stream_chunk', handleStreamChunk)
       off('stream_end', handleStreamEnd)
+      off('agent_status', handleAgentStatus)
     }
   }, [currentConversation, on, off, addMessage, setProcessing, startStreaming, appendStreamChunk, finalizeStreaming])
   
@@ -157,12 +220,15 @@ export default function ChatInterface() {
     
     // Set processing state immediately
     setProcessing(currentConversation.id, true)
+    setAgentStatus({ status: 'thinking' })
     
-    // Send via WebSocket — streaming is enabled by default
+    // Send via WebSocket — streaming is enabled by default. Forward the
+    // current enabled-tools selection so the backend can filter accordingly.
     emit('chat_message', {
       conversation_id: currentConversation.id,
       message: inputMessage,
       stream: true,
+      enabled_tools: enabledTools,
     })
     
     setInputMessage('')
@@ -186,12 +252,17 @@ export default function ChatInterface() {
     if (!currentConversation) return
     
     if (agentId === 'base_model') {
-      // Switch to base model mode
+      // Switch to base model mode. Pick a model immediately and persist.
       setIsBaseModelMode(true)
       setSelectedAgent(undefined)
-      // Use the first available model if not already selected
-      if (!selectedModel && availableModels.length > 0) {
-        setSelectedModel(availableModels[0])
+      const modelToUse = selectedModel || availableModels[0] || ''
+      if (modelToUse) {
+        setSelectedModel(modelToUse)
+        try {
+          await updateBaseModel(currentConversation.id, modelToUse)
+        } catch (e) {
+          console.error('Failed to set base model:', e)
+        }
       }
     } else {
       // Regular agent mode
@@ -204,33 +275,37 @@ export default function ChatInterface() {
   const handleModelChange = async (model: string) => {
     if (!currentConversation) return
     setSelectedModel(model)
-    
-    // In base model mode, create a temporary agent with default parameters
     if (isBaseModelMode) {
-      // Create a temporary agent config
-      const tempAgentConfig = {
-        id: `temp_${Date.now()}`,
-        name: `Base Model - ${model}`,
-        model: model,
-        system_prompt: '',
-        temperature: 0.7,
-        tools: [],
-      }
-      
-      // Send config to use this model
       try {
-        const response = await fetch(`/api/v1/chat/conversations/${currentConversation.id}/agent`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ agent_config: tempAgentConfig }),
-        })
-        if (!response.ok) {
-          console.error('Failed to set base model')
-        }
-      } catch (error) {
-        console.error('Error setting base model:', error)
+        await updateBaseModel(currentConversation.id, model)
+      } catch (e) {
+        console.error('Failed to update base model:', e)
       }
     }
+  }
+
+  const handleToggleTool = (name: string) => {
+    if (!currentConversation) return
+    const next = enabledTools.includes(name)
+      ? enabledTools.filter((n) => n !== name)
+      : [...enabledTools, name]
+    setEnabledTools(next)
+    updateEnabledTools(currentConversation.id, next).catch((e) =>
+      console.error('Failed to update tools:', e)
+    )
+  }
+
+  const handleEnableAllTools = () => {
+    if (!currentConversation) return
+    const all = availableTools.map((t) => t.name)
+    setEnabledTools(all)
+    updateEnabledTools(currentConversation.id, all).catch(console.error)
+  }
+
+  const handleDisableAllTools = () => {
+    if (!currentConversation) return
+    setEnabledTools([])
+    updateEnabledTools(currentConversation.id, []).catch(console.error)
   }
   
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -302,12 +377,26 @@ export default function ChatInterface() {
                   }
                 </p>
               </div>
-              <button
-                onClick={() => setShowAgentSelector(!showAgentSelector)}
-                className="p-2 hover:bg-gray-700 rounded-lg"
-              >
-                <Settings className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setShowToolsSidebar(true)}
+                  className="p-2 hover:bg-gray-700 rounded-lg relative"
+                  title="Manage tools"
+                >
+                  <Wrench className="w-5 h-5" />
+                  {enabledTools.length > 0 && (
+                    <span className="absolute -top-1 -right-1 text-[10px] bg-primary-600 rounded-full px-1.5 min-w-[18px] text-center">
+                      {enabledTools.length}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => setShowAgentSelector(!showAgentSelector)}
+                  className="p-2 hover:bg-gray-700 rounded-lg"
+                >
+                  <Settings className="w-5 h-5" />
+                </button>
+              </div>
             </div>
             
             {/* Agent selector dropdown */}
@@ -329,8 +418,8 @@ export default function ChatInterface() {
                   </select>
                 </div>
                 
-                {/* Show model selector only when Base Model is selected */}
-                {isBaseModelMode && (
+                {/* Show model selector when Base Model is selected (explicitly or by default) */}
+                {(isBaseModelMode || !selectedAgent) && (
                   <div>
                     <label className="block text-sm font-medium mb-2">Select Model:</label>
                     <select
@@ -383,7 +472,9 @@ export default function ChatInterface() {
                         <span className="inline-block w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                         <span className="inline-block w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                       </div>
-                      <span className="text-sm text-gray-400">Thinking...</span>
+                      <span className="text-sm text-gray-400">
+                        {statusLabel(agentStatus)}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -397,6 +488,13 @@ export default function ChatInterface() {
                       {activeStreaming.content}
                       <span className="inline-block w-2 h-4 ml-0.5 bg-gray-400 animate-pulse align-middle" />
                     </div>
+                    {agentStatus &&
+                      (agentStatus.status === 'tool_call' ||
+                        agentStatus.status === 'tool_result') && (
+                        <div className="text-xs text-gray-400 mt-2 italic">
+                          {statusLabel(agentStatus)}
+                        </div>
+                      )}
                   </div>
                 </div>
               )}
@@ -440,6 +538,35 @@ export default function ChatInterface() {
           </div>
         )}
       </div>
+
+      {/* Tool enable/disable sliding sidebar */}
+      <ToolsSidebar
+        isOpen={showToolsSidebar}
+        onClose={() => setShowToolsSidebar(false)}
+        tools={availableTools}
+        enabledTools={enabledTools}
+        onToggle={handleToggleTool}
+        onEnableAll={handleEnableAllTools}
+        onDisableAll={handleDisableAllTools}
+      />
     </div>
   )
+}
+
+function statusLabel(
+  status: { status: string; detail?: string | null } | null
+): string {
+  if (!status) return 'Thinking...'
+  switch (status.status) {
+    case 'thinking':
+      return 'Thinking...'
+    case 'tool_call':
+      return status.detail ? `Using tool: ${status.detail}...` : 'Using tool...'
+    case 'tool_result':
+      return 'Processing tool result...'
+    case 'generating':
+      return 'Generating...'
+    default:
+      return status.detail ? `${status.status}: ${status.detail}` : status.status
+  }
 }

@@ -4,7 +4,6 @@ TheTeam is a local-first LLM agent coordination and development suite. It includ
 - **pithos**: An agentic LLM interaction framework for managing models, contexts, and flowchart-driven workflows
 - **TheTeam**: Modern web interface for agent coordination, drag-and-drop flowchart interaction, and real-time workflow execution
 
-TODO:
 [![PyPI - Version](https://img.shields.io/pypi/v/theteam.svg)](https://pypi.org/project/theteam)
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/theteam.svg)](https://pypi.org/project/theteam)
 
@@ -53,10 +52,26 @@ TODO:
    pip install -e ".[test]"
    ```
 
-5. **Install benchmark dependencies (optional):**
+5. **Install optional LLM backends (optional):**
+
+   The default install talks to a running [Ollama](https://ollama.ai) server.
+   Two additional in-process backends are available behind extras:
+
    ```bash
-   pip install -e ".[benchmark]"
+   pip install -e ".[llamacpp]"    # GGUF inference via llama-cpp-python
+   pip install -e ".[exllamav2]"   # Quantized GPU inference via ExLlamaV2
    ```
+
+   Each backend's class is imported from its own submodule:
+
+   ```python
+   from pithos.agent import OllamaAgent                       # default
+   from pithos.agent.llamacpp_agent import LlamacppAgent       # extras: [llamacpp]
+   from pithos.agent.exl_agent import EXLAgent                 # extras: [exllamav2]
+   ```
+
+   Constructing one of the optional agents without its backend installed
+   raises `ImportError` with installation guidance.
 
 ### From PyPI (Coming Soon)
 
@@ -107,6 +122,7 @@ pithos-agent chat glm-4.7-flash:latest --flowchart simple_reflect
 - **Flowchart Execution**: Guide agent reasoning through configurable flowcharts
 - **Message-Based Routing**: Advanced data flow with explicit message passing between nodes
 - **Tool Calling**: Enable agents to execute CLI commands dynamically
+- **Web Research Tool**: Subagent-driven web crawler (`web-research`) restricted to a configurable domain whitelist, with deduplicated excerpt storage and a cited summary report
 - **Conditions**: Define conditional logic for flowchart branching
 - **Configuration**: YAML-based configuration for agents, flowcharts, and conditions
 - **Serialization**: Save and load agent states, contexts, and flowcharts
@@ -647,6 +663,29 @@ pithos-tools test <tool_name> <args>
 pithos-tools refresh
 ```
 
+### pithos-research
+
+Subagent-driven web research CLI. Requires the optional `web` extra: `pip install -e ".[web]"`.
+
+```bash
+# Ask a question; results constrained to the configured domain whitelist
+pithos-research "What are the major changes in HTTP/3?"
+
+# Override whitelisted domains for this run
+pithos-research "Difference between SSE and WebSockets" \
+    --domains developer.mozilla.org --domains en.wikipedia.org
+
+# Seed the crawl with specific URLs
+pithos-research "Trafilatura extraction pipeline" \
+    --seed-url https://github.com/adbar/trafilatura
+
+# Machine-readable JSON output (summary + sources + stats)
+pithos-research "Python GIL removal status" --json
+```
+
+See [docs/WEB_RESEARCH.md](docs/WEB_RESEARCH.md) for architecture, configuration,
+and the in-flowchart `webresearch` node.
+
 ### pithos-memory
 
 Memory system management CLI for vector database knowledge storage.
@@ -774,41 +813,31 @@ pithos-flowcharts notes auth_v1 "Added OAuth2 support on 2024-03-26"
 
 **See [DATABASE.md](docs/DATABASE.md) for detailed documentation.**
 
-### pithos-benchmark
+### pithos-eval
 
-Run benchmarks to evaluate and compare LLM agents and workflows.
+Evaluate pithos agents, teams, and flowcharts with the unified
+evaluation suite — multi-round, resumable, with trajectory analyzers
+and the C.L.A.S.S. report.
 
 ```bash
-# Run with default configuration
-pithos-benchmark
+# Show available task suites
+pithos-eval list-suites
 
-# Run with custom config
-pithos-benchmark --config my_benchmark.yaml
+# List YAML configs under configs/eval/
+pithos-eval list-configs
 
-# Run specific models only
-pithos-benchmark --models model1 model2
+# Run an evaluation
+pithos-eval run --config configs/eval/example.yaml
 
-# Run with custom number of rounds
-pithos-benchmark --rounds 5
-
-# Generate report from existing results
-pithos-benchmark report --path ./results/2024-03-12-Multi-Benchmark
-
-# List available configs
-pithos-benchmark list-configs
-
-# List available datasets
-pithos-benchmark list-datasets
+# Re-aggregate an existing run
+pithos-eval report --run-dir ./results/2026-05-23-example
 ```
 
-**Features:**
-- YAML-based benchmark configuration
-- Support for multiple dataset types (multiple choice, free-form)
-- Compare different models and flowchart workflows
-- Generate performance charts and statistics
-- CLI overrides for quick iterations
+Built-in datasets ship under `src/pithos/eval/datasets/builtins/`:
+`linguistic_basic` (multi-choice), `tool_use_basic`,
+`memory_recall_basic`, `self_reflection_basic`.
 
-**See [BENCHMARKS.md](docs/BENCHMARKS.md) for detailed documentation.**
+**See [docs/EVALUATION.md](docs/EVALUATION.md) for full documentation.**
 
 ## Configuration
 
@@ -997,8 +1026,7 @@ src/
     services/            # Business logic layer
     static/              # Built frontend assets
 tests/                   # Comprehensive test suite
-configs/                 # YAML configurations
-benchmarks/              # Benchmark suites
+configs/                 # YAML configurations (agents, flowcharts, eval, tools)
 frontend/                # React web interface
   src/                   # Frontend source code
     components/          # UI components
