@@ -1,7 +1,7 @@
 """pithos Agent - Abstract base class for LLM agents."""
 
 from abc import ABC, abstractmethod
-from typing import Optional, Any, Type, TypeVar, Iterator
+from typing import Optional, Any, Type, TypeVar, Iterator, Callable
 import logging
 import uuid
 import yaml
@@ -476,6 +476,7 @@ class Agent(ABC):
         workspace: Optional[str] = None,
         verbose: bool = False,
         model: Optional[str] = None,
+        status_callback: Optional[Callable[[str, Optional[str]], None]] = None,
     ) -> Iterator[str]:
         """Stream response tokens with mid-stream tool execution.
 
@@ -496,6 +497,13 @@ class Agent(ABC):
             workspace: Optional workspace context to prepend.
             verbose: Print conversation details.
             model: Model to use (uses default_model if None).
+            status_callback: Optional callback invoked with progress status
+                updates of the form ``(status, detail)``. Known status
+                values: ``"thinking"`` (before first token), ``"tool_call"``
+                (with tool name in detail, before execution),
+                ``"tool_result"`` (with tool name in detail, after
+                execution), ``"generating"`` (when resuming generation
+                after a tool result).
 
         Yields:
             Text chunks produced by the model.
@@ -552,6 +560,14 @@ class Agent(ABC):
             # Hashes of raw_text for tool calls already executed this turn.
             _seen_raw: set[str] = set()
 
+            # Notify caller that the model is being invoked (pre-first-token).
+            if status_callback is not None:
+                try:
+                    status_callback("thinking", None)
+                except Exception:
+                    pass
+            _first_token_seen = False
+
             for token, raw_chunk in self._raw_stream(messages, model_to_use, options):
                 token = token or ""
                 accumulated += token
@@ -559,6 +575,13 @@ class Agent(ABC):
                     logger.debug("%s", token)
                 if raw_chunk is not None:
                     _last_chunk = raw_chunk
+                if not _first_token_seen and token:
+                    _first_token_seen = True
+                    if status_callback is not None:
+                        try:
+                            status_callback("generating", None)
+                        except Exception:
+                            pass
                 yield token
 
                 # Mid-stream tool detection: only execute newly-seen complete calls.
@@ -569,8 +592,26 @@ class Agent(ABC):
                         for c in new_calls:
                             _seen_raw.add(c.raw_text)
                         context.add_message(AgentMsg(accumulated))
+                        if status_callback is not None:
+                            for c in new_calls:
+                                try:
+                                    status_callback(
+                                        "tool_call",
+                                        (
+                                            (c.command or "").split()[0]
+                                            if getattr(c, "command", None)
+                                            else None
+                                        ),
+                                    )
+                                except Exception:
+                                    pass
                         result_msg = self._execute_tools(new_calls)
                         context.add_message(Msg("system", result_msg))
+                        if status_callback is not None:
+                            try:
+                                status_callback("tool_result", None)
+                            except Exception:
+                                pass
                         if content:
                             self._history_persist(ctx, "user", content)
                         yield from self.stream(
@@ -579,6 +620,7 @@ class Agent(ABC):
                             workspace=workspace,
                             verbose=verbose,
                             model=model,
+                            status_callback=status_callback,
                         )
                         return
 

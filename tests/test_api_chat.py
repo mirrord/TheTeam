@@ -114,3 +114,51 @@ def test_update_agent_404(client):
     svc.update_conversation_agent.return_value = False
     resp = c.put("/api/v1/chat/conversations/1/agent", json={"agent_id": "a"})
     assert resp.status_code == 404
+
+def test_update_base_model_ok(client):
+    c, svc = client
+    svc.update_conversation_base_model.return_value = True
+    resp = c.put('/api/v1/chat/conversations/1/agent', json={'base_model': 'llama3:8b'})
+    assert resp.status_code == 200
+    svc.update_conversation_base_model.assert_called_once_with('1', 'llama3:8b')
+
+
+def test_update_base_model_404(client):
+    c, svc = client
+    svc.update_conversation_base_model.return_value = False
+    resp = c.put('/api/v1/chat/conversations/1/agent', json={'base_model': 'm'})
+    assert resp.status_code == 404
+
+
+def test_update_tools_ok(client):
+    c, svc = client
+    svc.update_conversation_tools.return_value = True
+    resp = c.put('/api/v1/chat/conversations/1/tools', json={'enabled_tools': ['git']})
+    assert resp.status_code == 200
+    svc.update_conversation_tools.assert_called_once_with('1', ['git'])
+
+
+def test_update_tools_clear(client):
+    c, svc = client
+    svc.update_conversation_tools.return_value = True
+    resp = c.put('/api/v1/chat/conversations/1/tools', json={'enabled_tools': None})
+    assert resp.status_code == 200
+
+
+def test_update_tools_missing(client):
+    c, _ = client
+    resp = c.put('/api/v1/chat/conversations/1/tools', json={})
+    assert resp.status_code == 400
+
+
+def test_update_tools_bad_type(client):
+    c, _ = client
+    resp = c.put('/api/v1/chat/conversations/1/tools', json={'enabled_tools': 'git'})
+    assert resp.status_code == 400
+
+
+def test_update_tools_404(client):
+    c, svc = client
+    svc.update_conversation_tools.return_value = False
+    resp = c.put('/api/v1/chat/conversations/1/tools', json={'enabled_tools': []})
+    assert resp.status_code == 404

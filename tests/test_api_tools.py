@@ -20,10 +20,19 @@ def client(make_app, monkeypatch):
 
 def test_list_tools(client):
     c, reg = client
-    reg.tools = {"a": SimpleNamespace(name="a"), "b": SimpleNamespace(name="b")}
+    reg.tools = {
+        "a": SimpleNamespace(
+            name="a", description="da", platform="linux", source="system"
+        ),
+        "b": SimpleNamespace(
+            name="b", description="db", platform="linux", source="system"
+        ),
+    }
     resp = c.get("/api/v1/tools/")
     assert resp.status_code == 200
-    assert sorted(resp.get_json()["tools"]) == ["a", "b"]
+    body = resp.get_json()["tools"]
+    assert sorted(t["name"] for t in body) == ["a", "b"]
+    assert all("description" in t and "source" in t for t in body)
 
 
 def test_get_tool_ok(client):

@@ -1058,3 +1058,36 @@ class TestAgentInferenceFlowchart:
             assert history[0]["role"] == "user"
             assert history[0]["content"] == "Question"
             assert history[-1]["role"] == "assistant"
+
+
+# ---------------------------------------------------------------------------
+# status_callback (added for live UI status reporting)
+# ---------------------------------------------------------------------------
+
+
+class TestOllamaAgentStreamStatusCallback:
+    @patch('pithos.agent.ollama_agent.chat')
+    def test_status_callback_fires_thinking_and_generating(self, mock_chat):
+        """status_callback receives 'thinking' before stream and 'generating' on first token."""
+        chunk1, chunk2 = Mock(), Mock()
+        chunk1.message.content = 'Hi'
+        chunk2.message.content = ' there'
+        mock_chat.return_value = iter([chunk1, chunk2])
+
+        agent = OllamaAgent('glm-4.7-flash')
+        events = []
+        list(agent.stream('q', status_callback=lambda s, d=None: events.append((s, d))))
+
+        statuses = [e[0] for e in events]
+        assert statuses[0] == 'thinking'
+        assert 'generating' in statuses
+
+    @patch('pithos.agent.ollama_agent.chat')
+    def test_status_callback_optional(self, mock_chat):
+        """Existing callers (no status_callback) must still work."""
+        chunk = Mock()
+        chunk.message.content = 'ok'
+        mock_chat.return_value = iter([chunk])
+        agent = OllamaAgent('glm-4.7-flash')
+        # Should not raise
+        assert list(agent.stream('q')) == ['ok']

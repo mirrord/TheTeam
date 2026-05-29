@@ -111,6 +111,31 @@ def test_chat_message_invokes_chat_service(sio_app, monkeypatch):
     events = {r["name"] for r in received}
     assert "message_sent" in events
     fake_chat_service.send_message.assert_called_once()
+    # By default no enabled_tools override should be forwarded.
+    _, kwargs = fake_chat_service.send_message.call_args
+    assert kwargs.get("enabled_tools") is None
+
+
+def test_chat_message_forwards_enabled_tools(sio_app, monkeypatch):
+    fake_chat_service = MagicMock()
+    fake_chat_service.send_message.return_value = "msg-2"
+    import theteam.api.chat as chat_api
+
+    monkeypatch.setattr(chat_api, "chat_service", fake_chat_service)
+
+    client = _client(sio_app)
+    client.get_received()
+    client.emit(
+        "chat_message",
+        {
+            "conversation_id": "c1",
+            "message": "hi",
+            "enabled_tools": ["git", "python"],
+        },
+    )
+    client.get_received()
+    _, kwargs = fake_chat_service.send_message.call_args
+    assert kwargs["enabled_tools"] == ["git", "python"]
 
 
 def test_chat_message_missing_args_emits_error(sio_app):

@@ -173,3 +173,63 @@ def test_send_message_emits_error_on_exception(service):
 
     events = [call.args[2] for call in emit_mock.call_args_list]
     assert "message_error" in events
+
+
+# ---------------------------------------------------------------------------
+# Base-model and per-conversation tools (new in this revision)
+# ---------------------------------------------------------------------------
+
+
+def test_update_base_model_clears_agent(service):
+    cid = service.create_conversation(agent_id='agent-1')
+    assert service.update_conversation_base_model(cid, 'llama3:8b') is True
+    convo = service.get_conversation(cid)
+    assert convo['base_model'] == 'llama3:8b'
+    assert convo['agent_id'] is None
+
+
+def test_update_agent_clears_base_model(service):
+    cid = service.create_conversation()
+    service.update_conversation_base_model(cid, 'llama3:8b')
+    assert service.update_conversation_agent(cid, 'agent-2') is True
+    convo = service.get_conversation(cid)
+    assert convo['agent_id'] == 'agent-2'
+    assert convo['base_model'] is None
+
+
+def test_update_tools_allow_list(service):
+    cid = service.create_conversation()
+    assert service.update_conversation_tools(cid, ['git', 'python']) is True
+    convo = service.get_conversation(cid)
+    assert convo['enabled_tools'] == ['git', 'python']
+
+
+def test_update_tools_clear_override(service):
+    cid = service.create_conversation()
+    service.update_conversation_tools(cid, ['git'])
+    assert service.update_conversation_tools(cid, None) is True
+    convo = service.get_conversation(cid)
+    assert convo['enabled_tools'] is None
+
+
+def test_update_tools_disable_all(service):
+    cid = service.create_conversation()
+    assert service.update_conversation_tools(cid, []) is True
+    convo = service.get_conversation(cid)
+    assert convo['enabled_tools'] == []
+
+
+def test_base_model_persists_across_reload(service, tmp_conversations_dir):
+    cid = service.create_conversation()
+    service.update_conversation_base_model(cid, 'llama3:8b')
+    service.update_conversation_tools(cid, ['git'])
+    # Reload from disk
+    fresh = ChatService(storage_dir=tmp_conversations_dir)
+    convo = fresh.get_conversation(cid)
+    assert convo['base_model'] == 'llama3:8b'
+    assert convo['enabled_tools'] == ['git']
+
+
+def test_update_missing_returns_false(service):
+    assert service.update_conversation_base_model('ghost', 'm') is False
+    assert service.update_conversation_tools('ghost', []) is False

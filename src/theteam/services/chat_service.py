@@ -7,7 +7,7 @@ import uuid
 import json
 import threading
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 from dataclasses import dataclass, asdict
 
@@ -37,6 +37,13 @@ class Conversation:
     created_at: str
     updated_at: str
     messages: list[Message]
+    # When set (and agent_id is None), conversation runs in "base model"
+    # mode using the chosen Ollama model with no system prompt / tools.
+    base_model: Optional[str] = None
+    # Per-conversation tool filter. None = use agent's configured tools;
+    # empty list = no tools enabled; otherwise = explicit allow-list of
+    # tool names that override the agent default for this conversation.
+    enabled_tools: Optional[List[str]] = None
 
     def to_dict(self) -> dict:
         return {
@@ -46,6 +53,8 @@ class Conversation:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "messages": [msg.to_dict() for msg in self.messages],
+            "base_model": self.base_model,
+            "enabled_tools": self.enabled_tools,
         }
 
 
@@ -85,6 +94,8 @@ class ChatService:
                     created_at=data["created_at"],
                     updated_at=data["updated_at"],
                     messages=messages,
+                    base_model=data.get("base_model"),
+                    enabled_tools=data.get("enabled_tools"),
                 )
                 self.conversations[conversation.id] = conversation
 
@@ -115,6 +126,8 @@ class ChatService:
                         "id": conv.id,
                         "title": conv.title,
                         "agent_id": conv.agent_id,
+                        "base_model": conv.base_model,
+                        "enabled_tools": conv.enabled_tools,
                         "created_at": conv.created_at,
                         "updated_at": conv.updated_at,
                         "message_count": len(conv.messages),
@@ -203,6 +216,7 @@ class ChatService:
         message: str,
         client_id: Optional[str] = None,
         socketio=None,
+        enabled_tools: Optional[List[str]] = None,
     ) -> str:
         """Send a message and get agent response (async, always streamed).
 
@@ -211,6 +225,9 @@ class ChatService:
             message: User message content.
             client_id: Optional client identifier for socket events.
             socketio: Optional socket.io instance for real-time updates.
+            enabled_tools: Optional per-request tool override. If provided,
+                takes precedence over the conversation's stored
+                ``enabled_tools`` and the agent config's ``tools`` list.
 
         Returns:
             Message ID of the sent user message.
@@ -233,6 +250,10 @@ class ChatService:
             )
             conversation.messages.append(user_message)
             conversation.updated_at = datetime.now().isoformat()
+            # Persist any per-request tool override on the conversation so
+            # it sticks across reloads.
+            if enabled_tools is not None:
+                conversation.enabled_tools = list(enabled_tools)
             self._save_conversation(conversation)
 
         # Start async processing — use socketio.start_background_task when
@@ -278,17 +299,21 @@ class ChatService:
                 if not conversation:
                     raise ValueError(f"Conversation {conversation_id} not found")
                 agent_id = conversation.agent_id
+                base_model = conversation.base_model
+                enabled_tools = conversation.enabled_tools
 
             agent_service = AgentService()
             agent_config = agent_service.get_agent(agent_id) if agent_id else None
 
             if not agent_config:
-                logger.warning(
-                    f"No agent specified for conversation {conversation_id}, using default"
-                )
-                agent_config = {
-                    "config": {"model": "glm-4.7-flash:latest", "name": "Default Agent"}
-                }
+                # Base-model mode: no agent selected. Use the conversation's
+                # base_model if set, otherwise fall back to a default.
+                model = base_model or "glm-4.7-flash:latest"
+                if not base_model:
+                    logger.warning(
+                        f"No agent or base_model for conversation {conversation_id}, using default"
+                    )
+                agent_config = {"config": {"model": model, "name": "Base Model"}}
 
             if socketio and client_id:
                 emit_to_client(
@@ -309,6 +334,56 @@ class ChatService:
                 temperature=float(config.get("temperature", 0.7)),
             )
 
+            # Pre-populate agent context with prior conversation history.
+            # Exclude the last message (the current user message) because
+            # agent.stream() adds it internally via context.add_message().
+            from pithos.context import Msg
+
+            agent.create_context("default")
+            agent_ctx = agent.contexts["default"]
+            with self.lock:
+                conversation = self.conversations[conversation_id]
+                prior = conversation.messages[:-1]  # everything except current user msg
+            for msg in prior:
+                agent_ctx.add_message(Msg(role=msg.role, content=msg.content))
+
+            # Determine which tools (if any) should be available for this
+            # message. Per-conversation override wins over agent config.
+            agent_tools = config.get("tools")
+            if enabled_tools is not None:
+                effective_tools: Optional[List[str]] = list(enabled_tools)
+            elif isinstance(agent_tools, list):
+                effective_tools = list(agent_tools)
+            else:
+                effective_tools = None
+
+            if effective_tools:
+                try:
+                    from pithos.config_manager import ConfigManager as _CM
+
+                    agent.enable_tools(
+                        _CM(),
+                        auto_loop=bool(config.get("tool_auto_loop", False)),
+                        max_iterations=int(config.get("tool_max_iterations", 5)),
+                    )
+                    # Filter the registry to only the requested tools so the
+                    # system prompt and dispatch are limited accordingly.
+                    if agent.tool_registry is not None:
+                        allowed = set(effective_tools)
+                        agent.tool_registry.tools = {
+                            name: meta
+                            for name, meta in agent.tool_registry.tools.items()
+                            if name in allowed
+                        }
+                        # Re-apply tool prompt now that registry is filtered.
+                        agent._add_tool_prompt_to_contexts()
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to enable tools for conversation %s: %s",
+                        conversation_id,
+                        exc,
+                    )
+
             # Apply inference flowchart if configured
             inference_cfg = config.get("inference")
             if inference_cfg is not None:
@@ -323,19 +398,6 @@ class ChatService:
                         agent_id,
                         exc,
                     )
-
-            # Pre-populate agent context with prior conversation history.
-            # Exclude the last message (the current user message) because
-            # agent.stream() adds it internally via context.add_message().
-            from pithos.context import Msg
-
-            agent.create_context("default")
-            agent_ctx = agent.contexts["default"]
-            with self.lock:
-                conversation = self.conversations[conversation_id]
-                prior = conversation.messages[:-1]  # everything except current user msg
-            for msg in prior:
-                agent_ctx.add_message(Msg(role=msg.role, content=msg.content))
 
             # Pre-allocate the ID that will identify the streaming message
             assistant_message_id = str(uuid.uuid4())
@@ -352,9 +414,37 @@ class ChatService:
                     },
                 )
 
-            # Consume the stream, forwarding every chunk to the client
+            # Consume the stream, forwarding every chunk to the client.
+            # A status_callback is wired into the agent so the frontend can
+            # show a live "Thinking... / Using tool ..." indicator.
+            def _status_cb(status: str, detail: Optional[str] = None) -> None:
+                if socketio and client_id:
+                    emit_to_client(
+                        socketio,
+                        client_id,
+                        "agent_status",
+                        {
+                            "conversation_id": conversation_id,
+                            "message_id": assistant_message_id,
+                            "status": status,
+                            "detail": detail,
+                            "timestamp": datetime.now().isoformat(),
+                        },
+                    )
+
             full_response = ""
-            for chunk in agent.stream(message):
+            stream_kwargs = {}
+            try:
+                # Probe whether the agent supports status_callback (newer
+                # pithos versions) without breaking older signatures.
+                import inspect as _inspect
+
+                if "status_callback" in _inspect.signature(agent.stream).parameters:
+                    stream_kwargs["status_callback"] = _status_cb
+            except Exception:
+                pass
+
+            for chunk in agent.stream(message, **stream_kwargs):
                 full_response += chunk
                 if socketio and client_id:
                     emit_to_client(
@@ -413,6 +503,9 @@ class ChatService:
     def update_conversation_agent(self, conversation_id: str, agent_id: str) -> bool:
         """Update the agent for a conversation.
 
+        Setting a non-empty agent_id clears any base_model override so the
+        conversation switches cleanly out of base-model mode.
+
         Args:
             conversation_id: Conversation identifier.
             agent_id: New agent identifier.
@@ -426,12 +519,57 @@ class ChatService:
                 return False
 
             conversation.agent_id = agent_id
+            conversation.base_model = None
             conversation.updated_at = datetime.now().isoformat()
             self._save_conversation(conversation)
 
             logger.info(
                 f"Updated agent for conversation {conversation_id} to {agent_id}"
             )
+            return True
+
+    def update_conversation_base_model(
+        self, conversation_id: str, base_model: str
+    ) -> bool:
+        """Switch a conversation into base-model mode using the given model.
+
+        Clears any configured agent_id so the streaming path uses the raw
+        Ollama model with no system prompt or tools.
+        """
+        with self.lock:
+            conversation = self.conversations.get(conversation_id)
+            if not conversation:
+                return False
+
+            conversation.agent_id = None
+            conversation.base_model = base_model
+            conversation.updated_at = datetime.now().isoformat()
+            self._save_conversation(conversation)
+
+            logger.info(
+                f"Set base_model for conversation {conversation_id} to {base_model}"
+            )
+            return True
+
+    def update_conversation_tools(
+        self, conversation_id: str, enabled_tools: Optional[List[str]]
+    ) -> bool:
+        """Set the per-conversation tool override.
+
+        Pass ``None`` to clear the override (revert to agent default);
+        pass ``[]`` to explicitly disable all tools; otherwise pass an
+        allow-list of tool names.
+        """
+        with self.lock:
+            conversation = self.conversations.get(conversation_id)
+            if not conversation:
+                return False
+
+            conversation.enabled_tools = (
+                None if enabled_tools is None else list(enabled_tools)
+            )
+            conversation.updated_at = datetime.now().isoformat()
+            self._save_conversation(conversation)
             return True
 
     def add_system_message(self, conversation_id: str, message: str) -> bool:

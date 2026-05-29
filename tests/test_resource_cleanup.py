@@ -32,11 +32,22 @@ def _make_agent(model: str = "test-model") -> OllamaAgent:
 
 
 def _patched_chat(response_text: str = "pong"):
-    """Return a context-manager patch for ollama.chat that succeeds."""
-    mock_response = MagicMock()
-    mock_response.message.content = response_text
-    mock_response.usage = None
-    return patch("pithos.agent.agent.chat", return_value=mock_response)
+    """Return a context-manager patch for ollama.chat that succeeds.
+
+    The current Ollama backend iterates ``chat(...)`` as a streaming
+    response, so the mock must return a fresh iterable on each call.
+    """
+
+    def _make_chunk():
+        chunk = MagicMock()
+        chunk.message.content = response_text
+        chunk.usage = None
+        return chunk
+
+    return patch(
+        "pithos.agent.ollama_agent.chat",
+        side_effect=lambda *a, **kw: iter([_make_chunk()]),
+    )
 
 
 # ===========================================================================
@@ -57,7 +68,8 @@ class TestSendConnectionErrorHandling:
         original_len = len(ctx.message_history)
 
         with patch(
-            "pithos.agent.agent.chat", side_effect=ConnectionRefusedError("refused")
+            "pithos.agent.ollama_agent.chat",
+            side_effect=ConnectionRefusedError("refused"),
         ):
             with pytest.raises((RuntimeError, ConnectionRefusedError)):
                 agent.send("hello")
@@ -69,7 +81,8 @@ class TestSendConnectionErrorHandling:
         agent = _make_agent()
 
         with patch(
-            "pithos.agent.agent.chat", side_effect=OSError("connection timed out")
+            "pithos.agent.ollama_agent.chat",
+            side_effect=OSError("connection timed out"),
         ):
             with pytest.raises(RuntimeError) as exc_info:
                 agent.send("hello")
@@ -83,7 +96,8 @@ class TestSendConnectionErrorHandling:
         agent = _make_agent()
 
         with patch(
-            "pithos.agent.agent.chat", side_effect=OSError("Network unreachable")
+            "pithos.agent.ollama_agent.chat",
+            side_effect=OSError("Network unreachable"),
         ):
             with pytest.raises(RuntimeError):
                 agent.send("ping")
@@ -180,7 +194,8 @@ class TestStreamConnectionErrorHandling:
         original_len = len(ctx.message_history)
 
         with patch(
-            "pithos.agent.agent.chat", side_effect=ConnectionRefusedError("refused")
+            "pithos.agent.ollama_agent.chat",
+            side_effect=ConnectionRefusedError("refused"),
         ):
             with pytest.raises((RuntimeError, ConnectionRefusedError)):
                 list(agent.stream("hello"))
@@ -200,7 +215,10 @@ class TestStreamConnectionErrorHandling:
             "inject_recall",
             side_effect=RuntimeError("stream recall error"),
         ):
-            with patch("pithos.agent.agent.chat", return_value=iter([mock_chunk])):
+            with patch(
+                "pithos.agent.ollama_agent.chat",
+                side_effect=lambda *a, **kw: iter([mock_chunk]),
+            ):
                 chunks = list(agent.stream("ping"))
 
         assert "".join(chunks) == "streamed"

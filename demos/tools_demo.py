@@ -30,7 +30,6 @@ from pithos.tools import (
     ToolExecutor,
     ToolCallExtractor,
     FlowchartToolExecutor,
-    format_tool_result_for_agent,
 )
 
 # ── helpers ──────────────────────────────────────────────────────────────────

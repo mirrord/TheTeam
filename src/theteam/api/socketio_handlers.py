@@ -102,6 +102,9 @@ def register_handlers(socketio):
         client_id = request.sid
         conversation_id = data.get("conversation_id")
         message = data.get("message")
+        # Optional per-request tool override (None = use conversation/agent
+        # default; [] = disable all; list = explicit allow-list).
+        enabled_tools = data.get("enabled_tools", None)
 
         if not conversation_id or not message:
             emit("error", {"message": "Missing conversation_id or message"})
@@ -113,6 +116,7 @@ def register_handlers(socketio):
                 message=message,
                 client_id=client_id,
                 socketio=socketio,
+                enabled_tools=enabled_tools,
             )
 
             # Immediate acknowledgment
