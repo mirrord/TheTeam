@@ -22,15 +22,6 @@ include:
   - python3
   - pip
   - pip3
-  # --- Shell interpreters ---
-  - powershell
-  - pwsh
-  - cmd
-  - bash
-  - sh
-  - wsl
-  # --- Version control ---
-  - git
   # --- Network ---
   - curl
   - wget
@@ -110,6 +101,15 @@ exclude:
   - dd
   - mkfs
   - fdisk
+  # --- Shell interpreters ---
+  - powershell
+  - pwsh
+  - cmd
+  - bash
+  - sh
+  - wsl
+  # --- Version control ---
+  - git
 
 # Flowchart tool configuration
 # Allows agents to run registered flowcharts as tools
@@ -132,13 +132,6 @@ descriptions:
   python3: "Python 3 interpreter"
   pip: "Python package installer"
   pip3: "Python 3 package installer"
-  powershell: "Windows PowerShell — run scripts or commands via powershell -Command \"...\""
-  pwsh: "PowerShell Core (cross-platform) — run scripts or commands via pwsh -Command \"...\""
-  cmd: "Windows Command Prompt — run commands via cmd /c \"...\""
-  bash: "Bash shell — run scripts or commands via bash -c \"...\""
-  sh: "POSIX shell — run scripts or commands via sh -c \"...\""
-  wsl: "Windows Subsystem for Linux — run Linux commands via wsl <command>"
-  git: "Distributed version control system"
   curl: "Transfer data from or to a server using various protocols"
   wget: "Download files from the web"
   ssh: "Secure shell client for remote connections"
