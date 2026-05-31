@@ -572,6 +572,28 @@ class ChatService:
             self._save_conversation(conversation)
             return True
 
+    def rename_conversation(self, conversation_id: str, new_title: str) -> bool:
+        """Rename a conversation.
+
+        Args:
+            conversation_id: Conversation identifier.
+            new_title: New title for the conversation.
+
+        Returns:
+            True if rename successful, False if conversation not found.
+        """
+        with self.lock:
+            conversation = self.conversations.get(conversation_id)
+            if not conversation:
+                return False
+
+            conversation.title = new_title
+            conversation.updated_at = datetime.now().isoformat()
+            self._save_conversation(conversation)
+
+            logger.info(f"Renamed conversation {conversation_id} to '{new_title}'")
+            return True
+
     def add_system_message(self, conversation_id: str, message: str) -> bool:
         """Add a system message to a conversation.
 
