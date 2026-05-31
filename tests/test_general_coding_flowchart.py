@@ -78,6 +78,9 @@ class StubToolRegistry:
     def list_tools(self) -> list[str]:
         return ["python"]
 
+    def requires_confirmation(self, name: str) -> bool:
+        return False
+
 
 # ---------------------------------------------------------------------------
 # Fixture repository

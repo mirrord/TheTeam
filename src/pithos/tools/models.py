@@ -1,7 +1,24 @@
 """Data models for the pithos tool calling system."""
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Optional
+
+
+class RiskLevel(Enum):
+    """Risk classification for a CLI command."""
+
+    SAFE = "safe"
+    REVIEW = "review"  # Requires user confirmation before executing
+    BLOCK = "block"  # Denied outright; subprocess is never called
+
+
+@dataclass
+class SafetyVerdict:
+    """Result of a CommandSafetyChecker evaluation."""
+
+    level: RiskLevel
+    reason: str  # Human-readable explanation shown to agent / logged
 
 
 @dataclass
@@ -36,3 +53,4 @@ class ToolResult:
     execution_time: float
     command: str
     error_hint: Optional[str] = None  # Specific error guidance for agents
+    safety_verdict: Optional["SafetyVerdict"] = None  # Set when safety checker ran

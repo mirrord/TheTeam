@@ -204,3 +204,46 @@ descriptions:
   uname: "Display system information (Unix)"
   flowchart: "Run a registered pithos flowchart. Usage: flowchart <name> [input text]"
   web-research: "Subagent-driven web research over whitelisted domains. Usage: web-research <inquiry text>"
+
+# Command safety analysis configuration
+# Evaluates each command's arguments and flags before execution, independently
+# of the tool allowlist. This catches dangerous patterns even when the tool
+# itself is on the allow list (e.g. `python -c "import os; os.system(...)"`)
+safety:
+  # Master switch — set to false to disable all safety checks
+  enabled: true
+
+  # Detect shell injection operators (;  &&  ||  |  backticks  $(...)  >  2>&1)
+  # These allow arbitrary command chaining regardless of which tool is called.
+  # Verdict: BLOCK (denied outright, no user prompt)
+  block_shell_injection: true
+
+  # Detect known-dangerous command patterns (rm -rf /, curl | bash, dd if=/dev/zero, etc.)
+  # Verdict: BLOCK
+  block_dangerous_patterns: true
+
+  # Detect destructive argument flags (--force, --delete, --purge, --hard, -rf, etc.)
+  # Verdict: REVIEW (routes through user confirmation before executing)
+  review_destructive_flags: true
+
+  # Detect sensitive system path arguments (/etc/, /dev/, C:\Windows\, HKLM, etc.)
+  # Verdict: REVIEW
+  review_sensitive_paths: true
+
+  # Additional regex patterns that should trigger an outright BLOCK.
+  # Evaluated after built-in block checks; useful for site-specific rules.
+  # Example: extra_block_patterns: ["nc\\s+-[le]", "ncat\\s+.*--exec"]
+  extra_block_patterns: []
+
+  # Additional regex patterns that should trigger a REVIEW (user confirmation).
+  # Evaluated after all built-in checks.
+  extra_review_patterns: []
+
+  # Optional LLM-based secondary review for commands that reach REVIEW level.
+  # When enabled, REVIEW-level commands are first assessed by the local LLM;
+  # only commands the LLM deems HARMFUL are escalated to the user prompt.
+  # Off by default to avoid adding latency to every tool call.
+  llm_review:
+    enabled: false
+    # model: ""  # leave blank to use the agent's current model
+    # timeout: 10  # seconds to wait for LLM response before falling back to user prompt

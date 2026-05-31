@@ -5,8 +5,9 @@ import subprocess
 import time
 from typing import Callable, Optional
 
-from .models import ToolResult
+from .models import RiskLevel, ToolResult
 from .registry import ToolRegistry
+from .safety import CommandSafetyChecker
 
 
 class ToolExecutor:
@@ -17,6 +18,7 @@ class ToolExecutor:
         timeout: int = 30,
         max_output_size: int = 10000,
         confirm_callback: Optional[Callable[[str], bool]] = None,
+        safety_checker: Optional[CommandSafetyChecker] = None,
     ):
         """Initialize tool executor.
 
@@ -27,6 +29,11 @@ class ToolExecutor:
                 confirmation.  Receives the full command string and must return
                 True (approved) or False (denied).  When None, confirmation
                 falls back to a CLI prompt via ``rich`` or plain ``input()``.
+            safety_checker: Optional :class:`~pithos.tools.safety.CommandSafetyChecker`
+                instance.  When provided, every command is evaluated before
+                execution — BLOCK verdicts are denied outright; REVIEW verdicts
+                are routed through user confirmation regardless of the registry
+                ``confirm`` mode setting.
 
         Raises:
             ValueError: If timeout or max_output_size is invalid.
@@ -39,6 +46,7 @@ class ToolExecutor:
         self.timeout = timeout
         self.max_output_size = max_output_size
         self.confirm_callback = confirm_callback
+        self.safety_checker = safety_checker
         self.platform = platform.system().lower()
 
     def run(self, command: str, tool_registry: ToolRegistry) -> ToolResult:
@@ -92,8 +100,33 @@ class ToolExecutor:
                 error_hint=hint,
             )
 
-        # Check for confirmation requirement before executing
-        if tool_registry.requires_confirmation(tool_name):
+        # Run heuristic safety analysis on the full command string
+        safety_verdict = None
+        if self.safety_checker is not None:
+            safety_verdict = self.safety_checker.check(command)
+            if safety_verdict.level == RiskLevel.BLOCK:
+                return ToolResult(
+                    success=False,
+                    stdout="",
+                    stderr=f"Command blocked by safety checker: {safety_verdict.reason}",
+                    exit_code=-1,
+                    execution_time=0.0,
+                    command=command,
+                    error_hint=(
+                        "This command was blocked because it contains a pattern considered "
+                        "too dangerous to execute. Rephrase your request without using "
+                        "shell injection operators or known-destructive commands."
+                    ),
+                    safety_verdict=safety_verdict,
+                )
+
+        # Check for confirmation requirement before executing:
+        # • registry-level confirm mode, OR
+        # • safety checker flagged the command as REVIEW
+        needs_confirm = tool_registry.requires_confirmation(tool_name) or (
+            safety_verdict is not None and safety_verdict.level == RiskLevel.REVIEW
+        )
+        if needs_confirm:
             if not self._prompt_confirm(command):
                 return ToolResult(
                     success=False,
@@ -102,6 +135,7 @@ class ToolExecutor:
                     exit_code=-1,
                     execution_time=0.0,
                     command=command,
+                    safety_verdict=safety_verdict,
                 )
 
         # Execute command
@@ -133,6 +167,7 @@ class ToolExecutor:
                 execution_time=execution_time,
                 command=command,
                 error_hint=error_hint,
+                safety_verdict=safety_verdict,
             )
 
         except subprocess.TimeoutExpired:
