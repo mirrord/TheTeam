@@ -3,8 +3,10 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useChatStore, Message } from '../store/chatStore'
 import { useAgentStore } from '../store/agentStore'
 import { useSocketStore } from '../store/socketStore'
+import { useConfirmStore } from '../store/confirmStore'
 import { Send, Plus, Trash2, Settings, Wrench, MoreHorizontal, X, Eye } from 'lucide-react'
 import ToolsSidebar, { ToolInfo } from '../components/ToolsSidebar'
+import { ToolConfirmationModal } from '../components/ToolConfirmationModal'
 
 export default function ChatInterface() {
   const { id } = useParams()
@@ -32,6 +34,7 @@ export default function ChatInterface() {
   
   const { agents, fetchAgents } = useAgentStore()
   const { emit, on, off, connected } = useSocketStore()
+  const { setPendingConfirmation } = useConfirmStore()
   
   const [inputMessage, setInputMessage] = useState('')
   const [selectedAgent, setSelectedAgent] = useState<string | undefined>()
@@ -206,6 +209,15 @@ export default function ChatInterface() {
         setAgentStatus({ status: data.status, detail: data.detail })
       }
     }
+
+    const handleToolConfirmationRequest = (data: any) => {
+      setPendingConfirmation({
+        requestId: data.request_id,
+        command: data.command,
+        conversationId: data.conversation_id,
+        messageId: data.message_id,
+      })
+    }
     
     on('message_response', handleMessageResponse)
     on('message_error', handleMessageError)
@@ -214,6 +226,7 @@ export default function ChatInterface() {
     on('stream_chunk', handleStreamChunk)
     on('stream_end', handleStreamEnd)
     on('agent_status', handleAgentStatus)
+    on('tool_confirmation_request', handleToolConfirmationRequest)
     
     console.log('✅ Socket handlers registered')
     
@@ -226,6 +239,7 @@ export default function ChatInterface() {
       off('stream_chunk', handleStreamChunk)
       off('stream_end', handleStreamEnd)
       off('agent_status', handleAgentStatus)
+      off('tool_confirmation_request', handleToolConfirmationRequest)
     }
   }, [currentConversation, on, off, addMessage, setProcessing, startStreaming, appendStreamChunk, finalizeStreaming])
 
@@ -672,6 +686,9 @@ export default function ChatInterface() {
         onEnableAll={handleEnableAllTools}
         onDisableAll={handleDisableAllTools}
       />
+
+      {/* Tool call confirmation modal */}
+      <ToolConfirmationModal />
 
       {/* Delete confirmation modal */}
       {deleteConfirmId && (

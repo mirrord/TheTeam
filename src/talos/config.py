@@ -27,7 +27,7 @@ DEFAULT_SYSTEM_PROMPT: str = (
 )
 DEFAULT_TEMPERATURE: float = 0.7
 DEFAULT_TOOLS: bool = False
-DEFAULT_TOOLS_MODE: str = "include"  # "all" | "include" | "exclude"
+DEFAULT_TOOLS_MODE: str = "include"  # "all" | "include" | "exclude" | "confirm"
 DEFAULT_TOOLS_AUTO_LOOP: bool = False
 DEFAULT_TOOLS_MAX_ITERATIONS: int = 5
 DEFAULT_MEMORY: bool = False
@@ -59,8 +59,8 @@ class ToolsConfig:
 
     Attributes:
         enabled: Master switch — when False, no tools are loaded.
-        mode: Tool discovery filter — ``"all"``, ``"include"``, or
-            ``"exclude"``.  Overrides the ``mode`` field in
+        mode: Tool discovery filter — ``"all"``, ``"include"``,
+            ``"exclude"``, or ``"confirm"``.  Overrides the ``mode`` field in
             ``configs/tools/tool_config.yaml`` so users can grant Talos
             access to every discovered tool without editing the shared
             tool config.

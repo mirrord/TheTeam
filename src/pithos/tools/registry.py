@@ -370,6 +370,7 @@ class ToolRegistry:
         mode = self.config.get("mode", "include")
         include_list = self.config.get("include", [])
         exclude_list = self.config.get("exclude", [])
+        confirm_list = self.config.get("confirm", [])
 
         if mode == "all":
             # Allow all except those in exclude list
@@ -380,9 +381,28 @@ class ToolRegistry:
         elif mode == "exclude":
             # Allow all except those in exclude list
             return tool_name not in exclude_list
+        elif mode == "confirm":
+            # Only allow tools in confirm list (each call requires user approval)
+            return tool_name in confirm_list
         else:
             # Unknown mode, default to restrictive
             return False
+
+    def requires_confirmation(self, tool_name: str) -> bool:
+        """Check if a tool requires user confirmation before execution.
+
+        Returns True only when ``mode`` is ``"confirm"`` and the tool is in
+        the confirm list.  For all other modes this always returns False.
+
+        Args:
+            tool_name: Name of the tool to check.
+
+        Returns:
+            True if the tool requires confirmation, False otherwise.
+        """
+        if self.config.get("mode") != "confirm":
+            return False
+        return tool_name in self.config.get("confirm", [])
 
     def get_tool(self, name: str) -> Optional[ToolMetadata]:
         """Get metadata for a specific tool.

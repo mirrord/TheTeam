@@ -7,7 +7,7 @@ import uuid
 import json
 import threading
 from pathlib import Path
-from typing import Optional, List
+from typing import Any, Optional, List
 from datetime import datetime
 from dataclasses import dataclass, asdict
 
@@ -78,6 +78,12 @@ class ChatService:
         self._load_conversations()
 
         self.lock = threading.Lock()
+
+        # Pending tool confirmation requests keyed by request_id.
+        # Each entry holds an eventlet (or threading) event that is resolved
+        # when the frontend sends a tool_confirmation_response.
+        self.pending_confirmations: dict[str, Any] = {}
+        self._confirm_lock = threading.Lock()
 
     def _load_conversations(self):
         """Load conversations from disk."""
@@ -402,6 +408,17 @@ class ChatService:
             # Pre-allocate the ID that will identify the streaming message
             assistant_message_id = str(uuid.uuid4())
 
+            # Wire up web-GUI confirmation callback now that we have the
+            # message id.  The callback pauses the eventlet greenlet and asks
+            # the frontend for approval before each tool call.
+            if socketio and client_id and agent.tool_executor is not None:
+                agent.tool_executor.confirm_callback = self._create_confirm_callback(
+                    socketio,
+                    client_id,
+                    conversation_id,
+                    assistant_message_id,
+                )
+
             if socketio and client_id:
                 emit_to_client(
                     socketio,
@@ -499,6 +516,116 @@ class ChatService:
                         "timestamp": datetime.now().isoformat(),
                     },
                 )
+
+    # ------------------------------------------------------------------
+    # Tool confirmation helpers
+    # ------------------------------------------------------------------
+
+    def _create_confirm_callback(
+        self,
+        socketio: Any,
+        client_id: str,
+        conversation_id: str,
+        message_id: str,
+    ):
+        """Return a callable that pauses execution and asks the frontend for approval.
+
+        The callback emits a ``tool_confirmation_request`` SocketIO event and
+        then blocks (yielding the eventlet greenlet) until the frontend replies
+        with ``tool_confirmation_response`` or a 30-second timeout elapses.
+
+        Args:
+            socketio: Flask-SocketIO instance for emitting events.
+            client_id: Target client session id.
+            conversation_id: Active conversation id (sent to the frontend so it
+                can associate the prompt with the right chat window).
+            message_id: In-progress message id.
+
+        Returns:
+            A ``Callable[[str], bool]`` suitable for
+            :attr:`~pithos.tools.ToolExecutor.confirm_callback`.
+        """
+        from theteam.api.socketio_handlers import emit_to_client
+
+        def _callback(command: str) -> bool:
+            request_id = str(uuid.uuid4())
+
+            # Try to use an eventlet event for non-blocking cooperative wait.
+            # Fall back to threading.Event if eventlet is not available.
+            try:
+                import eventlet
+
+                evt = eventlet.event.Event()
+            except (ImportError, AttributeError):
+                evt = threading.Event()
+                evt._result = None  # type: ignore[attr-defined]
+
+            with self._confirm_lock:
+                self.pending_confirmations[request_id] = evt
+
+            emit_to_client(
+                socketio,
+                client_id,
+                "tool_confirmation_request",
+                {
+                    "request_id": request_id,
+                    "command": command,
+                    "conversation_id": conversation_id,
+                    "message_id": message_id,
+                    "timestamp": datetime.now().isoformat(),
+                },
+            )
+
+            approved = False
+            try:
+                if hasattr(evt, "wait") and hasattr(evt, "send"):
+                    # eventlet.event.Event — cooperative wait with timeout
+                    try:
+                        import eventlet
+
+                        with eventlet.Timeout(30):
+                            approved = evt.wait()
+                    except Exception:
+                        approved = False
+                else:
+                    # threading.Event fallback
+                    evt.wait(timeout=30)  # type: ignore[arg-type]
+                    approved = bool(getattr(evt, "_result", False))
+            finally:
+                with self._confirm_lock:
+                    self.pending_confirmations.pop(request_id, None)
+
+            return approved
+
+        return _callback
+
+    def resolve_confirmation(self, request_id: str, approved: bool) -> None:
+        """Resolve a pending tool confirmation request.
+
+        Called by the SocketIO handler when the frontend sends a
+        ``tool_confirmation_response`` event.
+
+        Args:
+            request_id: The id from the original ``tool_confirmation_request``.
+            approved: True if the user approved the tool call, False otherwise.
+        """
+        with self._confirm_lock:
+            evt = self.pending_confirmations.get(request_id)
+
+        if evt is None:
+            # Already timed out or unknown id — no-op
+            return
+
+        if hasattr(evt, "send"):
+            # eventlet.event.Event
+            try:
+                evt.send(approved)
+            except Exception:
+                pass
+        else:
+            # threading.Event fallback
+            evt._result = approved  # type: ignore[attr-defined]
+            evt.set()  # type: ignore[union-attr]
 
     def update_conversation_agent(self, conversation_id: str, agent_id: str) -> bool:
         """Update the agent for a conversation.

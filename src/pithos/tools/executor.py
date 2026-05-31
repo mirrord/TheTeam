@@ -3,7 +3,7 @@
 import platform
 import subprocess
 import time
-from typing import Optional
+from typing import Callable, Optional
 
 from .models import ToolResult
 from .registry import ToolRegistry
@@ -12,12 +12,21 @@ from .registry import ToolRegistry
 class ToolExecutor:
     """Executes CLI tools safely with timeout and output capture."""
 
-    def __init__(self, timeout: int = 30, max_output_size: int = 10000):
+    def __init__(
+        self,
+        timeout: int = 30,
+        max_output_size: int = 10000,
+        confirm_callback: Optional[Callable[[str], bool]] = None,
+    ):
         """Initialize tool executor.
 
         Args:
             timeout: Maximum execution time in seconds.
             max_output_size: Maximum size of captured output in bytes.
+            confirm_callback: Optional callable invoked when a tool requires
+                confirmation.  Receives the full command string and must return
+                True (approved) or False (denied).  When None, confirmation
+                falls back to a CLI prompt via ``rich`` or plain ``input()``.
 
         Raises:
             ValueError: If timeout or max_output_size is invalid.
@@ -29,6 +38,7 @@ class ToolExecutor:
 
         self.timeout = timeout
         self.max_output_size = max_output_size
+        self.confirm_callback = confirm_callback
         self.platform = platform.system().lower()
 
     def run(self, command: str, tool_registry: ToolRegistry) -> ToolResult:
@@ -81,6 +91,18 @@ class ToolExecutor:
                 command=command,
                 error_hint=hint,
             )
+
+        # Check for confirmation requirement before executing
+        if tool_registry.requires_confirmation(tool_name):
+            if not self._prompt_confirm(command):
+                return ToolResult(
+                    success=False,
+                    stdout="Denied by user.",
+                    stderr="",
+                    exit_code=-1,
+                    execution_time=0.0,
+                    command=command,
+                )
 
         # Execute command
         try:
@@ -135,6 +157,44 @@ class ToolExecutor:
                 command=command,
                 error_hint="Tool path may be invalid or tool may not be installed properly.",
             )
+
+    def _prompt_confirm(self, command: str) -> bool:
+        """Ask the user whether to allow a tool call.
+
+        Resolution order:
+        1. ``self.confirm_callback`` — callable injected at construction time
+           (used by the web GUI to route the request over SocketIO).
+        2. ``rich.prompt.Confirm`` — interactive CLI prompt with styling.
+        3. Plain ``input()`` fallback for environments without ``rich``.
+
+        Returns False automatically when stdin is unavailable (headless mode).
+
+        Args:
+            command: Full command string the agent wants to run.
+
+        Returns:
+            True if approved, False if denied.
+        """
+        if self.confirm_callback is not None:
+            return self.confirm_callback(command)
+
+        prompt_text = f"Allow tool call: '{command}'?"
+        try:
+            from rich.prompt import Confirm
+
+            return Confirm.ask(prompt_text)
+        except ImportError:
+            pass
+        except Exception:
+            # rich is available but we're not in an interactive terminal
+            pass
+
+        try:
+            answer = input(f"{prompt_text} [y/N]: ").strip().lower()
+            return answer in ("y", "yes")
+        except (EOFError, OSError):
+            # No stdin available (e.g. running as a background service)
+            return False
 
     def _parse_command(self, command: str) -> tuple[str | None, list[str]]:
         """Parse command string into tool name and arguments.

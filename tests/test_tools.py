@@ -119,6 +119,54 @@ class TestToolRegistry:
         assert registry.is_allowed("git") is True
         assert registry.is_allowed("rm") is False
 
+    def test_is_allowed_confirm_mode(self, mock_config_manager):
+        """Test tool filtering in confirm mode — only confirm list is consulted."""
+        registry = ToolRegistry(mock_config_manager)
+        registry.config = {
+            "mode": "confirm",
+            "include": ["python"],  # should be ignored
+            "exclude": ["rm"],  # should be ignored
+            "confirm": ["bash", "powershell"],
+        }
+        assert registry.is_allowed("bash") is True
+        assert registry.is_allowed("powershell") is True
+        # Not in confirm list — blocked even though it's in include
+        assert registry.is_allowed("python") is False
+        assert registry.is_allowed("rm") is False
+
+    def test_requires_confirmation_confirm_mode_in_list(self, mock_config_manager):
+        """requires_confirmation returns True for a tool in confirm list."""
+        registry = ToolRegistry(mock_config_manager)
+        registry.config = {
+            "mode": "confirm",
+            "confirm": ["bash", "powershell"],
+        }
+        assert registry.requires_confirmation("bash") is True
+        assert registry.requires_confirmation("powershell") is True
+
+    def test_requires_confirmation_confirm_mode_not_in_list(self, mock_config_manager):
+        """requires_confirmation returns False for a tool NOT in confirm list."""
+        registry = ToolRegistry(mock_config_manager)
+        registry.config = {
+            "mode": "confirm",
+            "confirm": ["bash"],
+        }
+        assert registry.requires_confirmation("python") is False
+
+    def test_requires_confirmation_other_modes(self, mock_config_manager):
+        """requires_confirmation returns False for all non-confirm modes."""
+        registry = ToolRegistry(mock_config_manager)
+        for mode in ("include", "exclude", "all"):
+            registry.config = {
+                "mode": mode,
+                "include": ["python"],
+                "exclude": [],
+                "confirm": ["python"],  # should be ignored in non-confirm modes
+            }
+            assert (
+                registry.requires_confirmation("python") is False
+            ), f"expected False for mode={mode!r}"
+
     def test_get_tool(self, mock_config_manager):
         """Test getting a specific tool."""
         registry = ToolRegistry(mock_config_manager)
@@ -312,6 +360,7 @@ class TestToolExecutor:
         registry.get_tool.return_value = ToolMetadata(
             "python", "/usr/bin/python", "Python interpreter", "unix", "system"
         )
+        registry.requires_confirmation.return_value = False
 
         # Execute command
         result = executor.run("python --version", registry)
@@ -339,6 +388,7 @@ class TestToolExecutor:
         registry.get_tool.return_value = ToolMetadata(
             "badcmd", "/usr/bin/badcmd", "Bad command", "unix", "system"
         )
+        registry.requires_confirmation.return_value = False
 
         # Execute command
         result = executor.run("badcmd", registry)
@@ -382,6 +432,7 @@ class TestToolExecutor:
         registry.get_tool.return_value = ToolMetadata(
             "sleep", "/usr/bin/sleep", "Sleep command", "unix", "system"
         )
+        registry.requires_confirmation.return_value = False
 
         result = executor.run("sleep 10", registry)
 
@@ -452,6 +503,117 @@ exclude: []
         assert result.success is True
         assert "Hello World" in result.stdout
         assert result.exit_code == 0
+
+
+class TestToolExecutorConfirm:
+    """Tests for ToolExecutor confirmation behaviour."""
+
+    def _make_registry_with_confirm(self, tools: list[str]):
+        """Return a mock registry where the given tools require confirmation."""
+        registry = Mock()
+        registry.get_tool.side_effect = lambda name: (
+            ToolMetadata(
+                name=name,
+                path=f"/usr/bin/{name}",
+                description=f"{name} tool",
+                platform="unix",
+                source="system",
+            )
+            if name in tools
+            else None
+        )
+        registry.requires_confirmation.side_effect = lambda name: name in tools
+        return registry
+
+    @patch("subprocess.run")
+    def test_confirm_approved_via_callback(self, mock_run):
+        """When callback returns True, the tool executes normally."""
+        mock_result = Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = "hello"
+        mock_result.stderr = ""
+        mock_run.return_value = mock_result
+
+        callback = Mock(return_value=True)
+        executor = ToolExecutor(confirm_callback=callback)
+        registry = self._make_registry_with_confirm(["echo"])
+
+        result = executor.run("echo hello", registry)
+
+        callback.assert_called_once_with("echo hello")
+        assert result.success is True
+        assert mock_run.called
+
+    @patch("subprocess.run")
+    def test_confirm_denied_via_callback(self, mock_run):
+        """When callback returns False, execution is skipped and agent receives denial."""
+        callback = Mock(return_value=False)
+        executor = ToolExecutor(confirm_callback=callback)
+        registry = self._make_registry_with_confirm(["bash"])
+
+        result = executor.run("bash -c 'echo hi'", registry)
+
+        callback.assert_called_once_with("bash -c 'echo hi'")
+        assert result.success is False
+        assert result.stdout == "Denied by user."
+        assert result.exit_code == -1
+        mock_run.assert_not_called()
+
+    @patch("builtins.input", return_value="n")
+    @patch("subprocess.run")
+    def test_confirm_denied_stdin_fallback(self, mock_run, mock_input):
+        """Without callback, 'n' via input() denies the tool call."""
+        executor = ToolExecutor()  # no callback
+        registry = self._make_registry_with_confirm(["bash"])
+
+        with patch.dict("sys.modules", {"rich": None, "rich.prompt": None}):
+            result = executor.run("bash -c 'ls'", registry)
+
+        assert result.success is False
+        assert result.stdout == "Denied by user."
+        mock_run.assert_not_called()
+
+    @patch("builtins.input", return_value="y")
+    @patch("subprocess.run")
+    def test_confirm_approved_stdin_fallback(self, mock_run, mock_input):
+        """Without callback, 'y' via input() approves the tool call."""
+        mock_result = Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = "ok"
+        mock_result.stderr = ""
+        mock_run.return_value = mock_result
+
+        executor = ToolExecutor()
+        registry = self._make_registry_with_confirm(["echo"])
+
+        with patch.dict("sys.modules", {"rich": None, "rich.prompt": None}):
+            result = executor.run("echo ok", registry)
+
+        assert result.success is True
+        assert mock_run.called
+
+    @patch("subprocess.run")
+    def test_no_confirmation_for_non_confirm_mode(self, mock_run):
+        """Tools that don't require confirmation execute without prompting."""
+        mock_result = Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = "ok"
+        mock_result.stderr = ""
+        mock_run.return_value = mock_result
+
+        callback = Mock(return_value=False)
+        executor = ToolExecutor(confirm_callback=callback)
+
+        registry = Mock()
+        registry.get_tool.return_value = ToolMetadata(
+            "echo", "/bin/echo", "echo", "unix", "system"
+        )
+        registry.requires_confirmation.return_value = False
+
+        result = executor.run("echo ok", registry)
+
+        callback.assert_not_called()
+        assert result.success is True
 
 
 if __name__ == "__main__":

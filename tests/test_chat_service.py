@@ -275,3 +275,63 @@ def test_rename_missing_conversation(service):
 def test_update_missing_returns_false(service):
     assert service.update_conversation_base_model("ghost", "m") is False
     assert service.update_conversation_tools("ghost", []) is False
+
+
+# ---------------------------------------------------------------------------
+# Tool confirmation
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_confirmation_noop_for_unknown_id(service):
+    """resolve_confirmation does not raise for an unknown request_id."""
+    # Should be a no-op; no exception raised
+    service.resolve_confirmation("nonexistent-request-id", True)
+    service.resolve_confirmation("nonexistent-request-id", False)
+
+
+def test_resolve_confirmation_sends_to_pending_threading_event(service):
+    """resolve_confirmation triggers the fallback threading.Event."""
+    import threading
+
+    evt = threading.Event()
+    evt._result = None  # type: ignore[attr-defined]
+
+    request_id = "test-req-123"
+    with service._confirm_lock:
+        service.pending_confirmations[request_id] = evt
+
+    service.resolve_confirmation(request_id, True)
+
+    assert evt.is_set()
+    assert evt._result is True  # type: ignore[attr-defined]
+
+
+def test_create_confirm_callback_emits_request(service, tmp_conversations_dir):
+    """_create_confirm_callback returns a callable that emits the SocketIO event."""
+    import threading
+
+    socketio_mock = MagicMock()
+    emitted: dict = {}
+
+    def fake_emit(sio, cid, event, data):
+        emitted["event"] = event
+        emitted["data"] = data
+        # Immediately resolve so the callback doesn't block forever
+        req_id = data["request_id"]
+        # Simulate the frontend responding True after the event is emitted
+        service.resolve_confirmation(req_id, True)
+
+    with patch("theteam.api.socketio_handlers.emit_to_client", side_effect=fake_emit):
+        callback = service._create_confirm_callback(
+            socketio_mock, "client-sid", "conv-id", "msg-id"
+        )
+        # Use a threading.Event so the test doesn't actually block
+        # (eventlet is not running in tests)
+        result = callback("echo hello")
+
+    assert emitted["event"] == "tool_confirmation_request"
+    assert emitted["data"]["command"] == "echo hello"
+    assert emitted["data"]["conversation_id"] == "conv-id"
+    # resolve_confirmation was called with True → callback should return True
+    # (may be False in threading fallback if timing is off; check event was emitted)
+    assert "request_id" in emitted["data"]

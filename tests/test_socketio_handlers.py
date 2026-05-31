@@ -194,3 +194,59 @@ def test_emit_to_room_calls_socketio_emit():
     sio = MagicMock()
     emit_to_room(sio, "room-1", "evt", {})
     sio.emit.assert_called_once_with("evt", {}, room="room-1")
+
+
+# ---------------------------------------------------------------------------
+# Tool confirmation response
+# ---------------------------------------------------------------------------
+
+
+def test_tool_confirmation_response_calls_resolve(sio_app, monkeypatch):
+    """Emitting tool_confirmation_response delegates to chat_service.resolve_confirmation."""
+    mock_service = MagicMock()
+
+    # Patch the chat_service imported inside the handler
+    import theteam.api.chat as chat_module
+
+    monkeypatch.setattr(chat_module, "chat_service", mock_service)
+
+    client = _client(sio_app)
+    client.get_received()  # clear connection event
+
+    client.emit(
+        "tool_confirmation_response",
+        {"request_id": "req-abc", "approved": True},
+    )
+
+    mock_service.resolve_confirmation.assert_called_once_with("req-abc", True)
+
+
+def test_tool_confirmation_response_denied(sio_app, monkeypatch):
+    """approved=False is forwarded correctly."""
+    mock_service = MagicMock()
+
+    import theteam.api.chat as chat_module
+
+    monkeypatch.setattr(chat_module, "chat_service", mock_service)
+
+    client = _client(sio_app)
+    client.get_received()
+
+    client.emit(
+        "tool_confirmation_response",
+        {"request_id": "req-xyz", "approved": False},
+    )
+
+    mock_service.resolve_confirmation.assert_called_once_with("req-xyz", False)
+
+
+def test_tool_confirmation_response_missing_request_id(sio_app):
+    """Missing request_id results in an error event emitted back."""
+    client = _client(sio_app)
+    client.get_received()
+
+    client.emit("tool_confirmation_response", {"approved": True})
+
+    received = client.get_received()
+    names = [r["name"] for r in received]
+    assert "error" in names
