@@ -151,6 +151,51 @@ the following additional protections:
 Each excerpt carries `{url, title, relevance, ts, m_<custom>}` metadata so
 the summariser can emit cited sources in insertion order.
 
+## Citation verification (editor subagent)
+
+After the summarizer drafts the report, an **editor subagent** audits every
+`[N]` citation. Two checks are performed:
+
+1. **Deterministic source check** — every cited URL must be reachable.
+   Sources already present in the `ExcerptStore` are trusted (they were
+   fetched successfully during the research loop). Any cited URL not in
+   the store is probed via `Fetcher.verify_url` (HEAD with GET fallback),
+   honouring the same whitelist + `robots.txt` rules as the crawler.
+2. **LLM claim check** — for each `[N]` marker, the surrounding sentence
+   is sent to the editor agent together with the stored excerpts from
+   that source. The agent replies with one of `SUPPORTED`, `PARTIAL`,
+   or `UNSUPPORTED` plus a short reason; replies that cannot be parsed
+   default to `UNSUPPORTED`.
+
+If any claim comes back `UNSUPPORTED` or its source is dead, the editor is
+asked to rewrite the summary, deleting or softening those claims and
+stripping only their `[N]` markers. Supported citations are preserved
+exactly. The pre-edit text is kept on `ResearchReport.original_summary`
+for audit, and `report.stats` gains:
+
+| Key | Meaning |
+|---|---|
+| `citations_total` | Total `[N]` markers checked |
+| `citations_unsupported` | Markers verdicted `UNSUPPORTED` |
+| `dead_sources` | Cited URLs that failed reachability |
+| `editor_rewrote` | `true` iff the summary was rewritten |
+| `editor_duration_seconds` | Wall-clock time for the editor stage |
+
+Editor failures degrade gracefully: an error is appended to
+`report.errors`, the original summary is retained, and the rest of the
+report is unchanged.
+
+Configuration knobs (`configs/tools/web_research_config.yaml`):
+
+```yaml
+verify_citations: true            # set false to skip the editor stage
+editor_config_name: "editor"      # configs/agents/editor.yaml
+editor_model: null                # null = use the value from the agent config
+```
+
+The editor agent is defined in `configs/agents/editor.yaml`. It uses the
+same backend as `web_researcher` by default and does not invoke any tools.
+
 ## CLI
 
 ```bash

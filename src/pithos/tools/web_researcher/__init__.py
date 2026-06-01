@@ -12,8 +12,10 @@ when those deps are missing; consumers should check
 """
 
 from .models import (
+    CitationCheck,
     Excerpt,
     ResearchReport,
+    SourceStatus,
     WebResearchConfig,
     WebResearchRequest,
 )
@@ -54,8 +56,10 @@ def __getattr__(name):  # pragma: no cover - thin lazy-import shim
 
 
 __all__ = [
+    "CitationCheck",
     "Excerpt",
     "ResearchReport",
+    "SourceStatus",
     "WebResearchConfig",
     "WebResearchRequest",
     "WEB_RESEARCH_AVAILABLE",

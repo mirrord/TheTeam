@@ -10,6 +10,7 @@ from typing import Any, Optional
 from ...config_manager import ConfigManager
 from ..models import ToolMetadata, ToolResult
 from .agent_loop import ResearchLoop, per_domain_stats
+from .editor import edit_summary, verify_citations, verify_sources
 from .fetcher import Fetcher
 from .models import ResearchReport, WebResearchConfig, WebResearchRequest
 from .search import DuckDuckGoSearch
@@ -32,6 +33,7 @@ class WebResearcher:
         config_manager: ConfigManager,
         config: Optional[WebResearchConfig] = None,
         agent_factory: Optional[Any] = None,
+        editor_agent_factory: Optional[Any] = None,
     ) -> None:
         """Initialise the researcher.
 
@@ -42,10 +44,15 @@ class WebResearcher:
             agent_factory: Optional callable returning a subagent. When None
                 the subagent is built from the registered agent config named
                 by :attr:`WebResearchConfig.subagent_config_name`.
+            editor_agent_factory: Optional callable returning the editor
+                subagent used for citation verification. Falls back to
+                :attr:`agent_factory` when None, then to the registered
+                ``editor`` agent config.
         """
         self.config_manager = config_manager
         self.config = config or self._load_config(config_manager)
         self._agent_factory = agent_factory
+        self._editor_agent_factory = editor_agent_factory
 
     # ------------------------------------------------------------------
     # Public API
@@ -128,6 +135,56 @@ class WebResearcher:
             model=cfg.summarizer_model,
         )
 
+        # --- Citation verification (editor subagent) ---------------------
+        citation_checks = []
+        source_statuses = []
+        original_summary = None
+        editor_stats: dict[str, Any] = {}
+        if cfg.verify_citations and ordered_sources:
+            editor_started = time.time()
+            try:
+                editor_agent = self._build_editor_agent()
+                source_statuses = verify_sources(ordered_sources, store, fetcher)
+                citation_checks = verify_citations(
+                    summary=summary,
+                    sources=ordered_sources,
+                    excerpts=excerpts,
+                    agent=editor_agent,
+                    model=cfg.editor_model,
+                )
+                dead = sum(1 for s in source_statuses if not s.exists)
+                unsupported = sum(
+                    1 for c in citation_checks if c.verdict == "unsupported"
+                )
+                rewrote = False
+                if dead > 0 or unsupported > 0:
+                    new_summary = edit_summary(
+                        inquiry=request.inquiry,
+                        summary=summary,
+                        citation_checks=citation_checks,
+                        source_statuses=source_statuses,
+                        agent=editor_agent,
+                        model=cfg.editor_model,
+                    )
+                    if new_summary and new_summary.strip() != summary.strip():
+                        original_summary = summary
+                        summary = new_summary
+                        rewrote = True
+                editor_stats = {
+                    "citations_total": len(citation_checks),
+                    "citations_unsupported": unsupported,
+                    "dead_sources": dead,
+                    "editor_rewrote": rewrote,
+                    "editor_duration_seconds": round(time.time() - editor_started, 2),
+                }
+            except Exception as exc:
+                logger.exception("citation verification failed")
+                loop.errors.append(f"citation verification failed: {exc}")
+                editor_stats = {
+                    "editor_error": str(exc),
+                    "editor_duration_seconds": round(time.time() - editor_started, 2),
+                }
+
         # Cleanup the per-run collection unless the operator wants it kept.
         if not cfg.keep_collection:
             store.cleanup()
@@ -141,6 +198,7 @@ class WebResearcher:
             "per_domain_pages": per_domain_stats(loop),
             "notes": loop.notes,
         }
+        stats.update(editor_stats)
         return ResearchReport(
             inquiry=request.inquiry,
             summary=summary,
@@ -148,6 +206,9 @@ class WebResearcher:
             sources=ordered_sources,
             stats=stats,
             errors=loop.errors,
+            citation_checks=citation_checks,
+            source_statuses=source_statuses,
+            original_summary=original_summary,
         )
 
     # ------------------------------------------------------------------
@@ -189,6 +250,41 @@ class WebResearcher:
 
         if cfg.subagent_model:
             agent.default_model = cfg.subagent_model
+        return agent
+
+    def _build_editor_agent(self) -> Any:
+        """Build the editor subagent for citation verification + rewrite.
+
+        Falls back to a minimal :class:`OllamaAgent` if no
+        ``editor_config_name`` agent config is registered. The system
+        prompt is set per call by the editor module.
+        """
+        if self._editor_agent_factory is not None:
+            return self._editor_agent_factory()
+        if self._agent_factory is not None:
+            return self._agent_factory()
+
+        from ...agent import OllamaAgent
+
+        cfg = self.config
+        agent_cfg = None
+        try:
+            agent_cfg = self.config_manager.get_config(cfg.editor_config_name, "agents")
+        except Exception as exc:
+            logger.debug("failed to load editor agent config: %s", exc)
+
+        if agent_cfg:
+            agent = OllamaAgent.from_dict(agent_cfg, self.config_manager)
+        else:
+            model = cfg.editor_model or cfg.subagent_model or "llama3.2"
+            agent = OllamaAgent(
+                default_model=model,
+                agent_name="editor",
+                system_prompt="",
+            )
+
+        if cfg.editor_model:
+            agent.default_model = cfg.editor_model
         return agent
 
 

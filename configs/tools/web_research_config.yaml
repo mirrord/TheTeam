@@ -40,3 +40,8 @@ keep_collection: false       # drop the per-run collection after summarizing
 subagent_config_name: "web_researcher"  # configs/agents/web_researcher.yaml
 subagent_model: null         # null = use the value from the agent config
 summarizer_model: null       # null = same as subagent_model
+
+# --- Citation verification (editor subagent) ------------------------------
+verify_citations: true              # set false to skip the editor stage
+editor_config_name: "editor"        # configs/agents/editor.yaml
+editor_model: null                  # null = use the value from the agent config

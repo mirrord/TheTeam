@@ -298,6 +298,58 @@ class Fetcher:
     # robots.txt
     # ------------------------------------------------------------------
 
+    def verify_url(self, url: str) -> tuple[bool, Optional[int], Optional[str]]:
+        """Cheap reachability probe: HEAD with GET fallback.
+
+        Returns ``(exists, status_code, error)``. Honours the whitelist and
+        robots.txt (robots failures fail-closed for verification).
+        """
+        if not in_whitelist(url, self.whitelist):
+            return False, None, "not in whitelist"
+        if self.respect_robots and not self._robots_allow(url):
+            return False, None, "blocked by robots.txt"
+        try:
+            import requests  # local import: optional dep
+        except ImportError:
+            return False, None, "requests not installed"
+
+        host = host_of(url)
+        self._limiter.wait(host)
+        session = self._session or requests
+        headers = {"User-Agent": self.user_agent, "Accept": "*/*"}
+        try:
+            resp = session.head(
+                url, headers=headers, timeout=self.timeout, allow_redirects=True
+            )
+            status = getattr(resp, "status_code", 0)
+            if 200 <= status < 400:
+                return True, status, None
+            # Some servers reject HEAD; fall through to GET.
+            if status not in (405, 501):
+                return False, status, f"HTTP {status}"
+        except Exception as exc:
+            logger.debug("HEAD verify failed for %s: %s", url, exc)
+
+        self._limiter.wait(host)
+        try:
+            resp = session.get(
+                url,
+                headers=headers,
+                timeout=self.timeout,
+                allow_redirects=True,
+                stream=True,
+            )
+            status = getattr(resp, "status_code", 0)
+            try:
+                resp.close()
+            except Exception:
+                pass
+            if 200 <= status < 400:
+                return True, status, None
+            return False, status, f"HTTP {status}"
+        except Exception as exc:
+            return False, None, f"fetch failed: {exc}"
+
     def _robots_allow(self, url: str) -> bool:
         try:
             parsed = urlparse(url)
