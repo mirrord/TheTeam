@@ -9,6 +9,7 @@ from typing import Any, Optional
 
 from ...config_manager import ConfigManager
 from ..models import ToolMetadata, ToolResult
+from ..provider import ToolProvider
 from .agent_loop import ResearchLoop, per_domain_stats
 from .editor import edit_summary, verify_citations, verify_sources
 from .fetcher import Fetcher
@@ -302,7 +303,7 @@ def _make_collection_name(inquiry: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-class WebResearcherToolExecutor:
+class WebResearcherToolExecutor(ToolProvider):
     """Adapts :class:`WebResearcher` for use as a virtual ``web-research`` tool."""
 
     TOOL_NAME = "web-research"
@@ -336,6 +337,28 @@ class WebResearcherToolExecutor:
                 tool_type="web_research",
             )
         }
+
+    def can_execute(self, tool_name: str) -> bool:
+        """Return True for the ``web-research`` tool name."""
+        return tool_name == self.TOOL_NAME
+
+    def execute(
+        self,
+        command: str,
+        context: Optional[dict[str, Any]] = None,
+    ) -> ToolResult:
+        """Execute the web-research tool call extracted from *command*.
+
+        Strips the leading ``web-research`` token and treats the rest as the
+        inquiry string.
+
+        Args:
+            command: Full command string, e.g. ``"web-research how does X work"``.
+            context: Unused; accepted for interface consistency.
+        """
+        parts = command.strip().split(None, 1)
+        inquiry = parts[1].strip() if len(parts) > 1 else ""
+        return self.run(inquiry)
 
     def run(self, inquiry: str) -> ToolResult:
         """Execute a research pass and wrap the report as a :class:`ToolResult`."""

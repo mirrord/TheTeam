@@ -7,7 +7,6 @@ from pithos.tools import ToolMetadata, ToolResult, ToolRegistry
 from pithos.tools.flowchart_tool import FlowchartToolExecutor
 from pithos.config_manager import ConfigManager
 
-
 # ---------------------------------------------------------------------------
 # ToolMetadata.tool_type
 # ---------------------------------------------------------------------------
@@ -65,9 +64,12 @@ class TestFlowchartToolExecutor:
         tools = executor.discover_flowcharts()
         assert "flowchart:simple_reflect" in tools
         assert "flowchart:multi_agent_research" in tools
-        for meta in tools.values():
+        for name, meta in tools.items():
             assert meta.tool_type == "flowchart"
-            assert meta.source == "flowchart"
+            # The dispatcher entry ("flowchart") uses source="virtual";
+            # named entries ("flowchart:<name>") use source="flowchart".
+            if name.startswith("flowchart:"):
+                assert meta.source == "flowchart"
 
     def test_run_flowchart_not_found(self, mock_config_manager):
         """Running a non-existent flowchart returns an error ToolResult."""
@@ -138,18 +140,20 @@ class TestRegistryFlowchartDiscovery:
         return cm
 
     def test_flowchart_virtual_tool_registered(self, mock_cm_with_flowcharts):
-        ToolRegistry.invalidate_cache()
-        registry = ToolRegistry(mock_cm_with_flowcharts)
+        fc = FlowchartToolExecutor(mock_cm_with_flowcharts)
+        registry = ToolRegistry(mock_cm_with_flowcharts, providers=[fc])
         assert "flowchart" in registry.tools
         assert registry.tools["flowchart"].tool_type == "flowchart"
 
     def test_individual_flowcharts_registered(self, mock_cm_with_flowcharts):
-        ToolRegistry.invalidate_cache()
-        registry = ToolRegistry(mock_cm_with_flowcharts)
+        fc = FlowchartToolExecutor(mock_cm_with_flowcharts)
+        registry = ToolRegistry(mock_cm_with_flowcharts, providers=[fc])
         assert "flowchart:simple_reflect" in registry.tools
         assert "flowchart:teacher_student" in registry.tools
 
     def test_flowchart_not_registered_when_disabled(self):
+        # When flowcharts are disabled, the FlowchartToolExecutor is simply
+        # not passed as a provider — so no flowchart tools appear.
         cm = Mock(spec=ConfigManager)
         cm.get_config.return_value = {
             "enabled": True,
@@ -161,13 +165,12 @@ class TestRegistryFlowchartDiscovery:
             "descriptions": {},
             "flowcharts": {"enabled": False},
         }
-        ToolRegistry.invalidate_cache()
-        registry = ToolRegistry(cm)
+        registry = ToolRegistry(cm)  # no providers -> no flowchart tools
         assert "flowchart" not in registry.tools
 
     def test_tool_list_text_groups_flowcharts(self, mock_cm_with_flowcharts):
-        ToolRegistry.invalidate_cache()
-        registry = ToolRegistry(mock_cm_with_flowcharts)
+        fc = FlowchartToolExecutor(mock_cm_with_flowcharts)
+        registry = ToolRegistry(mock_cm_with_flowcharts, providers=[fc])
         text = registry.get_tool_list_text()
         assert "Flowchart tools" in text
         assert "simple_reflect" in text
@@ -201,15 +204,40 @@ class TestRegistryExpandedTools:
         return cm
 
     def test_shell_tools_allowed(self, cm_with_shells):
-        ToolRegistry.invalidate_cache()
-        registry = ToolRegistry(cm_with_shells)
-        for name in ("powershell", "pwsh", "cmd", "bash", "sh", "wsl", "ping"):
+        # Build a mock provider that exposes exactly the shell tools in the
+        # include list, mirroring what CLIToolProvider would do on a system
+        # where those executables exist on PATH.
+        shell_names = ("powershell", "pwsh", "cmd", "bash", "sh", "wsl", "ping")
+        mock_provider = Mock()
+        mock_provider.discover.return_value = {
+            name: ToolMetadata(
+                name=name,
+                path=f"/usr/bin/{name}",
+                description=name,
+                platform="cross-platform",
+                source="system",
+            )
+            for name in shell_names
+        }
+        registry = ToolRegistry(cm_with_shells, providers=[mock_provider])
+        for name in shell_names:
             assert registry.is_allowed(name), f"{name} should be allowed"
 
     def test_excluded_tools_still_blocked(self, cm_with_shells):
-        """Dangerous commands stay blocked even with generous include list."""
-        ToolRegistry.invalidate_cache()
-        registry = ToolRegistry(cm_with_shells)
+        """Dangerous commands not in the include list are absent from the registry."""
+        shell_names = ("powershell", "pwsh", "cmd", "bash", "sh", "wsl", "ping")
+        mock_provider = Mock()
+        mock_provider.discover.return_value = {
+            name: ToolMetadata(
+                name=name,
+                path=f"/usr/bin/{name}",
+                description=name,
+                platform="cross-platform",
+                source="system",
+            )
+            for name in shell_names
+        }
+        registry = ToolRegistry(cm_with_shells, providers=[mock_provider])
         for name in ("rm", "del", "format", "shutdown"):
             assert not registry.is_allowed(name), f"{name} should be blocked"
 

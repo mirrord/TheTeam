@@ -2,15 +2,16 @@
 
 import logging
 import time
-from typing import Any
+from typing import Any, Optional
 
 from ..config_manager import ConfigManager
 from .models import ToolMetadata, ToolResult
+from .provider import ToolProvider
 
 logger = logging.getLogger(__name__)
 
 
-class FlowchartToolExecutor:
+class FlowchartToolExecutor(ToolProvider):
     """Discovers and executes flowcharts on behalf of an agent."""
 
     def __init__(
@@ -24,22 +25,27 @@ class FlowchartToolExecutor:
         self.max_steps = max_steps
 
     # ------------------------------------------------------------------
-    # Discovery
+    # ToolProvider interface
     # ------------------------------------------------------------------
 
-    def discover_flowcharts(
-        self, platform: str = "cross-platform"
-    ) -> dict[str, ToolMetadata]:
-        """Return ToolMetadata entries for every registered flowchart.
+    def discover(self, platform: str = "cross-platform") -> dict[str, ToolMetadata]:
+        """Return ToolMetadata for the flowchart dispatcher and each registered flowchart.
 
-        Each flowchart is exposed as a virtual tool named
-        ``flowchart:<config_name>`` so that agents can call
-        ``RUN: flowchart <name> <input>``.
+        Registers:
+        - ``flowchart`` — dispatcher tool agents use to invoke any flowchart
+        - ``flowchart:<name>`` — one entry per registered flowchart for discoverability
         """
-        tools: dict[str, ToolMetadata] = {}
-
-        flowchart_files = list(self.config_manager.get_registered_flowchart_names())
-        for name in flowchart_files:
+        tools: dict[str, ToolMetadata] = {
+            "flowchart": ToolMetadata(
+                name="flowchart",
+                path="",
+                description="Run a registered pithos flowchart. Usage: flowchart <name> [input text]",
+                platform=platform,
+                source="virtual",
+                tool_type="flowchart",
+            )
+        }
+        for name in self.config_manager.get_registered_flowchart_names():
             tools[f"flowchart:{name}"] = ToolMetadata(
                 name=f"flowchart:{name}",
                 path="",
@@ -48,8 +54,56 @@ class FlowchartToolExecutor:
                 source="flowchart",
                 tool_type="flowchart",
             )
-
         return tools
+
+    def can_execute(self, tool_name: str) -> bool:
+        """Return True for the ``flowchart`` dispatcher and ``flowchart:*`` names."""
+        return tool_name == "flowchart" or tool_name.startswith("flowchart:")
+
+    def execute(
+        self,
+        command: str,
+        context: Optional[dict[str, Any]] = None,
+    ) -> ToolResult:
+        """Execute a flowchart tool call.
+
+        Parses ``flowchart <name> [input]`` from *command*, builds the agents
+        dict from ``context["agent"]``, and delegates to :meth:`run`.
+
+        Args:
+            command: Full command string, e.g. ``"flowchart my-flow some input"``.
+            context: Must contain ``"agent"`` key with the calling agent instance
+                for flowcharts that contain prompt nodes.
+        """
+        parts = command.strip().split(None, 2)
+        # parts[0] == "flowchart"
+        if len(parts) < 2:
+            available = self.list_flowcharts()
+            return ToolResult(
+                success=False,
+                stdout="",
+                stderr="No flowchart name provided.",
+                exit_code=-1,
+                execution_time=0.0,
+                command=command,
+                error_hint=f"Usage: flowchart <name> [input]\nAvailable: {', '.join(available)}",
+            )
+
+        fc_name = parts[1]
+        fc_input = parts[2] if len(parts) > 2 else ""
+
+        agents_dict = self._build_agents_dict(fc_name, context)
+        return self.run(fc_name, fc_input, agents_dict)
+
+    # ------------------------------------------------------------------
+    # Backward-compat alias
+    # ------------------------------------------------------------------
+
+    def discover_flowcharts(
+        self, platform: str = "cross-platform"
+    ) -> dict[str, ToolMetadata]:
+        """Alias for :meth:`discover` kept for backward compatibility."""
+        return self.discover(platform=platform)
 
     # ------------------------------------------------------------------
     # Execution
@@ -133,3 +187,33 @@ class FlowchartToolExecutor:
     def list_flowcharts(self) -> list[str]:
         """Return names of all registered flowcharts."""
         return list(self.config_manager.get_registered_flowchart_names())
+
+    def _build_agents_dict(
+        self,
+        flowchart_name: str,
+        context: Optional[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Build the agents dict required by the flowchart.
+
+        Maps every agent name referenced in the flowchart to the calling
+        agent from *context*, allowing single-agent flowcharts to just work.
+        Falls back to an empty dict if the flowchart cannot be loaded or no
+        agent is available.
+        """
+        agent = (context or {}).get("agent")
+        if agent is None:
+            return {}
+
+        from ..flowchart import Flowchart
+        from ..flownode import AgentPromptNode, GetHistoryNode, SetHistoryNode
+
+        try:
+            fc = Flowchart.from_registered(flowchart_name, self.config_manager)
+            required: set[str] = set()
+            for nid in fc.graph.nodes:
+                nobj = fc.graph.nodes[nid]["nodeobj"]
+                if isinstance(nobj, (AgentPromptNode, GetHistoryNode, SetHistoryNode)):
+                    required.add(nobj.agent)
+            return {name: agent for name in required}
+        except Exception:
+            return {}

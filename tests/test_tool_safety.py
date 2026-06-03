@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import Mock, patch
 
 from pithos.tools.safety import CommandSafetyChecker
-from pithos.tools.models import RiskLevel, SafetyVerdict, ToolMetadata
+from pithos.tools.models import RiskLevel, SafetyVerdict, ToolMetadata, ToolResult
 from pithos.tools.executor import ToolExecutor
 
 # ---------------------------------------------------------------------------
@@ -355,32 +355,65 @@ class TestConfigToggles:
 
 
 class TestToolExecutorSafetyIntegration:
-    """Safety checker integrates correctly with ToolExecutor.run()."""
+    """ToolExecutor correctly routes safety verdicts returned by providers.
 
-    def _make_registry(self, tool_name: str = "python") -> Mock:
-        """Return a mock ToolRegistry that allows *tool_name*."""
+    Safety analysis (BLOCK/REVIEW detection) now lives inside each
+    ToolProvider.  ToolExecutor is responsible for:
+    - propagating provider results (including their safety_verdict) unchanged
+    - prompting for confirmation when a provider returns a REVIEW verdict
+    - returning "Denied by user" when confirmation is denied
+    """
+
+    def _make_registry(
+        self,
+        tool_name: str = "python",
+        provider_result: "ToolResult | None" = None,
+    ) -> "tuple[Mock, Mock]":
+        """Return a (registry, provider) pair.
+
+        provider_result, when given, is what provider.execute() returns.
+        """
+        from pithos.tools.models import SafetyVerdict
+
+        if provider_result is None:
+            provider_result = ToolResult(
+                success=True,
+                stdout="ok",
+                stderr="",
+                exit_code=0,
+                execution_time=0.01,
+                command=tool_name,
+                safety_verdict=SafetyVerdict(RiskLevel.SAFE, "safe"),
+            )
+
+        mock_provider = Mock()
+        mock_provider.execute.return_value = provider_result
+
         registry = Mock()
-        meta = ToolMetadata(
-            name=tool_name,
-            path=f"/usr/bin/{tool_name}",
-            description="test tool",
-            platform="unix",
-            source="system",
-        )
-        registry.get_tool.return_value = meta
+        registry.is_allowed.return_value = True
         registry.requires_confirmation.return_value = False
-        return registry
+        registry.get_provider.return_value = mock_provider
+        registry.list_tools.return_value = [tool_name]
+        return registry, mock_provider
 
-    def test_block_verdict_returns_error_without_subprocess(self) -> None:
-        """BLOCK verdict must deny without calling subprocess."""
-        checker = CommandSafetyChecker({})
-        executor = ToolExecutor(safety_checker=checker)
-        registry = self._make_registry()
+    def test_block_verdict_propagated_from_provider(self) -> None:
+        """A BLOCK result from the provider is returned unchanged by the executor."""
+        from pithos.tools.models import SafetyVerdict
 
-        with patch("subprocess.run") as mock_run:
-            result = executor.run("python script.py; rm -rf /", registry)
+        block_result = ToolResult(
+            success=False,
+            stdout="",
+            stderr="Command blocked by safety checker: Shell injection detected",
+            exit_code=-1,
+            execution_time=0.0,
+            command="python script.py; rm -rf /",
+            safety_verdict=SafetyVerdict(RiskLevel.BLOCK, "Shell injection detected"),
+        )
+        registry, provider = self._make_registry("python", block_result)
+        executor = ToolExecutor()
 
-        mock_run.assert_not_called()
+        result = executor.run("python script.py; rm -rf /", registry)
+
         assert result.success is False
         assert result.exit_code == -1
         assert "blocked" in result.stderr.lower()
@@ -388,87 +421,109 @@ class TestToolExecutorSafetyIntegration:
         assert result.safety_verdict.level == RiskLevel.BLOCK
 
     def test_review_verdict_triggers_confirm_callback(self) -> None:
-        """REVIEW verdict must invoke the confirm callback."""
-        checker = CommandSafetyChecker({})
-        confirm = Mock(return_value=True)
-        executor = ToolExecutor(safety_checker=checker, confirm_callback=confirm)
-        registry = self._make_registry("git")
+        """REVIEW verdict from the provider must invoke the executor confirm callback."""
+        from pithos.tools.models import SafetyVerdict
 
-        with patch("subprocess.run") as mock_run:
-            mock_proc = Mock()
-            mock_proc.returncode = 0
-            mock_proc.stdout = "ok"
-            mock_proc.stderr = ""
-            mock_run.return_value = mock_proc
-            result = executor.run("git push --force origin main", registry)
+        review_result = ToolResult(
+            success=True,
+            stdout="ok",
+            stderr="",
+            exit_code=0,
+            execution_time=0.1,
+            command="git push --force origin main",
+            safety_verdict=SafetyVerdict(RiskLevel.REVIEW, "Destructive flag detected"),
+        )
+        registry, _ = self._make_registry("git", review_result)
+        confirm = Mock(return_value=True)
+        executor = ToolExecutor(confirm_callback=confirm)
+
+        result = executor.run("git push --force origin main", registry)
 
         confirm.assert_called_once_with("git push --force origin main")
         assert result.safety_verdict is not None
         assert result.safety_verdict.level == RiskLevel.REVIEW
 
     def test_review_denied_by_callback_returns_error(self) -> None:
-        """Denying a REVIEW command returns denied ToolResult without subprocess."""
-        checker = CommandSafetyChecker({})
-        executor = ToolExecutor(
-            safety_checker=checker, confirm_callback=lambda _: False
+        """Denying a REVIEW result returns denied ToolResult."""
+        from pithos.tools.models import SafetyVerdict
+
+        review_result = ToolResult(
+            success=True,
+            stdout="Pushed.",
+            stderr="",
+            exit_code=0,
+            execution_time=0.1,
+            command="git push --force origin main",
+            safety_verdict=SafetyVerdict(RiskLevel.REVIEW, "Destructive flag detected"),
         )
-        registry = self._make_registry("git")
+        registry, _ = self._make_registry("git", review_result)
+        executor = ToolExecutor(confirm_callback=lambda _: False)
 
-        with patch("subprocess.run") as mock_run:
-            result = executor.run("git push --force origin main", registry)
+        result = executor.run("git push --force origin main", registry)
 
-        mock_run.assert_not_called()
         assert result.success is False
         assert "Denied" in result.stdout
 
     def test_safe_command_skips_safety_confirmation(self) -> None:
-        """SAFE command must not go through confirmation even if safety_checker is set."""
-        checker = CommandSafetyChecker({})
-        confirm = Mock(return_value=True)
-        executor = ToolExecutor(safety_checker=checker, confirm_callback=confirm)
-        registry = self._make_registry()
+        """SAFE result from provider must not trigger the confirm callback."""
+        from pithos.tools.models import SafetyVerdict
 
-        with patch("subprocess.run") as mock_run:
-            mock_proc = Mock()
-            mock_proc.returncode = 0
-            mock_proc.stdout = "Python 3.12.0"
-            mock_proc.stderr = ""
-            mock_run.return_value = mock_proc
-            result = executor.run("python --version", registry)
+        safe_result = ToolResult(
+            success=True,
+            stdout="Python 3.12.0",
+            stderr="",
+            exit_code=0,
+            execution_time=0.05,
+            command="python --version",
+            safety_verdict=SafetyVerdict(RiskLevel.SAFE, "safe"),
+        )
+        registry, _ = self._make_registry("python", safe_result)
+        confirm = Mock(return_value=True)
+        executor = ToolExecutor(confirm_callback=confirm)
+
+        result = executor.run("python --version", registry)
 
         confirm.assert_not_called()
         assert result.success is True
-        assert result.safety_verdict is not None
         assert result.safety_verdict.level == RiskLevel.SAFE
 
-    def test_no_safety_checker_no_verdict(self) -> None:
-        """When no safety_checker is provided, safety_verdict must be None."""
-        executor = ToolExecutor()
-        registry = self._make_registry()
+    def test_no_safety_verdict_no_confirmation(self) -> None:
+        """When the provider returns no safety_verdict, the executor skips confirmation."""
+        no_verdict_result = ToolResult(
+            success=True,
+            stdout="ok",
+            stderr="",
+            exit_code=0,
+            execution_time=0.01,
+            command="python --version",
+            safety_verdict=None,
+        )
+        registry, _ = self._make_registry("python", no_verdict_result)
+        confirm = Mock(return_value=True)
+        executor = ToolExecutor(confirm_callback=confirm)
 
-        with patch("subprocess.run") as mock_run:
-            mock_proc = Mock()
-            mock_proc.returncode = 0
-            mock_proc.stdout = "ok"
-            mock_proc.stderr = ""
-            mock_run.return_value = mock_proc
-            result = executor.run("python --version", registry)
+        result = executor.run("python --version", registry)
 
+        confirm.assert_not_called()
         assert result.safety_verdict is None
 
-    def test_safety_verdict_attached_to_successful_result(self) -> None:
-        """safety_verdict from SAFE check is attached to successful ToolResult."""
-        checker = CommandSafetyChecker({})
-        executor = ToolExecutor(safety_checker=checker)
-        registry = self._make_registry()
+    def test_safety_verdict_attached_to_result(self) -> None:
+        """safety_verdict from the provider is preserved on the returned ToolResult."""
+        from pithos.tools.models import SafetyVerdict
 
-        with patch("subprocess.run") as mock_run:
-            mock_proc = Mock()
-            mock_proc.returncode = 0
-            mock_proc.stdout = "Python 3.12.0"
-            mock_proc.stderr = ""
-            mock_run.return_value = mock_proc
-            result = executor.run("python --version", registry)
+        safe_result = ToolResult(
+            success=True,
+            stdout="Python 3.12.0",
+            stderr="",
+            exit_code=0,
+            execution_time=0.05,
+            command="python --version",
+            safety_verdict=SafetyVerdict(RiskLevel.SAFE, "safe"),
+        )
+        registry, _ = self._make_registry("python", safe_result)
+        executor = ToolExecutor()
+
+        result = executor.run("python --version", registry)
 
         assert result.safety_verdict is not None
         assert result.safety_verdict.level == RiskLevel.SAFE

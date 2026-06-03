@@ -8,7 +8,7 @@ import yaml
 
 from ..config_manager import ConfigManager
 from ..tools import ToolRegistry, ToolExecutor, MemoryOpRequest, MemoryOpExtractor
-from ..tools.flowchart_tool import FlowchartToolExecutor
+from ..tools.provider import ToolProvider
 from ..context import AgentContext
 from .history import ConversationStore, HistorySearchResult
 from .compaction import CompactionConfig, MemoryCompactor
@@ -52,9 +52,6 @@ class Agent(ABC):
         self.tools_enabled = False
         self.tool_registry: Optional[ToolRegistry] = None
         self.tool_executor: Optional[ToolExecutor] = None
-        self.flowchart_executor: Optional[FlowchartToolExecutor] = None
-        # Web-research virtual tool executor (set by enable_tools when enabled)
-        self.web_research_executor: Optional[Any] = None
         self.tool_auto_loop = False
         self.tool_max_iterations = 5
         # Memory tool support
@@ -841,16 +838,11 @@ class Agent(ABC):
             parts = req.command.split(None, 1) if req.command else []
             tool_name = parts[0] if parts else ""
 
-            if tool_name == "flowchart":
-                result = self._execute_flowchart_tool(
-                    parts[1] if len(parts) > 1 else ""
-                )
-            elif tool_name == "web-research":
-                result = self._execute_web_research_tool(
-                    parts[1] if len(parts) > 1 else ""
-                )
-            else:
-                result = self.tool_executor.run(req.command, self.tool_registry)
+            result = self.tool_executor.run(
+                req.command,
+                self.tool_registry,
+                context={"agent": self},
+            )
 
             # Record tool call metrics
             if self.metrics is not None:
@@ -865,89 +857,6 @@ class Agent(ABC):
             results.append(self._format_tool_result(result))
 
         return "\n\n".join(results)
-
-    def _execute_flowchart_tool(self, args_str: str) -> Any:
-        """Run a flowchart invoked via the ``flowchart`` virtual tool.
-
-        Expected format: ``<flowchart_name> [input text ...]``
-
-        The calling agent is injected into the flowchart's agent dict under
-        every required agent name so single-agent flowcharts work
-        out-of-the-box.  For multi-agent flowcharts the caller is used as a
-        fallback for any unresolved agent name.
-        """
-        from ..tools.models import ToolResult
-
-        if not self.flowchart_executor:
-            return ToolResult(
-                success=False,
-                stdout="",
-                stderr="Flowchart tools are not enabled.",
-                exit_code=-1,
-                execution_time=0.0,
-                command=f"flowchart {args_str}",
-                error_hint="Enable flowcharts in tool_config.yaml under 'flowcharts.enabled: true'.",
-            )
-
-        parts = args_str.strip().split(None, 1)
-        if not parts:
-            available = self.flowchart_executor.list_flowcharts()
-            return ToolResult(
-                success=False,
-                stdout="",
-                stderr="No flowchart name provided.",
-                exit_code=-1,
-                execution_time=0.0,
-                command="flowchart",
-                error_hint=f"Usage: flowchart <name> [input]\nAvailable: {', '.join(available)}",
-            )
-
-        fc_name = parts[0]
-        fc_input = parts[1] if len(parts) > 1 else ""
-
-        # Build an agents dict: map every required agent name to *self* so
-        # that single-agent flowcharts (prompt nodes) just work.
-        from ..flowchart import Flowchart
-        from ..flownode import AgentPromptNode, GetHistoryNode, SetHistoryNode
-
-        try:
-            fc = Flowchart.from_registered(
-                fc_name, self.flowchart_executor.config_manager
-            )
-            required: set[str] = set()
-            for nid in fc.graph.nodes:
-                nobj = fc.graph.nodes[nid]["nodeobj"]
-                if isinstance(nobj, (AgentPromptNode, GetHistoryNode, SetHistoryNode)):
-                    required.add(nobj.agent)
-            agents_dict = {name: self for name in required}
-        except Exception:
-            agents_dict = {}
-
-        return self.flowchart_executor.run(fc_name, fc_input, agents_dict)
-
-    def _execute_web_research_tool(self, args_str: str) -> Any:
-        """Run a research pass via the ``web-research`` virtual tool.
-
-        Expected format: ``<inquiry text...>``.
-        """
-        from ..tools.models import ToolResult
-
-        if not self.web_research_executor:
-            return ToolResult(
-                success=False,
-                stdout="",
-                stderr="Web research tool is not enabled.",
-                exit_code=-1,
-                execution_time=0.0,
-                command=f"web-research {args_str}",
-                error_hint=(
-                    "Enable it under 'web_research.enabled: true' in tool_config.yaml "
-                    "and install the optional web deps: pip install .[web]"
-                ),
-            )
-
-        inquiry = (args_str or "").strip()
-        return self.web_research_executor.run(inquiry)
 
     def _format_tool_result(self, result) -> str:
         """Format a tool result with clear error feedback for the agent.
@@ -982,33 +891,48 @@ class Agent(ABC):
     ) -> None:
         """Enable tool calling for this agent.
 
+        Builds a list of ToolProviders from the tool configuration, creates a
+        ToolRegistry populated with those providers, then creates a ToolExecutor
+        that routes all tool calls through the registry.
+
         Args:
             config_manager: ConfigManager for loading tool configurations.
             auto_loop: Whether to automatically continue conversation after tool execution.
             max_iterations: Maximum number of tool calling iterations to prevent loops.
         """
-        self.tools_enabled = True
-        self.tool_registry = ToolRegistry(config_manager)
+        from ..tools.cli_provider import CLIToolProvider
+        from ..tools.flowchart_tool import FlowchartToolExecutor
+        from ..tools.safety import CommandSafetyChecker
 
-        # Get timeout and max_output_size from config
-        tool_config = self.tool_registry.config
+        # Load config via a temporary registry (reads tool_config.yaml).
+        _tmp = ToolRegistry(config_manager, providers=[])
+        tool_config = _tmp.config
+
         timeout = tool_config.get("timeout", 30)
         max_output_size = tool_config.get("max_output_size", 10000)
 
-        self.tool_executor = ToolExecutor(timeout, max_output_size)
-        self.tool_auto_loop = auto_loop
-        self.tool_max_iterations = max_iterations
+        # Always register a CLI provider.
+        safety = CommandSafetyChecker(tool_config.get("safety", {}))
+        cli = CLIToolProvider(
+            config=tool_config,
+            timeout=timeout,
+            max_output_size=max_output_size,
+            safety_checker=safety,
+        )
+        providers: list[ToolProvider] = [cli]
 
-        # Set up flowchart tool executor if flowcharts are enabled
+        # Optionally add a flowchart provider.
         fc_config = tool_config.get("flowcharts", {})
         if fc_config.get("enabled", False):
-            self.flowchart_executor = FlowchartToolExecutor(
-                config_manager=config_manager,
-                timeout=fc_config.get("timeout", 120),
-                max_steps=fc_config.get("max_steps", 100),
+            providers.append(
+                FlowchartToolExecutor(
+                    config_manager=config_manager,
+                    timeout=fc_config.get("timeout", 120),
+                    max_steps=fc_config.get("max_steps", 100),
+                )
             )
 
-        # Set up web-research virtual tool executor when enabled.
+        # Optionally add a web-research provider.
         wr_config = tool_config.get("web_research", {})
         if wr_config.get("enabled", False):
             try:
@@ -1018,13 +942,20 @@ class Agent(ABC):
                 )
 
                 if WEB_RESEARCH_AVAILABLE:
-                    self.web_research_executor = WebResearcherToolExecutor(
-                        config_manager=config_manager
+                    providers.append(
+                        WebResearcherToolExecutor(config_manager=config_manager)
                     )
             except Exception:
-                # Optional feature - if deps are missing, the tool simply
-                # remains unavailable; the agent continues to work.
-                self.web_research_executor = None
+                pass  # optional feature — silently skip if deps are missing
+
+        self.tool_registry = ToolRegistry(config_manager, providers=providers)
+        self.tool_executor = ToolExecutor(
+            timeout=timeout,
+            max_output_size=max_output_size,
+        )
+        self.tools_enabled = True
+        self.tool_auto_loop = auto_loop
+        self.tool_max_iterations = max_iterations
 
         # Enhance system prompt with tool usage instructions
         self._add_tool_prompt_to_contexts()
@@ -1094,6 +1025,14 @@ Only use tools when necessary. If a tool fails, you will receive clear error fee
 
         self.memory_enabled = True
         self.memory_store = MemoryStore(config_manager, persist_directory)
+
+        # Register the memory virtual tool if tools are already enabled.
+        if self.tool_registry is not None:
+            from ..tools.memory_provider import MemoryToolProvider
+
+            self.tool_registry.register_provider(
+                MemoryToolProvider(self.tool_registry.config)
+            )
 
         # Enhance system prompt with memory usage instructions
         self._add_memory_prompt_to_contexts()
