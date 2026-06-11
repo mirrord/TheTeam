@@ -927,7 +927,6 @@ class Agent(ABC):
             providers.append(
                 FlowchartToolExecutor(
                     config_manager=config_manager,
-                    timeout=fc_config.get("timeout", 120),
                     max_steps=fc_config.get("max_steps", 100),
                 )
             )
@@ -949,10 +948,7 @@ class Agent(ABC):
                 pass  # optional feature — silently skip if deps are missing
 
         self.tool_registry = ToolRegistry(config_manager, providers=providers)
-        self.tool_executor = ToolExecutor(
-            timeout=timeout,
-            max_output_size=max_output_size,
-        )
+        self.tool_executor = ToolExecutor()
         self.tools_enabled = True
         self.tool_auto_loop = auto_loop
         self.tool_max_iterations = max_iterations

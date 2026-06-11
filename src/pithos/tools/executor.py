@@ -27,32 +27,17 @@ class ToolExecutor:
 
     def __init__(
         self,
-        timeout: int = 30,
-        max_output_size: int = 10000,
         confirm_callback: Optional[Callable[[str], bool]] = None,
-        safety_checker=None,
     ) -> None:
         """Initialise the executor.
 
         Args:
-            timeout: Kept for backward compatibility.
-            max_output_size: Kept for backward compatibility.
             confirm_callback: Optional callable invoked when a tool requires
                 confirmation.  Receives the full command string and must return
                 True (approved) or False (denied).  When None, falls back to
                 interactive CLI prompting.
-            safety_checker: Kept for backward compatibility.  Safety analysis
-                now lives inside each ToolProvider.
         """
-        if timeout <= 0:
-            raise ValueError("timeout must be > 0")
-        if max_output_size <= 0:
-            raise ValueError("max_output_size must be > 0")
-
-        self.timeout = timeout
-        self.max_output_size = max_output_size
         self.confirm_callback = confirm_callback
-        self.safety_checker = safety_checker
 
     def run(
         self,

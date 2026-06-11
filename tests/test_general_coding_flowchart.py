@@ -276,7 +276,7 @@ def test_general_coding_flowchart_drives_repo_to_green(tmp_path: Path) -> None:
     sc["repo_root"] = repo.as_posix()
     sc["test_target"] = (repo / "test_mymod.py").as_posix()
     sc["task"] = "Fix the add() function so that the tests pass."
-    sc["tool_executor"] = ToolExecutor(timeout=30)
+    sc["tool_executor"] = ToolExecutor()
     sc["tool_registry"] = StubToolRegistry(python_path=sys.executable)
 
     # ---- run ------------------------------------------------------------

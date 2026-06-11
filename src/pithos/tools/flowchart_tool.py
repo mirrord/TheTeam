@@ -17,11 +17,9 @@ class FlowchartToolExecutor(ToolProvider):
     def __init__(
         self,
         config_manager: ConfigManager,
-        timeout: int = 120,
         max_steps: int = 100,
     ):
         self.config_manager = config_manager
-        self.timeout = timeout
         self.max_steps = max_steps
 
     # ------------------------------------------------------------------

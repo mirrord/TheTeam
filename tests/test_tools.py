@@ -1,9 +1,7 @@
 """Tests for pithos tool calling system."""
 
-import os
 import pytest
 from unittest.mock import Mock, patch
-import subprocess
 
 from pithos.tools import (
     ToolMetadata,
@@ -63,8 +61,6 @@ class TestToolRegistry:
         cm = Mock(spec=ConfigManager)
         cm.get_config.return_value = {
             "enabled": True,
-            "timeout": 30,
-            "max_output_size": 10000,
             "mode": "include",
             "include": ["echo", "python", "git"],
             "exclude": ["rm", "del"],
@@ -187,12 +183,6 @@ class TestToolRegistry:
 class TestToolExecutor:
     """Tests for ToolExecutor."""
 
-    def test_tool_executor_initialization(self):
-        """Test ToolExecutor initialization."""
-        executor = ToolExecutor(timeout=10, max_output_size=5000)
-        assert executor.timeout == 10
-        assert executor.max_output_size == 5000
-
     def test_parse_command(self):
         """Test command parsing."""
         executor = ToolExecutor()
@@ -294,33 +284,6 @@ class TestToolExecutor:
         assert "Invalid command format" in result.stderr
         assert result.exit_code == -1
 
-    def test_run_command_timeout(self):
-        """Test command timeout is reported when a provider raises the error."""
-        from pithos.tools.models import ToolResult
-
-        timeout_result = ToolResult(
-            success=False,
-            stdout="",
-            stderr="Command timed out after 1s",
-            exit_code=-1,
-            execution_time=1.0,
-            command="sleep 10",
-        )
-        mock_provider = Mock()
-        mock_provider.execute.return_value = timeout_result
-
-        executor = ToolExecutor(timeout=1)
-        registry = Mock()
-        registry.is_allowed.return_value = True
-        registry.get_provider.return_value = mock_provider
-        registry.requires_confirmation.return_value = False
-
-        result = executor.run("sleep 10", registry)
-
-        assert result.success is False
-        assert "timed out" in result.stderr
-        assert result.exit_code == -1
-
 
 class TestToolIntegration:
     """Integration tests for tool system."""
@@ -336,8 +299,6 @@ class TestToolIntegration:
         config_file = config_dir / "tool_config.yaml"
         config_content = """
 enabled: true
-timeout: 5
-max_output_size: 1000
 mode: include
 include:
   - echo
@@ -356,7 +317,6 @@ exclude: []
         """Test ToolRegistry with real configuration."""
         registry = ToolRegistry(config_manager)
         assert registry.config["enabled"] is True
-        assert registry.config["timeout"] == 5
         assert "echo" in registry.config["include"]
 
     def test_end_to_end_tool_execution(self, config_manager):
