@@ -76,7 +76,7 @@ def show_context_summary(agent: OllamaAgent, context_name: str = "default") -> N
         print(f"    {DIM}[RECALL]  {preview}...{RESET}")
 
 
-def ask(model: str, prompt: str, default: str) -> str:
+def ask(prompt: str, default: str) -> str:
     answer = input(f"  {prompt} [{default}]: ").strip()
     return answer or default
 
@@ -315,14 +315,14 @@ def main() -> None:
     print(f"\n{BOLD}pithos — Memory Features Demo{RESET}")
     print(f"{DIM}Automatic Context Compaction + Automatic Memory Recall{RESET}\n")
 
-    model = ask(model="", prompt="Ollama model to use", default="glm-4.7-flash")
+    model = ask(prompt="Ollama model to use", default="glm-4.7-flash")
 
     print("\nAvailable demos:")
     print("  1. Context Compaction only")
     print("  2. Automatic Recall only")
     print("  3. Both features combined")
     print("  4. Run all three sequentially")
-    choice = ask(model="", prompt="Select demo", default="4")
+    choice = ask(prompt="Select demo", default="4")
 
     with tempfile.TemporaryDirectory(prefix="pithos_demo_") as tmpdir:
         if choice in ("1", "4"):
