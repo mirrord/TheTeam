@@ -197,9 +197,10 @@ def test_build_agent_enables_tools_when_requested() -> None:
             memory=MemoryConfig(enabled=False),
         ),
     )
-    with patch("talos.config.OllamaAgent.enable_tools") as enable_tools, patch(
-        "talos.config.OllamaAgent.enable_memory"
-    ) as enable_memory:
+    with (
+        patch("talos.config.OllamaAgent.enable_tools") as enable_tools,
+        patch("talos.config.OllamaAgent.enable_memory") as enable_memory,
+    ):
         build_agent(cfg)
     enable_tools.assert_called_once()
     kwargs = enable_tools.call_args.kwargs
@@ -216,28 +217,13 @@ def test_build_agent_enables_memory_when_requested() -> None:
             memory=MemoryConfig(enabled=True),
         ),
     )
-    with patch("talos.config.OllamaAgent.enable_tools") as enable_tools, patch(
-        "talos.config.OllamaAgent.enable_memory"
-    ) as enable_memory:
+    with (
+        patch("talos.config.OllamaAgent.enable_tools") as enable_tools,
+        patch("talos.config.OllamaAgent.enable_memory") as enable_memory,
+    ):
         build_agent(cfg)
     enable_tools.assert_not_called()
     enable_memory.assert_called_once()
-
-
-def test_build_agent_tools_mode_default_uses_plain_config_manager() -> None:
-    cfg = TalosConfig(
-        agent=AgentConfig(
-            model="m",
-            tools=ToolsConfig(enabled=True, mode="include"),
-        ),
-    )
-    with patch("talos.config.OllamaAgent.enable_tools") as enable_tools, patch(
-        "talos.config.ConfigManager"
-    ) as plain_cm, patch("talos.config._ModeOverrideConfigManager") as override_cm:
-        build_agent(cfg)
-    plain_cm.assert_called_once()
-    override_cm.assert_not_called()
-    enable_tools.assert_called_once()
 
 
 def test_build_agent_tools_mode_override_uses_override_config_manager() -> None:
@@ -247,9 +233,10 @@ def test_build_agent_tools_mode_override_uses_override_config_manager() -> None:
             tools=ToolsConfig(enabled=True, mode="all"),
         ),
     )
-    with patch("talos.config.OllamaAgent.enable_tools") as enable_tools, patch(
-        "talos.config._ModeOverrideConfigManager"
-    ) as override_cm:
+    with (
+        patch("talos.config.OllamaAgent.enable_tools") as enable_tools,
+        patch("talos.config._ModeOverrideConfigManager") as override_cm,
+    ):
         build_agent(cfg)
     override_cm.assert_called_once_with(tool_mode_override="all")
     enable_tools.assert_called_once()
@@ -270,13 +257,13 @@ def test_build_agent_memory_full_features() -> None:
             ),
         ),
     )
-    with patch("talos.config.OllamaAgent.enable_memory") as em, patch(
-        "talos.config.OllamaAgent.enable_compaction"
-    ) as ec, patch("talos.config.OllamaAgent.enable_recall") as er, patch(
-        "talos.config.OllamaAgent.enable_history"
-    ) as eh, patch(
-        "talos.config.OllamaAgent.enable_tag_suggestions"
-    ) as ets:
+    with (
+        patch("talos.config.OllamaAgent.enable_memory") as em,
+        patch("talos.config.OllamaAgent.enable_compaction") as ec,
+        patch("talos.config.OllamaAgent.enable_recall") as er,
+        patch("talos.config.OllamaAgent.enable_history") as eh,
+        patch("talos.config.OllamaAgent.enable_tag_suggestions") as ets,
+    ):
         build_agent(cfg)
     em.assert_called_once()
     assert em.call_args.kwargs["persist_directory"] == "/tmp/talos-mem"
@@ -295,13 +282,13 @@ def test_build_agent_memory_compaction_only() -> None:
             memory=MemoryConfig(enabled=True, compaction=True),
         ),
     )
-    with patch("talos.config.OllamaAgent.enable_memory"), patch(
-        "talos.config.OllamaAgent.enable_compaction"
-    ) as ec, patch("talos.config.OllamaAgent.enable_recall") as er, patch(
-        "talos.config.OllamaAgent.enable_history"
-    ) as eh, patch(
-        "talos.config.OllamaAgent.enable_tag_suggestions"
-    ) as ets:
+    with (
+        patch("talos.config.OllamaAgent.enable_memory"),
+        patch("talos.config.OllamaAgent.enable_compaction") as ec,
+        patch("talos.config.OllamaAgent.enable_recall") as er,
+        patch("talos.config.OllamaAgent.enable_history") as eh,
+        patch("talos.config.OllamaAgent.enable_tag_suggestions") as ets,
+    ):
         build_agent(cfg)
     ec.assert_called_once()
     er.assert_not_called()
@@ -327,3 +314,114 @@ def test_mode_override_config_manager_patches_tool_mode(tmp_path: Path) -> None:
     other = cm2.get_config("foo", "agents")
     assert other is not None
     assert other["mode"] == "include"
+
+
+def test_mode_override_config_manager_applies_tool_config_overrides(
+    tmp_path: Path,
+) -> None:
+    tool_dir = tmp_path / "tools"
+    tool_dir.mkdir()
+    (tool_dir / "tool_config.yaml").write_text(
+        "enabled: true\nmode: include\nflowcharts:\n  enabled: true\nweb_research:\n  enabled: true\n"
+    )
+    overrides = {"flowcharts": {"enabled": False}, "web_research": {"enabled": False}}
+    cm = _ModeOverrideConfigManager(
+        tool_mode_override="include",
+        config_dir=str(tmp_path),
+        tool_config_overrides=overrides,
+    )
+    cfg = cm.get_config("tool_config", "tools")
+    assert cfg is not None
+    assert cfg["flowcharts"]["enabled"] is False
+    assert cfg["web_research"]["enabled"] is False
+    # mode is still honoured independently
+    assert cfg["mode"] == "include"
+
+
+def test_build_agent_flowcharts_disabled_in_talos_config_uses_override_cm() -> None:
+    cfg = TalosConfig(
+        agent=AgentConfig(
+            model="m",
+            tools=ToolsConfig(
+                enabled=True,
+                mode="include",
+                flowcharts={"enabled": False},
+            ),
+        ),
+    )
+    with (
+        patch("talos.config.OllamaAgent.enable_tools"),
+        patch("talos.config._ModeOverrideConfigManager") as override_cm,
+    ):
+        build_agent(cfg)
+    override_cm.assert_called_once_with(
+        tool_mode_override="include",
+        tool_config_overrides={"flowcharts": {"enabled": False}},
+    )
+
+
+def test_build_agent_web_research_disabled_in_talos_config_uses_override_cm() -> None:
+    cfg = TalosConfig(
+        agent=AgentConfig(
+            model="m",
+            tools=ToolsConfig(
+                enabled=True,
+                mode="include",
+                web_research={"enabled": False},
+            ),
+        ),
+    )
+    with (
+        patch("talos.config.OllamaAgent.enable_tools"),
+        patch("talos.config._ModeOverrideConfigManager") as override_cm,
+    ):
+        build_agent(cfg)
+    override_cm.assert_called_once_with(
+        tool_mode_override="include",
+        tool_config_overrides={"web_research": {"enabled": False}},
+    )
+
+
+def test_build_agent_both_overrides_and_mode_change() -> None:
+    cfg = TalosConfig(
+        agent=AgentConfig(
+            model="m",
+            tools=ToolsConfig(
+                enabled=True,
+                mode="all",
+                flowcharts={"enabled": False},
+                web_research={"enabled": True},
+            ),
+        ),
+    )
+    with (
+        patch("talos.config.OllamaAgent.enable_tools"),
+        patch("talos.config._ModeOverrideConfigManager") as override_cm,
+    ):
+        build_agent(cfg)
+    override_cm.assert_called_once_with(
+        tool_mode_override="all",
+        tool_config_overrides={
+            "flowcharts": {"enabled": False},
+            "web_research": {"enabled": True},
+        },
+    )
+
+
+def test_build_agent_no_talos_overrides_default_mode_uses_plain_cm() -> None:
+    # flowcharts and web_research are both None (default) and mode is "include"
+    # → no _ModeOverrideConfigManager, plain ConfigManager is used
+    cfg = TalosConfig(
+        agent=AgentConfig(
+            model="m",
+            tools=ToolsConfig(enabled=True, mode="include"),
+        ),
+    )
+    with (
+        patch("talos.config.OllamaAgent.enable_tools"),
+        patch("talos.config.ConfigManager") as plain_cm,
+        patch("talos.config._ModeOverrideConfigManager") as override_cm,
+    ):
+        build_agent(cfg)
+    plain_cm.assert_called_once()
+    override_cm.assert_not_called()

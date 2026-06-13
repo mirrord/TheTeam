@@ -28,6 +28,9 @@ try:
     WEB_RESEARCH_AVAILABLE = True
 except ImportError:
     WEB_RESEARCH_AVAILABLE = False
+    print(
+        "Web research tool unavailable: missing dependencies. Install with: pip install -e .[web]"
+    )
 
 
 # Lazy imports for the heavy components - they pull in requests/bs4/trafilatura.

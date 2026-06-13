@@ -74,6 +74,8 @@ class ToolsConfig:
     mode: str = DEFAULT_TOOLS_MODE
     auto_loop: bool = DEFAULT_TOOLS_AUTO_LOOP
     max_iterations: int = DEFAULT_TOOLS_MAX_ITERATIONS
+    web_research: Optional[dict[str, bool]] = None  # enable web search tool
+    flowcharts: Optional[dict[str, Any]] = None
 
 
 @dataclass
@@ -337,8 +339,18 @@ def build_agent(config: TalosConfig) -> OllamaAgent:
     # ConfigManager is required for tools/memory.  When the user picked a
     # tool mode other than the tool_config.yaml default ("include"), wrap
     # the manager to inject the override without mutating the YAML file.
-    if tc.enabled and tc.mode != DEFAULT_TOOLS_MODE:
-        cm: ConfigManager = _ModeOverrideConfigManager(tool_mode_override=tc.mode)
+    # Collect Talos-level overrides that must win over tool_config.yaml.
+    tool_overrides: dict[str, Any] = {}
+    if tc.flowcharts is not None:
+        tool_overrides["flowcharts"] = tc.flowcharts
+    if tc.web_research is not None:
+        tool_overrides["web_research"] = tc.web_research
+
+    if tc.enabled and (tc.mode != DEFAULT_TOOLS_MODE or tool_overrides):
+        cm_kwargs: dict[str, Any] = {"tool_mode_override": tc.mode}
+        if tool_overrides:
+            cm_kwargs["tool_config_overrides"] = tool_overrides
+        cm: ConfigManager = _ModeOverrideConfigManager(**cm_kwargs)
     else:
         cm = ConfigManager()
 
@@ -368,19 +380,26 @@ def build_agent(config: TalosConfig) -> OllamaAgent:
 
 
 class _ModeOverrideConfigManager(ConfigManager):
-    """ConfigManager that overrides the tool discovery mode at read time.
+    """ConfigManager that overrides tool discovery settings at read time.
 
-    Used by :func:`build_agent` to honour ``ToolsConfig.mode`` without
-    modifying the shared ``configs/tools/tool_config.yaml`` file.
+    Used by :func:`build_agent` to honour ``ToolsConfig`` values without
+    modifying the shared ``configs/tools/tool_config.yaml`` file.  The
+    ``tool_mode_override`` always wins over the YAML ``mode`` field;
+    ``tool_config_overrides`` (if provided) are shallow-merged on top of
+    the full config so that Talos-level feature flags (e.g.
+    ``flowcharts.enabled``, ``web_research.enabled``) always take
+    precedence over registry defaults.
     """
 
     def __init__(
         self,
         tool_mode_override: str,
         config_dir: Optional[str] = None,
+        tool_config_overrides: Optional[dict[str, Any]] = None,
     ) -> None:
         super().__init__(config_dir)
         self._tool_mode_override = tool_mode_override
+        self._tool_config_overrides: dict[str, Any] = tool_config_overrides or {}
 
     def get_config(
         self, config_name: str, namespace: Optional[str] = None
@@ -389,6 +408,7 @@ class _ModeOverrideConfigManager(ConfigManager):
         if cfg is not None and config_name == "tool_config" and namespace == "tools":
             cfg = dict(cfg)
             cfg["mode"] = self._tool_mode_override
+            cfg.update(self._tool_config_overrides)
         return cfg
 
 

@@ -36,7 +36,7 @@ class TelegramInterface:
     def _ensure_context(self, user_id: int) -> str:
         ctx_name = _context_name_for_user(user_id)
         if ctx_name not in self.agent.contexts:
-            self.agent.create_context(ctx_name)
+            self.agent.copy_context(self.agent.current_context, ctx_name)
         return ctx_name
 
     async def _start(self, update: Any, _context: Any) -> None:

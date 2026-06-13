@@ -37,10 +37,6 @@ include:
   - netstat
   - ipconfig
   - ifconfig
-  # --- Node.js ---
-  - node
-  - npm
-  - npx
   # --- File & text utilities ---
   - echo
   - cat
@@ -101,8 +97,6 @@ confirm:
   - bash
   - sh
   - wsl
-  # --- Version control ---
-  - git
 
 # List of tools to exclude (used when mode is 'exclude' or 'all')
 # These are dangerous commands that should never be allowed
@@ -122,6 +116,12 @@ exclude:
   - dd
   - mkfs
   - fdisk
+  # --- Node.js ---
+  - node
+  - npm
+  - npx
+  # --- Version control ---
+  - git
 
 # Flowchart tool configuration
 # Allows agents to run registered flowcharts as tools
