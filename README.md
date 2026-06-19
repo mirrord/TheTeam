@@ -687,10 +687,22 @@ pithos-research "Python GIL removal status" --json
 See [docs/WEB_RESEARCH.md](docs/WEB_RESEARCH.md) for architecture, configuration,
 and the in-flowchart `webresearch` node.
 
-### pithos-text2image (coming soon)
+### pithos-text2image
 
-Image generation is currently available as an agent virtual tool (`text2image`).
-A standalone CLI entry point is planned.
+Generate an image from a text prompt with a local model. Requires at least one
+backend: `pip install -e ".[web]"` (http/comfyui) or `pip install -e ".[image]"`
+(diffusers).
+
+```bash
+# Basic generation (uses backend/settings from text2image_config.yaml)
+pithos-text2image "a red fox in a snowy forest"
+
+# Override backend and steps for this run
+pithos-text2image --backend comfyui --steps 20 "a glowing crystal cave"
+
+# Custom output directory and fixed seed
+pithos-text2image --output-dir /tmp/imgs --seed 42 "a futuristic cityscape"
+```
 
 See [docs/TEXT2IMAGE.md](docs/TEXT2IMAGE.md) for backends, configuration, and usage.
 

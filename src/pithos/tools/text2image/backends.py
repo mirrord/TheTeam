@@ -337,6 +337,15 @@ class ComfyUIBackend(ImageBackend):
                 "comfyui backend unavailable: install with 'pip install -e .[web]'"
             ) from exc
 
+        # Guard: the built-in workflow requires a checkpoint name.
+        using_builtin = not (self.config.comfyui_workflow_path or "").strip()
+        if using_builtin and not (params.model or "").strip():
+            raise Text2ImageError(
+                "comfyui backend: 'model' must be set to a checkpoint filename "
+                "when using the built-in workflow (e.g. 'v1-5-pruned-emaonly.safetensors'). "
+                "Set 'model' in text2image_config.yaml or use --model on the CLI."
+            )
+
         seed = _resolve_seed(params.seed)
         tokens: dict[str, Any] = {
             "%prompt%": params.prompt,
@@ -352,21 +361,49 @@ class ComfyUIBackend(ImageBackend):
         workflow = self._substitute(self._load_workflow(), tokens)
 
         base = self.config.comfyui_base_url.rstrip("/")
-        client_id = uuid.uuid4().hex
+        # Use standard dashed UUID format; some ComfyUI versions validate the format.
+        client_id = str(uuid.uuid4())
         try:
             resp = requests.post(
                 f"{base}/prompt",
                 json={"prompt": workflow, "client_id": client_id},
                 timeout=self.config.timeout,
             )
-            resp.raise_for_status()
-            prompt_id = resp.json().get("prompt_id")
+        except requests.exceptions.ConnectionError as exc:
+            raise Text2ImageError(
+                f"comfyui: could not reach server at {base} — "
+                f"check that ComfyUI is running and 'comfyui_base_url' is correct. "
+                f"Detail: {exc}"
+            ) from exc
         except Exception as exc:
             raise Text2ImageError(
                 f"comfyui /prompt request to {base} failed: {exc}"
             ) from exc
+
+        # Surface ComfyUI's validation error body when the server returns one.
+        if not resp.ok:
+            try:
+                body = resp.json()
+            except Exception:
+                body = resp.text
+            raise Text2ImageError(
+                f"comfyui /prompt returned HTTP {resp.status_code}: {body}"
+            )
+
+        data = resp.json()
+        # ComfyUI returns HTTP 200 with an 'error' key when workflow validation fails.
+        if "error" in data:
+            node_errors = data.get("node_errors", {})
+            raise Text2ImageError(
+                f"comfyui workflow validation failed: {data['error']}. "
+                f"Node errors: {node_errors}"
+            )
+
+        prompt_id = data.get("prompt_id")
         if not prompt_id:
-            raise Text2ImageError("comfyui did not return a prompt_id")
+            raise Text2ImageError(
+                f"comfyui did not return a prompt_id. Response: {data}"
+            )
 
         history = self._wait_for_history(requests, base, prompt_id)
         image_ref = self._first_image_ref(history)

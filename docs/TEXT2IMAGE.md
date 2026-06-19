@@ -6,11 +6,11 @@ local image model. It follows the same `ToolProvider` plugin pattern as
 dispatched in-process, and invoked with any of pithos's standard tool
 call syntaxes.
 
-**Agent usage**:
+It is exposed two ways:
 
-```
-RUN: text2image a red fox sitting in a snowy forest
-```
+1. **CLI**: [`pithos-text2image`](#cli).
+2. **Agent tool call**: `RUN: text2image <prompt>` (virtual tool, no
+   external binary required).
 
 The tool saves the PNG to `./data/generated_images/` and returns a
 markdown summary (path, backend, model, dimensions, steps, seed, time).
@@ -209,6 +209,36 @@ device: cuda
 steps: 1
 guidance_scale: 0.0   # sd-turbo doesn't use CFG
 ```
+
+## CLI
+
+```bash
+# Basic usage (backend + settings from text2image_config.yaml)
+pithos-text2image "a red fox in a snowy forest"
+
+# Override backend and steps for this run
+pithos-text2image --backend comfyui --steps 20 "a glowing crystal cave"
+
+# Custom output directory and fixed seed
+pithos-text2image --output-dir /tmp/imgs --seed 42 "a futuristic cityscape"
+
+# Full option reference
+pithos-text2image --help
+```
+
+**Options**
+
+| Flag | Description |
+|------|-------------|
+| `--backend` | Override config backend (`http`, `comfyui`, `diffusers`). |
+| `--output-dir` | Override `output_dir`. |
+| `--model` | Override checkpoint name / HF repo id. |
+| `--width` / `--height` | Override image dimensions. |
+| `--steps` | Override denoising step count. |
+| `--seed` | Fixed RNG seed. |
+| `--negative-prompt` | Override the negative prompt. |
+| `--config-dir` | Use a custom `configs/` directory. |
+| `--quiet` | Suppress non-error logging. |
 
 ## Output
 

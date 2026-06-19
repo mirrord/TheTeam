@@ -176,6 +176,8 @@ class TestComfyUIBackend:
     ) -> Mock:
         """Install a fake `requests` module that emulates ComfyUI endpoints."""
         post_resp = Mock()
+        post_resp.ok = True
+        post_resp.status_code = 200
         post_resp.raise_for_status = Mock()
         post_resp.json = Mock(return_value={"prompt_id": prompt_id})
 
@@ -208,6 +210,10 @@ class TestComfyUIBackend:
         requests_mod = Mock()
         requests_mod.post = Mock(return_value=post_resp)
         requests_mod.get = Mock(side_effect=_get)
+        # Expose the real ConnectionError class so isinstance checks work.
+        import requests as _real_requests
+
+        requests_mod.exceptions = _real_requests.exceptions
         monkeypatch.setitem(__import__("sys").modules, "requests", requests_mod)
         # Avoid real sleeps during history polling.
         monkeypatch.setattr(
@@ -236,6 +242,19 @@ class TestComfyUIBackend:
         # Endpoint sanity.
         assert requests_mod.post.call_args[0][0].endswith("/prompt")
 
+    def test_client_id_is_dashed_uuid(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """client_id must use standard dashed UUID format for ComfyUI compatibility."""
+        import re
+
+        requests_mod = self._install_requests(monkeypatch)
+        backend = ComfyUIBackend(self._config())
+        backend.generate(GenerationParams.from_config("hi", self._config()))
+        client_id = requests_mod.post.call_args[1]["json"]["client_id"]
+        assert re.match(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            client_id,
+        ), f"client_id '{client_id}' is not a standard dashed UUID"
+
     def test_workflow_placeholders_fully_substituted(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -262,13 +281,105 @@ class TestComfyUIBackend:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         post_resp = Mock()
+        post_resp.ok = True
+        post_resp.status_code = 200
         post_resp.raise_for_status = Mock()
         post_resp.json = Mock(return_value={})
         requests_mod = Mock()
         requests_mod.post = Mock(return_value=post_resp)
+        import requests as _real_requests
+
+        requests_mod.exceptions = _real_requests.exceptions
         monkeypatch.setitem(__import__("sys").modules, "requests", requests_mod)
         backend = ComfyUIBackend(self._config())
         with pytest.raises(Text2ImageError):
+            backend.generate(GenerationParams.from_config("x", self._config()))
+
+    def test_empty_model_with_builtin_workflow_raises(self) -> None:
+        """Empty model must be caught before any network call."""
+        cfg = Text2ImageConfig(
+            backend="comfyui",
+            model="",  # intentionally empty
+            comfyui_base_url="http://localhost:8188",
+        )
+        backend = ComfyUIBackend(cfg)
+        with pytest.raises(Text2ImageError, match="'model' must be set"):
+            backend.generate(GenerationParams.from_config("a cat", cfg))
+
+    def test_empty_model_with_custom_workflow_allowed(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Custom workflow may omit the model — no pre-send guard should fire."""
+        import json
+
+        wf = {
+            "1": {"class_type": "CLIPTextEncode", "inputs": {"text": "%prompt%"}},
+            "2": {"class_type": "SaveImage", "inputs": {"images": ["1", 0]}},
+        }
+        wf_path = tmp_path / "wf.json"
+        wf_path.write_text(json.dumps(wf), encoding="utf-8")
+        cfg = Text2ImageConfig(
+            backend="comfyui",
+            model="",
+            comfyui_workflow_path=str(wf_path),
+        )
+        self._install_requests(monkeypatch)
+        backend = ComfyUIBackend(cfg)
+        # Should not raise Text2ImageError for empty model.
+        backend.generate(GenerationParams.from_config("hi", cfg))
+
+    def test_connection_error_surfaces_hint(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import requests as _real_requests
+
+        requests_mod = Mock()
+        requests_mod.post = Mock(
+            side_effect=_real_requests.exceptions.ConnectionError("connection reset")
+        )
+        requests_mod.exceptions = _real_requests.exceptions
+        monkeypatch.setitem(__import__("sys").modules, "requests", requests_mod)
+        backend = ComfyUIBackend(self._config())
+        with pytest.raises(Text2ImageError, match="could not reach server"):
+            backend.generate(GenerationParams.from_config("x", self._config()))
+
+    def test_http_error_body_included_in_message(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import requests as _real_requests
+
+        post_resp = Mock()
+        post_resp.ok = False
+        post_resp.status_code = 400
+        post_resp.json = Mock(return_value={"error": "bad request"})
+        requests_mod = Mock()
+        requests_mod.post = Mock(return_value=post_resp)
+        requests_mod.exceptions = _real_requests.exceptions
+        monkeypatch.setitem(__import__("sys").modules, "requests", requests_mod)
+        backend = ComfyUIBackend(self._config())
+        with pytest.raises(Text2ImageError, match="HTTP 400"):
+            backend.generate(GenerationParams.from_config("x", self._config()))
+
+    def test_comfyui_validation_error_raised(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import requests as _real_requests
+
+        post_resp = Mock()
+        post_resp.ok = True
+        post_resp.status_code = 200
+        post_resp.json = Mock(
+            return_value={
+                "error": "prompt_outputs_failed_validation",
+                "node_errors": {"4": {"errors": [{"message": "ckpt not found"}]}},
+            }
+        )
+        requests_mod = Mock()
+        requests_mod.post = Mock(return_value=post_resp)
+        requests_mod.exceptions = _real_requests.exceptions
+        monkeypatch.setitem(__import__("sys").modules, "requests", requests_mod)
+        backend = ComfyUIBackend(self._config())
+        with pytest.raises(Text2ImageError, match="validation failed"):
             backend.generate(GenerationParams.from_config("x", self._config()))
 
     def test_timeout_when_history_never_ready(
