@@ -31,7 +31,10 @@ class FlowchartToolExecutor(ToolProvider):
 
         Registers:
         - ``flowchart`` — dispatcher tool agents use to invoke any flowchart
-        - ``flowchart:<name>`` — one entry per registered flowchart for discoverability
+        - ``flowchart:<name>`` — one entry per *enabled* registered flowchart
+
+        Per-flowchart enable/disable is controlled by ``flowcharts.items`` in
+        ``tool_config.yaml``.  Flowcharts not listed there default to enabled.
         """
         tools: dict[str, ToolMetadata] = {
             "flowchart": ToolMetadata(
@@ -44,6 +47,8 @@ class FlowchartToolExecutor(ToolProvider):
             )
         }
         for name in self.config_manager.get_registered_flowchart_names():
+            if not self._is_flowchart_enabled(name):
+                continue
             tools[f"flowchart:{name}"] = ToolMetadata(
                 name=f"flowchart:{name}",
                 path="",
@@ -183,8 +188,41 @@ class FlowchartToolExecutor(ToolProvider):
     # ------------------------------------------------------------------
 
     def list_flowcharts(self) -> list[str]:
-        """Return names of all registered flowcharts."""
-        return list(self.config_manager.get_registered_flowchart_names())
+        """Return names of all *enabled* registered flowcharts."""
+        return [
+            name
+            for name in self.config_manager.get_registered_flowchart_names()
+            if self._is_flowchart_enabled(name)
+        ]
+
+    # ------------------------------------------------------------------
+    # Per-flowchart enable/disable
+    # ------------------------------------------------------------------
+
+    def _get_items_config(self) -> dict[str, Any]:
+        """Return the ``flowcharts.items`` dict from tool_config, or ``{}``."""
+        try:
+            cfg = self.config_manager.get_config("tool_config", "tools")
+            if not isinstance(cfg, dict):
+                return {}
+            items = cfg.get("flowcharts", {}).get("items")
+            return items if isinstance(items, dict) else {}
+        except Exception:
+            return {}
+
+    def _is_flowchart_enabled(self, name: str) -> bool:
+        """Return True when *name* is enabled per the items config.
+
+        Flowcharts absent from ``flowcharts.items`` default to ``True``
+        (opt-out model — existing flowcharts are unaffected by the new config).
+        """
+        items = self._get_items_config()
+        if name not in items:
+            return True
+        entry = items[name]
+        if isinstance(entry, dict):
+            return bool(entry.get("enabled", True))
+        return True
 
     def _build_agents_dict(
         self,

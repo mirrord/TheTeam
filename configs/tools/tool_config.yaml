@@ -131,6 +131,16 @@ flowcharts:
   timeout: 120
   # Maximum steps per flowchart execution
   max_steps: 100
+  # Per-flowchart enable/disable overrides.
+  # Flowcharts NOT listed here default to enabled.
+  # Set enabled: false to hide a specific flowchart from agents.
+  # Example:
+  #   items:
+  #     multi_agent_research:
+  #       enabled: false
+  #     simple_reflect:
+  #       enabled: true   # explicit but redundant; true is the default
+  items: {}
 
 # Web research virtual tool configuration
 # When enabled, the agent can invoke `web-research <inquiry>` to spin up the

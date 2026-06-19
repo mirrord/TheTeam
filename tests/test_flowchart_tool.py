@@ -242,5 +242,135 @@ class TestRegistryExpandedTools:
             assert not registry.is_allowed(name), f"{name} should be blocked"
 
 
+# ---------------------------------------------------------------------------
+# Per-flowchart enable/disable (items config)
+# ---------------------------------------------------------------------------
+
+
+class TestPerFlowchartEnableDisable:
+    """Tests for per-flowchart enable/disable via flowcharts.items config."""
+
+    def _make_cm(self, items: dict) -> Mock:
+        """Return a config manager mock with the given items config."""
+        cm = Mock(spec=ConfigManager)
+        cm.get_registered_flowchart_names.return_value = iter(
+            ["simple_reflect", "teacher_student", "multi_agent_research"]
+        )
+        cm.get_config.return_value = {
+            "flowcharts": {
+                "enabled": True,
+                "timeout": 120,
+                "max_steps": 100,
+                "items": items,
+            }
+        }
+        return cm
+
+    def test_disabled_flowchart_absent_from_discover(self):
+        """A flowchart with enabled: false must not appear in discover()."""
+        cm = self._make_cm({"multi_agent_research": {"enabled": False}})
+        executor = FlowchartToolExecutor(cm)
+        tools = executor.discover()
+        assert "flowchart:multi_agent_research" not in tools
+        # Dispatcher entry is never gated
+        assert "flowchart" in tools
+
+    def test_enabled_flowchart_present_in_discover(self):
+        """A flowchart with enabled: true (explicit) must appear in discover()."""
+        cm = self._make_cm({"simple_reflect": {"enabled": True}})
+        executor = FlowchartToolExecutor(cm)
+        tools = executor.discover()
+        assert "flowchart:simple_reflect" in tools
+
+    def test_unlisted_flowchart_defaults_to_enabled(self):
+        """A flowchart not present in items must default to enabled."""
+        cm = self._make_cm({})
+        executor = FlowchartToolExecutor(cm)
+        tools = executor.discover()
+        assert "flowchart:simple_reflect" in tools
+        assert "flowchart:teacher_student" in tools
+        assert "flowchart:multi_agent_research" in tools
+
+    def test_mixed_items_only_disabled_excluded(self):
+        """Only disabled flowcharts are excluded; enabled/unlisted remain."""
+        cm = self._make_cm(
+            {
+                "multi_agent_research": {"enabled": False},
+                "simple_reflect": {"enabled": True},
+            }
+        )
+        executor = FlowchartToolExecutor(cm)
+        tools = executor.discover()
+        assert "flowchart:simple_reflect" in tools
+        assert "flowchart:teacher_student" in tools  # unlisted → enabled
+        assert "flowchart:multi_agent_research" not in tools
+
+    def test_list_flowcharts_excludes_disabled(self):
+        """list_flowcharts() must not return disabled flowchart names."""
+        cm = self._make_cm({"teacher_student": {"enabled": False}})
+        executor = FlowchartToolExecutor(cm)
+        names = executor.list_flowcharts()
+        assert "simple_reflect" in names
+        assert "multi_agent_research" in names
+        assert "teacher_student" not in names
+
+    def test_list_flowcharts_empty_items_returns_all(self):
+        """With empty items config, list_flowcharts() returns all registered names."""
+        cm = self._make_cm({})
+        executor = FlowchartToolExecutor(cm)
+        names = executor.list_flowcharts()
+        assert set(names) == {
+            "simple_reflect",
+            "teacher_student",
+            "multi_agent_research",
+        }
+
+    def test_missing_items_key_treated_as_empty(self):
+        """When the items key is absent from config, all flowcharts are enabled."""
+        cm = Mock(spec=ConfigManager)
+        cm.get_registered_flowchart_names.return_value = iter(["simple_reflect"])
+        cm.get_config.return_value = {
+            "flowcharts": {"enabled": True, "timeout": 120, "max_steps": 100}
+        }
+        executor = FlowchartToolExecutor(cm)
+        tools = executor.discover()
+        assert "flowchart:simple_reflect" in tools
+
+    def test_config_error_treated_as_all_enabled(self):
+        """When get_config raises, all flowcharts are treated as enabled (safe fallback)."""
+        cm = Mock(spec=ConfigManager)
+        cm.get_registered_flowchart_names.return_value = iter(["simple_reflect"])
+        cm.get_config.side_effect = RuntimeError("config unavailable")
+        executor = FlowchartToolExecutor(cm)
+        tools = executor.discover()
+        assert "flowchart:simple_reflect" in tools
+
+    def test_registry_respects_disabled_flowchart(self):
+        """Disabled flowchart must not appear in the ToolRegistry tool dict."""
+        cm = Mock(spec=ConfigManager)
+        cm.get_registered_flowchart_names.return_value = iter(
+            ["simple_reflect", "multi_agent_research"]
+        )
+        cm.get_config.return_value = {
+            "enabled": True,
+            "timeout": 30,
+            "max_output_size": 10000,
+            "mode": "include",
+            "include": ["flowchart"],
+            "exclude": [],
+            "descriptions": {},
+            "flowcharts": {
+                "enabled": True,
+                "timeout": 120,
+                "max_steps": 100,
+                "items": {"multi_agent_research": {"enabled": False}},
+            },
+        }
+        fc = FlowchartToolExecutor(cm)
+        registry = ToolRegistry(cm, providers=[fc])
+        assert "flowchart:simple_reflect" in registry.tools
+        assert "flowchart:multi_agent_research" not in registry.tools
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
