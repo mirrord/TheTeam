@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Literal, Optional
+
+Verdict = Literal["supported", "partial", "unsupported"]
 
 
 def _content_hash(text: str) -> str:
@@ -69,6 +71,11 @@ class WebResearchConfig:
     search_results_per_domain: int = 5
     enabled: bool = True
 
+    # Citation verification ("editor" subagent stage)
+    verify_citations: bool = True
+    editor_config_name: str = "editor"
+    editor_model: Optional[str] = None
+
     @classmethod
     def from_dict(cls, data: Optional[dict[str, Any]]) -> "WebResearchConfig":
         """Build a config from a (possibly partial) dict, applying defaults."""
@@ -89,6 +96,27 @@ class WebResearchRequest:
 
 
 @dataclass
+class SourceStatus:
+    """Result of deterministically verifying a single cited source URL."""
+
+    url: str
+    exists: bool
+    status_code: Optional[int] = None
+    error: Optional[str] = None
+
+
+@dataclass
+class CitationCheck:
+    """LLM verdict for a single `[N]` citation in the summary."""
+
+    index: int
+    source_url: str
+    claim: str
+    verdict: Verdict
+    reason: str = ""
+
+
+@dataclass
 class ResearchReport:
     """Output of a research run."""
 
@@ -98,6 +126,9 @@ class ResearchReport:
     sources: list[str]
     stats: dict[str, Any] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
+    citation_checks: list[CitationCheck] = field(default_factory=list)
+    source_statuses: list[SourceStatus] = field(default_factory=list)
+    original_summary: Optional[str] = None
 
     def to_markdown(self) -> str:
         """Render the report as a Markdown document with a Sources section."""
@@ -108,6 +139,30 @@ class ResearchReport:
             for i, url in enumerate(self.sources, 1):
                 parts.append(f"{i}. {url}")
             parts.append("")
+        if self.citation_checks or self.source_statuses:
+            parts.append("## Citation verification")
+            parts.append("")
+            if self.source_statuses:
+                parts.append("### Source reachability")
+                parts.append("")
+                for s in self.source_statuses:
+                    mark = "OK" if s.exists else "DEAD"
+                    detail = (
+                        f"HTTP {s.status_code}"
+                        if s.status_code is not None
+                        else (s.error or "unknown")
+                    )
+                    parts.append(f"- [{mark}] {s.url} ({detail})")
+                parts.append("")
+            if self.citation_checks:
+                parts.append("### Claim checks")
+                parts.append("")
+                for c in self.citation_checks:
+                    parts.append(
+                        f"- [{c.index}] {c.verdict.upper()} — {c.source_url}"
+                        + (f": {c.reason}" if c.reason else "")
+                    )
+                parts.append("")
         if self.errors:
             parts.append("## Errors")
             parts.append("")

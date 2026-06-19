@@ -294,6 +294,20 @@ def register_handlers(socketio):
             logger.error("Error stopping benchmark %s: %s", run_id, exc, exc_info=True)
             emit("error", {"message": str(exc)})
 
+    @socketio.on("tool_confirmation_response")
+    def handle_tool_confirmation_response(data):
+        """Handle user's approval or denial of a pending tool call."""
+        from theteam.api.chat import chat_service
+
+        request_id = data.get("request_id")
+        approved = bool(data.get("approved", False))
+
+        if not request_id:
+            emit("error", {"message": "Missing request_id"})
+            return
+
+        chat_service.resolve_confirmation(request_id, approved)
+
     @socketio.on("error")
     def handle_error(error):
         """Handle errors from client."""

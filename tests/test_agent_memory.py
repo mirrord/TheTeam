@@ -3,9 +3,10 @@
 import pytest
 import tempfile
 import shutil
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, MagicMock, patch
 from pithos.agent import OllamaAgent
 from pithos.config_manager import ConfigManager
+from pithos.tools.memory_ops import MemoryOpExtractor
 
 # Skip all tests if ChromaDB is not available
 try:
@@ -72,10 +73,11 @@ default_metadata:
 
     def test_extract_memory_ops_store(self, agent):
         """Test extracting store memory operations."""
+        extractor = MemoryOpExtractor()
         content1 = (
             'Let me save this: storemem(facts, "Python is a programming language")'
         )
-        ops1 = agent._extract_memory_ops(content1)
+        ops1 = extractor.extract(content1)
         assert len(ops1) == 1
         assert ops1[0].operation == "store"
         assert ops1[0].category == "facts"
@@ -83,8 +85,9 @@ default_metadata:
 
     def test_extract_memory_ops_retrieve(self, agent):
         """Test extracting retrieve memory operations."""
+        extractor = MemoryOpExtractor()
         content = 'Let me check: retrievemem(facts, "programming language")'
-        ops = agent._extract_memory_ops(content)
+        ops = extractor.extract(content)
         assert len(ops) == 1
         assert ops[0].operation == "retrieve"
         assert ops[0].category == "facts"
@@ -92,16 +95,18 @@ default_metadata:
 
     def test_extract_memory_ops_multiple(self, agent):
         """Test extracting multiple memory operations."""
+        extractor = MemoryOpExtractor()
         content = """First storemem(notes, "Important fact") then retrievemem(notes, "fact")"""
-        ops = agent._extract_memory_ops(content)
+        ops = extractor.extract(content)
         assert len(ops) == 2
         assert ops[0].operation == "store"
         assert ops[1].operation == "retrieve"
 
     def test_extract_memory_ops_none(self, agent):
         """Test extracting when no memory operations present."""
+        extractor = MemoryOpExtractor()
         content = "Just a regular response with no memory operations"
-        ops = agent._extract_memory_ops(content)
+        ops = extractor.extract(content)
         assert len(ops) == 0
 
     def test_execute_memory_ops_store(self, agent, config_manager, temp_dir):
@@ -114,7 +119,9 @@ default_metadata:
             MemoryOpRequest(operation="store", category="test", content="Test content")
         ]
 
-        result = agent._execute_memory_ops(operations)
+        result = agent._memory_provider._execute_ops(
+            operations, agent.memory_store, agent.metrics
+        )
         assert "Stored in test" in result
         assert "Test content" in result
 
@@ -132,7 +139,9 @@ default_metadata:
             MemoryOpRequest(operation="retrieve", category="test", query="Python")
         ]
 
-        result = agent._execute_memory_ops(operations)
+        result = agent._memory_provider._execute_ops(
+            operations, agent.memory_store, agent.metrics
+        )
         assert "Retrieved" in result or "No relevant results" in result
 
     def test_execute_memory_ops_retrieve_with_results(
@@ -155,20 +164,24 @@ default_metadata:
             )
         ]
 
-        result = agent._execute_memory_ops(operations)
+        result = agent._memory_provider._execute_ops(
+            operations, agent.memory_store, agent.metrics
+        )
         # Should find results or indicate no results
         assert "Retrieved" in result or "No relevant results" in result
 
     def test_execute_memory_ops_error_handling(self, agent):
-        """Test error handling in memory operations."""
+        """Test error handling in memory operations when memory is not enabled."""
         from pithos.tools import MemoryOpRequest
+        from pithos.tools.memory_provider import MemoryToolProvider
 
-        # Memory not enabled
+        # Use provider directly with no memory_store
+        provider = MemoryToolProvider()
         operations = [
             MemoryOpRequest(operation="store", category="test", content="content")
         ]
 
-        result = agent._execute_memory_ops(operations)
+        result = provider._execute_ops(operations, None)
         assert "not available" in result
 
     def test_memory_with_tools_enabled(self, agent, config_manager, temp_dir):
@@ -187,16 +200,11 @@ default_metadata:
         assert "storemem" in prompt
 
     def test_memory_prompt_includes_categories(self, agent, config_manager, temp_dir):
-        """Test that memory prompt includes existing categories."""
+        """Test that memory prompt is injected into the context system prompt."""
         agent.enable_memory(config_manager, persist_directory=temp_dir)
 
-        # Store something to create a category
-        agent.memory_store.store("test_cat", "Test content")
-
-        # Get the memory prompt
-        prompt = agent._get_memory_usage_prompt()
-        # Note: The prompt may or may not include test_cat depending on timing
-        # Just verify the structure is correct
+        # Verify the prompt was injected at enable_memory() time
+        prompt = agent.contexts["default"].get_system_prompt()
         assert "knowledge memory system" in prompt
         assert "storemem" in prompt or "STORE" in prompt
         assert "retrievemem" in prompt or "RETRIEVE" in prompt
@@ -218,7 +226,9 @@ default_metadata:
             MemoryOpRequest(operation="retrieve", category="docs", query="document")
         ]
 
-        result = agent._execute_memory_ops(operations)
+        result = agent._memory_provider._execute_ops(
+            operations, agent.memory_store, agent.metrics
+        )
 
         # Should show top results with scores
         assert "Score:" in result or "No relevant results" in result
@@ -288,6 +298,148 @@ class TestMemoryConfiguration:
         )
         assert store.config["max_results"] == 20
         assert store.config["similarity_threshold"] == 0.85
+
+
+class TestMemoryToolProviderUnit:
+    """Unit tests for MemoryToolProvider._execute_ops and extract_and_execute."""
+
+    def _make_provider(self):
+        from pithos.tools.memory_provider import MemoryToolProvider
+
+        return MemoryToolProvider()
+
+    def test_execute_ops_no_memory_store(self):
+        """Returns error message when memory_store is None."""
+        provider = self._make_provider()
+        from pithos.tools import MemoryOpRequest
+
+        ops = [MemoryOpRequest(operation="store", category="x", content="y")]
+        result = provider._execute_ops(ops, None)
+        assert "not available" in result
+
+    def test_execute_ops_store_success(self):
+        """Formats store result correctly."""
+        from pithos.tools import MemoryOpRequest
+
+        mock_store = MagicMock()
+        mock_store.store.return_value = "abc123"
+        mock_store.tag_suggestions_enabled = False
+
+        provider = self._make_provider()
+        ops = [
+            MemoryOpRequest(operation="store", category="facts", content="Sky is blue")
+        ]
+        result = provider._execute_ops(ops, mock_store)
+
+        assert "Stored in facts" in result
+        assert "Sky is blue" in result
+        assert "abc123" in result
+
+    def test_execute_ops_store_records_metrics(self):
+        """Records metric when store succeeds."""
+        from pithos.tools import MemoryOpRequest
+
+        mock_store = MagicMock()
+        mock_store.store.return_value = "id1"
+        mock_store.tag_suggestions_enabled = False
+
+        mock_metrics = MagicMock()
+
+        provider = self._make_provider()
+        ops = [MemoryOpRequest(operation="store", category="x", content="data")]
+        provider._execute_ops(ops, mock_store, mock_metrics)
+
+        mock_metrics.record_memory_store.assert_called_once()
+
+    def test_execute_ops_retrieve_no_results(self):
+        """Formats no-results retrieve message correctly."""
+        from pithos.tools import MemoryOpRequest
+
+        mock_store = MagicMock()
+        mock_store.retrieve.return_value = []
+
+        provider = self._make_provider()
+        ops = [MemoryOpRequest(operation="retrieve", category="notes", query="python")]
+        result = provider._execute_ops(ops, mock_store)
+
+        assert "No relevant results" in result
+
+    def test_execute_ops_retrieve_with_results(self):
+        """Formats retrieve result with scores correctly."""
+        from pithos.tools import MemoryOpRequest
+        from pithos.tools.memory_tool import SearchResult
+
+        sr = SearchResult(
+            id="1",
+            category="notes",
+            content="Python is a language",
+            metadata={},
+            distance=0.1,
+            relevance_score=0.9,
+        )
+        mock_store = MagicMock()
+        mock_store.retrieve.return_value = [sr]
+
+        provider = self._make_provider()
+        ops = [MemoryOpRequest(operation="retrieve", category="notes", query="Python")]
+        result = provider._execute_ops(ops, mock_store)
+
+        assert "Retrieved 1 results" in result
+        assert "0.90" in result
+        assert "Python is a language" in result
+
+    def test_execute_ops_empty_content_store(self):
+        """Store with no content returns hint message."""
+        from pithos.tools import MemoryOpRequest
+
+        mock_store = MagicMock()
+        provider = self._make_provider()
+        ops = [MemoryOpRequest(operation="store", category="x", content="")]
+        result = provider._execute_ops(ops, mock_store)
+
+        assert "No content provided" in result
+        mock_store.store.assert_not_called()
+
+    def test_execute_ops_empty_query_retrieve(self):
+        """Retrieve with no query returns hint message."""
+        from pithos.tools import MemoryOpRequest
+
+        mock_store = MagicMock()
+        provider = self._make_provider()
+        ops = [MemoryOpRequest(operation="retrieve", category="x", query="")]
+        result = provider._execute_ops(ops, mock_store)
+
+        assert "No query provided" in result
+        mock_store.retrieve.assert_not_called()
+
+    def test_extract_and_execute_returns_none_for_no_ops(self):
+        """Returns None when response has no memory operations."""
+        provider = self._make_provider()
+
+        mock_agent = MagicMock()
+        mock_agent.memory_store = MagicMock()
+        mock_agent.metrics = None
+
+        result = provider.extract_and_execute("No ops here.", mock_agent)
+        assert result is None
+
+    def test_extract_and_execute_processes_ops(self):
+        """Extracts and executes ops found in response text."""
+        provider = self._make_provider()
+
+        mock_store = MagicMock()
+        mock_store.store.return_value = "id99"
+        mock_store.tag_suggestions_enabled = False
+
+        mock_agent = MagicMock()
+        mock_agent.memory_store = mock_store
+        mock_agent.metrics = None
+
+        result = provider.extract_and_execute(
+            'Saving this: storemem(facts, "Important thing")', mock_agent
+        )
+        assert result is not None
+        assert "Stored in facts" in result
 
 
 if __name__ == "__main__":

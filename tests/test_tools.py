@@ -1,9 +1,7 @@
 """Tests for pithos tool calling system."""
 
-import os
 import pytest
 from unittest.mock import Mock, patch
-import subprocess
 
 from pithos.tools import (
     ToolMetadata,
@@ -63,8 +61,6 @@ class TestToolRegistry:
         cm = Mock(spec=ConfigManager)
         cm.get_config.return_value = {
             "enabled": True,
-            "timeout": 30,
-            "max_output_size": 10000,
             "mode": "include",
             "include": ["echo", "python", "git"],
             "exclude": ["rm", "del"],
@@ -82,42 +78,55 @@ class TestToolRegistry:
         assert isinstance(registry.tools, dict)
         assert isinstance(registry.config, dict)
 
-    def test_is_allowed_include_mode(self, mock_config_manager):
-        """Test tool filtering in include mode."""
+    def test_is_allowed_present_in_tools(self, mock_config_manager):
+        """is_allowed returns True for tools that exist in the registry dict."""
         registry = ToolRegistry(mock_config_manager)
-        registry.config = {
-            "mode": "include",
-            "include": ["python", "git"],
-            "exclude": ["rm"],
-        }
+        registry.tools["python"] = ToolMetadata(
+            "python", "/usr/bin/python", "Python", "unix", "system"
+        )
         assert registry.is_allowed("python") is True
-        assert registry.is_allowed("git") is True
-        assert registry.is_allowed("rm") is False
         assert registry.is_allowed("curl") is False
 
-    def test_is_allowed_exclude_mode(self, mock_config_manager):
-        """Test tool filtering in exclude mode."""
+    def test_is_allowed_empty_raises(self, mock_config_manager):
+        """is_allowed raises ValueError for empty tool name."""
         registry = ToolRegistry(mock_config_manager)
-        registry.config = {
-            "mode": "exclude",
-            "include": [],
-            "exclude": ["rm", "del"],
-        }
-        assert registry.is_allowed("python") is True
-        assert registry.is_allowed("rm") is False
-        assert registry.is_allowed("del") is False
+        import pytest
 
-    def test_is_allowed_all_mode(self, mock_config_manager):
-        """Test tool filtering in all mode."""
+        with pytest.raises(ValueError):
+            registry.is_allowed("")
+
+    def test_requires_confirmation_confirm_mode_in_list(self, mock_config_manager):
+        """requires_confirmation returns True for a tool in confirm list."""
         registry = ToolRegistry(mock_config_manager)
         registry.config = {
-            "mode": "all",
-            "include": [],
-            "exclude": ["rm"],
+            "mode": "confirm",
+            "confirm": ["bash", "powershell"],
         }
-        assert registry.is_allowed("python") is True
-        assert registry.is_allowed("git") is True
-        assert registry.is_allowed("rm") is False
+        assert registry.requires_confirmation("bash") is True
+        assert registry.requires_confirmation("powershell") is True
+
+    def test_requires_confirmation_confirm_mode_not_in_list(self, mock_config_manager):
+        """requires_confirmation returns False for a tool NOT in confirm list."""
+        registry = ToolRegistry(mock_config_manager)
+        registry.config = {
+            "mode": "confirm",
+            "confirm": ["bash"],
+        }
+        assert registry.requires_confirmation("python") is False
+
+    def test_requires_confirmation_other_modes(self, mock_config_manager):
+        """requires_confirmation returns False for all non-confirm modes."""
+        registry = ToolRegistry(mock_config_manager)
+        for mode in ("include", "exclude", "all"):
+            registry.config = {
+                "mode": mode,
+                "include": ["python"],
+                "exclude": [],
+                "confirm": ["python"],  # should be ignored in non-confirm modes
+            }
+            assert (
+                registry.requires_confirmation("python") is False
+            ), f"expected False for mode={mode!r}"
 
     def test_get_tool(self, mock_config_manager):
         """Test getting a specific tool."""
@@ -163,82 +172,6 @@ class TestToolRegistry:
         assert "python: Python interpreter" in text
         assert "git: Version control" in text
 
-    # ------------------------------------------------------------------
-    # Cache tests
-    # ------------------------------------------------------------------
-
-    def test_cache_populated_after_init(self, mock_config_manager):
-        """A scan cache entry is written after the first PATH scan."""
-        ToolRegistry.invalidate_cache()
-        assert ToolRegistry._scan_cache is None
-        ToolRegistry(mock_config_manager)
-        assert ToolRegistry._scan_cache is not None
-        assert "tools" in ToolRegistry._scan_cache
-        assert "path_hash" in ToolRegistry._scan_cache
-        assert "timestamp" in ToolRegistry._scan_cache
-
-    def test_cache_reused_across_instances(self, mock_config_manager):
-        """Second ToolRegistry instantiation reuses the cached scan result."""
-        ToolRegistry.invalidate_cache()
-        with patch("os.scandir") as mock_scandir:
-            mock_scandir.return_value.__iter__ = Mock(return_value=iter([]))
-            mock_scandir.return_value.__enter__ = Mock(return_value=iter([]))
-            mock_scandir.return_value.__exit__ = Mock(return_value=False)
-            ToolRegistry(mock_config_manager)
-            first_call_count = mock_scandir.call_count
-            ToolRegistry(mock_config_manager)
-            # scandir should not have been called again
-            assert mock_scandir.call_count == first_call_count
-
-    def test_cache_bypassed_on_path_change(self, mock_config_manager):
-        """Changing PATH invalidates the cache and triggers a fresh scan."""
-        ToolRegistry.invalidate_cache()
-        original_path = os.environ.get("PATH", "")
-        try:
-            ToolRegistry(mock_config_manager)
-            assert ToolRegistry._scan_cache is not None
-            # Simulate a PATH change
-            os.environ["PATH"] = original_path + os.pathsep + "/some/new/dir"
-            with patch("os.scandir") as mock_scandir:
-                mock_scandir.return_value.__iter__ = Mock(return_value=iter([]))
-                ToolRegistry(mock_config_manager)
-                # scandir must have been called because the path hash changed
-                assert mock_scandir.called
-        finally:
-            os.environ["PATH"] = original_path
-            ToolRegistry.invalidate_cache()
-
-    def test_cache_bypassed_on_ttl_expiry(self, mock_config_manager):
-        """A stale cache (past TTL) triggers a re-scan."""
-        ToolRegistry.invalidate_cache()
-        ToolRegistry(mock_config_manager)
-        # Wind the clock past TTL by backdating the timestamp
-        ToolRegistry._scan_cache["timestamp"] -= ToolRegistry._CACHE_TTL + 1
-        with patch("os.scandir") as mock_scandir:
-            mock_scandir.return_value.__iter__ = Mock(return_value=iter([]))
-            ToolRegistry(mock_config_manager)
-            assert mock_scandir.called
-
-    def test_invalidate_cache_classmethod(self, mock_config_manager):
-        """invalidate_cache() sets _scan_cache to None."""
-        ToolRegistry(mock_config_manager)
-        assert ToolRegistry._scan_cache is not None
-        ToolRegistry.invalidate_cache()
-        assert ToolRegistry._scan_cache is None
-
-    def test_refresh_invalidates_cache(self, mock_config_manager):
-        """refresh() discards the scan cache so the next operation re-scans."""
-        ToolRegistry.invalidate_cache()
-        registry = ToolRegistry(mock_config_manager)
-        assert ToolRegistry._scan_cache is not None
-        registry.refresh()
-        # Cache is rebuilt (not None) because _discover_tools runs immediately
-        # after invalidation, but the important thing is it was invalidated and
-        # a fresh scan was performed — verify by checking it's a new object.
-        assert ToolRegistry._scan_cache is not None
-
-    # ------------------------------------------------------------------
-
     def test_refresh(self, mock_config_manager):
         """Test refreshing tool registry."""
         registry = ToolRegistry(mock_config_manager)
@@ -249,12 +182,6 @@ class TestToolRegistry:
 
 class TestToolExecutor:
     """Tests for ToolExecutor."""
-
-    def test_tool_executor_initialization(self):
-        """Test ToolExecutor initialization."""
-        executor = ToolExecutor(timeout=10, max_output_size=5000)
-        assert executor.timeout == 10
-        assert executor.max_output_size == 5000
 
     def test_parse_command(self):
         """Test command parsing."""
@@ -282,68 +209,53 @@ class TestToolExecutor:
         assert tool_name is None
         assert args == []
 
-    def test_truncate_output(self):
-        """Test output truncation."""
-        executor = ToolExecutor(max_output_size=20)
+    def test_run_successful_command(self):
+        """Test successful command execution via a mock provider."""
+        expected = ToolResult(
+            success=True,
+            stdout="Python 3.10.0",
+            stderr="",
+            exit_code=0,
+            execution_time=0.05,
+            command="python --version",
+        )
+        mock_provider = Mock()
+        mock_provider.execute.return_value = expected
 
-        # Short output - no truncation
-        short = "Hello"
-        assert executor._truncate_output(short) == "Hello"
-
-        # Long output - should be truncated
-        long = "A" * 100
-        result = executor._truncate_output(long)
-        assert len(result) > 20  # Includes truncation note
-        assert "truncated" in result.lower()
-
-    @patch("subprocess.run")
-    def test_run_successful_command(self, mock_run):
-        """Test successful command execution."""
-        # Setup mock
-        mock_result = Mock()
-        mock_result.returncode = 0
-        mock_result.stdout = "Python 3.10.0"
-        mock_result.stderr = ""
-        mock_run.return_value = mock_result
-
-        # Create executor and mock registry
         executor = ToolExecutor()
         registry = Mock()
-        registry.get_tool.return_value = ToolMetadata(
-            "python", "/usr/bin/python", "Python interpreter", "unix", "system"
-        )
+        registry.is_allowed.return_value = True
+        registry.get_provider.return_value = mock_provider
+        registry.requires_confirmation.return_value = False
 
-        # Execute command
         result = executor.run("python --version", registry)
 
-        # Verify
         assert result.success is True
         assert result.stdout == "Python 3.10.0"
         assert result.exit_code == 0
-        assert result.command == "python --version"
-        mock_run.assert_called_once()
+        mock_provider.execute.assert_called_once()
 
-    @patch("subprocess.run")
-    def test_run_failed_command(self, mock_run):
-        """Test failed command execution."""
-        # Setup mock
-        mock_result = Mock()
-        mock_result.returncode = 1
-        mock_result.stdout = ""
-        mock_result.stderr = "Error: command not found"
-        mock_run.return_value = mock_result
+    def test_run_failed_command(self):
+        """Test failed command execution via a mock provider."""
+        expected = ToolResult(
+            success=False,
+            stdout="",
+            stderr="Error: command not found",
+            exit_code=1,
+            execution_time=0.01,
+            command="badcmd",
+        )
+        mock_provider = Mock()
+        mock_provider.execute.return_value = expected
 
-        # Create executor and mock registry
         executor = ToolExecutor()
         registry = Mock()
-        registry.get_tool.return_value = ToolMetadata(
-            "badcmd", "/usr/bin/badcmd", "Bad command", "unix", "system"
-        )
+        registry.is_allowed.return_value = True
+        registry.get_provider.return_value = mock_provider
+        registry.requires_confirmation.return_value = False
 
-        # Execute command
         result = executor.run("badcmd", registry)
 
-        # Verify
         assert result.success is False
         assert result.stderr == "Error: command not found"
         assert result.exit_code == 1
@@ -352,7 +264,8 @@ class TestToolExecutor:
         """Test running a tool that is not allowed."""
         executor = ToolExecutor()
         registry = Mock()
-        registry.get_tool.return_value = None
+        registry.is_allowed.return_value = False
+        registry.list_tools.return_value = []
 
         result = executor.run("rm -rf /", registry)
 
@@ -371,24 +284,6 @@ class TestToolExecutor:
         assert "Invalid command format" in result.stderr
         assert result.exit_code == -1
 
-    @patch("subprocess.run")
-    def test_run_command_timeout(self, mock_run):
-        """Test command timeout handling."""
-        # Setup mock to raise TimeoutExpired
-        mock_run.side_effect = subprocess.TimeoutExpired("test", 5)
-
-        executor = ToolExecutor(timeout=1)
-        registry = Mock()
-        registry.get_tool.return_value = ToolMetadata(
-            "sleep", "/usr/bin/sleep", "Sleep command", "unix", "system"
-        )
-
-        result = executor.run("sleep 10", registry)
-
-        assert result.success is False
-        assert "timed out" in result.stderr
-        assert result.exit_code == -1
-
 
 class TestToolIntegration:
     """Integration tests for tool system."""
@@ -404,8 +299,6 @@ class TestToolIntegration:
         config_file = config_dir / "tool_config.yaml"
         config_content = """
 enabled: true
-timeout: 5
-max_output_size: 1000
 mode: include
 include:
   - echo
@@ -424,25 +317,28 @@ exclude: []
         """Test ToolRegistry with real configuration."""
         registry = ToolRegistry(config_manager)
         assert registry.config["enabled"] is True
-        assert registry.config["timeout"] == 5
         assert "echo" in registry.config["include"]
 
-    @patch("subprocess.run")
-    def test_end_to_end_tool_execution(self, mock_run, config_manager):
+    def test_end_to_end_tool_execution(self, config_manager):
         """Test complete tool execution flow."""
-        # Setup mock
-        mock_result = Mock()
-        mock_result.returncode = 0
-        mock_result.stdout = "Hello World"
-        mock_result.stderr = ""
-        mock_run.return_value = mock_result
-
-        # Create registry and executor
+        # Create registry and register a mock provider
         registry = ToolRegistry(config_manager)
-        # Manually add echo tool since PATH scanning might not find it in tests
         registry.tools["echo"] = ToolMetadata(
             "echo", "/bin/echo", "Display a line of text", "unix", "system"
         )
+
+        mock_provider = Mock()
+        mock_provider.can_execute.side_effect = lambda name: name == "echo"
+        mock_provider.execute.return_value = ToolResult(
+            success=True,
+            stdout="Hello World",
+            stderr="",
+            exit_code=0,
+            execution_time=0.05,
+            command="echo Hello World",
+        )
+        registry._providers.append(mock_provider)
+
         executor = ToolExecutor()
 
         # Execute command
@@ -452,6 +348,104 @@ exclude: []
         assert result.success is True
         assert "Hello World" in result.stdout
         assert result.exit_code == 0
+
+
+class TestToolExecutorConfirm:
+    """Tests for ToolExecutor confirmation behaviour."""
+
+    def _make_registry_with_confirm(self, tools: list[str], provider=None):
+        """Return a mock registry where the given tools require confirmation."""
+        registry = Mock()
+        registry.is_allowed.side_effect = lambda name: name in tools
+        registry.requires_confirmation.side_effect = lambda name: name in tools
+        registry.list_tools.return_value = list(tools)
+        if provider is None:
+            default_provider = Mock()
+            default_provider.execute.return_value = ToolResult(
+                success=True,
+                stdout="ok",
+                stderr="",
+                exit_code=0,
+                execution_time=0.01,
+                command="echo hello",
+            )
+            provider = default_provider
+        registry.get_provider.return_value = provider
+        return registry
+
+    def test_confirm_approved_via_callback(self):
+        """When callback returns True, the tool executes normally."""
+        callback = Mock(return_value=True)
+        executor = ToolExecutor(confirm_callback=callback)
+        registry = self._make_registry_with_confirm(["echo"])
+
+        result = executor.run("echo hello", registry)
+
+        callback.assert_called_once_with("echo hello")
+        assert result.success is True
+
+    def test_confirm_denied_via_callback(self):
+        """When callback returns False, execution is skipped and agent receives denial."""
+        callback = Mock(return_value=False)
+        executor = ToolExecutor(confirm_callback=callback)
+        registry = self._make_registry_with_confirm(["bash"])
+
+        result = executor.run("bash -c 'echo hi'", registry)
+
+        callback.assert_called_once_with("bash -c 'echo hi'")
+        assert result.success is False
+        assert result.stdout == "Denied by user."
+        assert result.exit_code == -1
+        registry.get_provider.return_value.execute.assert_not_called()
+
+    @patch("builtins.input", return_value="n")
+    def test_confirm_denied_stdin_fallback(self, mock_input):
+        """Without callback, 'n' via input() denies the tool call."""
+        executor = ToolExecutor()  # no callback
+        registry = self._make_registry_with_confirm(["bash"])
+
+        with patch.dict("sys.modules", {"rich": None, "rich.prompt": None}):
+            result = executor.run("bash -c 'ls'", registry)
+
+        assert result.success is False
+        assert result.stdout == "Denied by user."
+        registry.get_provider.return_value.execute.assert_not_called()
+
+    @patch("builtins.input", return_value="y")
+    def test_confirm_approved_stdin_fallback(self, mock_input):
+        """Without callback, 'y' via input() approves the tool call."""
+        executor = ToolExecutor()
+        registry = self._make_registry_with_confirm(["echo"])
+
+        with patch.dict("sys.modules", {"rich": None, "rich.prompt": None}):
+            result = executor.run("echo ok", registry)
+
+        assert result.success is True
+
+    def test_no_confirmation_for_non_confirm_mode(self):
+        """Tools that don't require confirmation execute without prompting."""
+        mock_provider = Mock()
+        mock_provider.execute.return_value = ToolResult(
+            success=True,
+            stdout="ok",
+            stderr="",
+            exit_code=0,
+            execution_time=0.01,
+            command="echo ok",
+        )
+
+        callback = Mock(return_value=False)
+        executor = ToolExecutor(confirm_callback=callback)
+
+        registry = Mock()
+        registry.is_allowed.return_value = True
+        registry.requires_confirmation.return_value = False
+        registry.get_provider.return_value = mock_provider
+
+        result = executor.run("echo ok", registry)
+
+        callback.assert_not_called()
+        assert result.success is True
 
 
 if __name__ == "__main__":

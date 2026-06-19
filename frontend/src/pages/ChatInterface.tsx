@@ -1,10 +1,12 @@
-import { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useChatStore, Message } from '../store/chatStore'
 import { useAgentStore } from '../store/agentStore'
 import { useSocketStore } from '../store/socketStore'
-import { Send, Plus, Trash2, Settings, Wrench } from 'lucide-react'
+import { useConfirmStore } from '../store/confirmStore'
+import { Send, Plus, Trash2, Settings, Wrench, MoreHorizontal, X, Eye } from 'lucide-react'
 import ToolsSidebar, { ToolInfo } from '../components/ToolsSidebar'
+import { ToolConfirmationModal } from '../components/ToolConfirmationModal'
 
 export default function ChatInterface() {
   const { id } = useParams()
@@ -19,6 +21,7 @@ export default function ChatInterface() {
     updateAgent,
     updateBaseModel,
     updateEnabledTools,
+    renameConversation,
     addMessage,
     sending,
     processing,
@@ -31,6 +34,7 @@ export default function ChatInterface() {
   
   const { agents, fetchAgents } = useAgentStore()
   const { emit, on, off, connected } = useSocketStore()
+  const { setPendingConfirmation } = useConfirmStore()
   
   const [inputMessage, setInputMessage] = useState('')
   const [selectedAgent, setSelectedAgent] = useState<string | undefined>()
@@ -46,7 +50,18 @@ export default function ChatInterface() {
   const [agentStatus, setAgentStatus] = useState<
     { status: string; detail?: string | null } | null
   >(null)
+  // Options menu and modals for sidebar chat items
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  const [traceConvId, setTraceConvId] = useState<string | null>(null)
+  const [traceData, setTraceData] = useState<{ systemPrompt?: string; convTitle?: string; messages: Array<{ id: string; role: string; content: string; timestamp: string }> } | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  // Tracks the last finalized message id to prevent late agent_status events
+  // from re-activating the thinking indicator after streaming completes.
+  const finalizedMessageIdRef = useRef<string | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   
   useEffect(() => {
     fetchConversations()
@@ -146,6 +161,7 @@ export default function ChatInterface() {
       if (currentConversation && data.conversation_id === currentConversation.id) {
         console.error('Message error:', data.error)
         setProcessing(data.conversation_id, false)
+        setAgentStatus(null)
       }
     }
 
@@ -173,6 +189,11 @@ export default function ChatInterface() {
     const handleStreamEnd = (data: any) => {
       console.log('🏁 stream_end received:', data)
       if (currentConversation && data.conversation_id === currentConversation.id) {
+        // Record the finalized message id so any late-arriving agent_status
+        // events for this message are silently dropped.
+        if (data.message?.id) {
+          finalizedMessageIdRef.current = data.message.id
+        }
         finalizeStreaming(data.conversation_id, data.message)
         setAgentStatus(null)
       }
@@ -180,8 +201,22 @@ export default function ChatInterface() {
 
     const handleAgentStatus = (data: any) => {
       if (currentConversation && data.conversation_id === currentConversation.id) {
+        // Drop status updates that belong to an already-finalized message to
+        // prevent the thinking indicator from lingering after stream_end.
+        if (data.message_id && data.message_id === finalizedMessageIdRef.current) {
+          return
+        }
         setAgentStatus({ status: data.status, detail: data.detail })
       }
+    }
+
+    const handleToolConfirmationRequest = (data: any) => {
+      setPendingConfirmation({
+        requestId: data.request_id,
+        command: data.command,
+        conversationId: data.conversation_id,
+        messageId: data.message_id,
+      })
     }
     
     on('message_response', handleMessageResponse)
@@ -191,6 +226,7 @@ export default function ChatInterface() {
     on('stream_chunk', handleStreamChunk)
     on('stream_end', handleStreamEnd)
     on('agent_status', handleAgentStatus)
+    on('tool_confirmation_request', handleToolConfirmationRequest)
     
     console.log('✅ Socket handlers registered')
     
@@ -203,9 +239,23 @@ export default function ChatInterface() {
       off('stream_chunk', handleStreamChunk)
       off('stream_end', handleStreamEnd)
       off('agent_status', handleAgentStatus)
+      off('tool_confirmation_request', handleToolConfirmationRequest)
     }
   }, [currentConversation, on, off, addMessage, setProcessing, startStreaming, appendStreamChunk, finalizeStreaming])
-  
+
+  // Close options menu when clicking outside of it
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpenMenuId(null)
+      }
+    }
+    if (openMenuId) {
+      document.addEventListener('mousedown', handler)
+    }
+    return () => document.removeEventListener('mousedown', handler)
+  }, [openMenuId])
+
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || !currentConversation || !connected) return
     
@@ -240,14 +290,53 @@ export default function ChatInterface() {
   }
   
   const handleDeleteConversation = async (convId: string) => {
-    if (confirm('Are you sure you want to delete this conversation?')) {
-      await deleteConversation(convId)
-      if (currentConversation?.id === convId) {
-        navigate('/chat')
-      }
+    await deleteConversation(convId)
+    if (currentConversation?.id === convId) {
+      navigate('/chat')
     }
   }
-  
+
+  const handleStartRename = (conv: { id: string; title: string }) => {
+    setRenamingId(conv.id)
+    setRenameValue(conv.title)
+    setOpenMenuId(null)
+  }
+
+  const handleConfirmRename = async () => {
+    if (!renamingId) return
+    const trimmed = renameValue.trim()
+    if (trimmed) {
+      await renameConversation(renamingId, trimmed)
+    }
+    setRenamingId(null)
+  }
+
+  const handleShowTrace = async (convId: string, agentId?: string | null, convTitle?: string) => {
+    setOpenMenuId(null)
+    try {
+      const convResp = await fetch(`/api/v1/chat/conversations/${convId}`)
+      if (!convResp.ok) return
+      const convData = await convResp.json()
+      let systemPrompt: string | undefined
+      if (agentId) {
+        try {
+          const agentResp = await fetch(`/api/v1/agents/${agentId}`)
+          if (agentResp.ok) {
+            const agentData = await agentResp.json()
+            systemPrompt = agentData?.agent?.config?.system_prompt
+          }
+        } catch {
+          // system prompt unavailable — trace still shows
+        }
+      }
+      setTraceData({ systemPrompt, convTitle, messages: convData.conversation.messages })
+      setTraceConvId(convId)
+    } catch {
+      // silently ignore — trace unavailable
+    }
+  }
+
+
   const handleAgentChange = async (agentId: string) => {
     if (!currentConversation) return
     
@@ -340,21 +429,69 @@ export default function ChatInterface() {
                   : 'hover:bg-gray-700'
               }`}
             >
+              {renamingId === conv.id ? (
+                <input
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onBlur={handleConfirmRename}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); handleConfirmRename() }
+                    if (e.key === 'Escape') { setRenamingId(null) }
+                  }}
+                  autoFocus
+                  className="w-full px-3 py-2 bg-gray-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                />
+              ) : (
+                <button
+                  onClick={() => navigate(`/chat/${conv.id}`)}
+                  className="w-full text-left px-3 py-2 pr-8"
+                >
+                  <div className="font-medium truncate">{conv.title}</div>
+                  <div className="text-xs text-gray-400">
+                    {conv.message_count} messages
+                  </div>
+                </button>
+              )}
+              {/* Options kebab button */}
               <button
-                onClick={() => navigate(`/chat/${conv.id}`)}
-                className="w-full text-left px-3 py-2"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setOpenMenuId(openMenuId === conv.id ? null : conv.id)
+                }}
+                className="absolute top-2 right-1 p-1 opacity-0 group-hover:opacity-100 hover:bg-gray-600 rounded transition-opacity"
+                title="Options"
               >
-                <div className="font-medium truncate">{conv.title}</div>
-                <div className="text-xs text-gray-400">
-                  {conv.message_count} messages
+                <MoreHorizontal className="w-3 h-3" />
+              </button>
+              {/* Dropdown options menu */}
+              {openMenuId === conv.id && (
+                <div
+                  ref={menuRef}
+                  className="absolute right-0 top-8 bg-gray-700 border border-gray-600 rounded-lg shadow-xl z-50 min-w-[160px] py-1"
+                >
+                  <button
+                    onClick={() => handleStartRename(conv)}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-600 flex items-center gap-2"
+                  >
+                    <span>Rename</span>
+                  </button>
+                  <button
+                    onClick={() => handleShowTrace(conv.id, conv.agent_id, conv.title)}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-600 flex items-center gap-2"
+                  >
+                    <Eye className="w-3 h-3" />
+                    <span>Show Full Trace</span>
+                  </button>
+                  <div className="border-t border-gray-600 my-1" />
+                  <button
+                    onClick={() => { setDeleteConfirmId(conv.id); setOpenMenuId(null) }}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-red-600 text-red-300 hover:text-white flex items-center gap-2"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    <span>Delete</span>
+                  </button>
                 </div>
-              </button>
-              <button
-                onClick={() => handleDeleteConversation(conv.id)}
-                className="absolute top-2 right-2 p-1 opacity-0 group-hover:opacity-100 hover:bg-red-600 rounded transition-opacity"
-              >
-                <Trash2 className="w-3 h-3" />
-              </button>
+              )}
             </div>
           ))}
         </div>
@@ -549,8 +686,166 @@ export default function ChatInterface() {
         onEnableAll={handleEnableAllTools}
         onDisableAll={handleDisableAllTools}
       />
+
+      {/* Tool call confirmation modal */}
+      <ToolConfirmationModal />
+
+      {/* Delete confirmation modal */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-gray-800 rounded-xl p-6 max-w-sm w-full mx-4 space-y-4 border border-gray-700 shadow-2xl">
+            <h3 className="text-lg font-semibold flex items-center gap-2 text-red-300">
+              <Trash2 className="w-5 h-5" />
+              Delete Conversation
+            </h3>
+            <p className="text-sm text-gray-300">
+              Delete &ldquo;{conversations.find((c) => c.id === deleteConfirmId)?.title}&rdquo;?
+              This action cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setDeleteConfirmId(null)}
+                className="px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const id = deleteConfirmId
+                  setDeleteConfirmId(null)
+                  handleDeleteConversation(id)
+                }}
+                className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-sm"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Full trace modal */}
+      {traceConvId && traceData && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-3xl max-h-[85vh] flex flex-col mx-4 shadow-2xl">
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 border-b border-gray-700 flex-shrink-0">
+              <div>
+                <h3 className="font-semibold flex items-center gap-2">
+                  <Eye className="w-4 h-4 text-primary-400" />
+                  Full Conversation Trace
+                </h3>
+                {traceData.convTitle && (
+                  <p className="text-xs text-gray-400 mt-0.5">{traceData.convTitle}</p>
+                )}
+              </div>
+              <button
+                onClick={() => { setTraceConvId(null); setTraceData(null) }}
+                className="p-2 hover:bg-gray-700 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            {/* Scrollable body */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {/* System prompt block */}
+              {traceData.systemPrompt && (
+                <div className="rounded-lg border border-amber-800/50 bg-amber-950/30 px-4 py-3">
+                  <div className="text-xs font-semibold text-amber-400 mb-1 uppercase tracking-wide">
+                    System Prompt
+                  </div>
+                  <div className="text-sm text-amber-200/80 whitespace-pre-wrap">
+                    {traceData.systemPrompt}
+                  </div>
+                </div>
+              )}
+              {/* Messages */}
+              {traceData.messages.map((msg) => (
+                <div key={msg.id} className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs font-semibold uppercase tracking-wide px-2 py-0.5 rounded ${
+                      msg.role === 'user'
+                        ? 'bg-primary-900/60 text-primary-300'
+                        : msg.role === 'system'
+                        ? 'bg-amber-900/60 text-amber-300'
+                        : 'bg-gray-700 text-gray-300'
+                    }`}>
+                      {msg.role}
+                    </span>
+                    <span className="text-xs text-gray-500">
+                      {new Date(msg.timestamp).toLocaleTimeString()}
+                    </span>
+                  </div>
+                  {/* Render assistant messages: split think blocks from response */}
+                  {msg.role === 'assistant'
+                    ? renderTraceAssistantContent(msg.content)
+                    : (
+                      <div className="text-sm text-gray-200 whitespace-pre-wrap pl-1">
+                        {msg.content}
+                      </div>
+                    )
+                  }
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
+}
+
+/** Split an assistant message into think blocks and regular content for the trace view. */
+function renderTraceAssistantContent(content: string): React.ReactNode {
+  // Match <think>...</think> blocks (possibly multiline)
+  const parts: React.ReactNode[] = []
+  const regex = /<think>([\s\S]*?)<\/think>/g
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  while ((match = regex.exec(content)) !== null) {
+    // Text before the think block
+    if (match.index > lastIndex) {
+      const before = content.slice(lastIndex, match.index)
+      if (before.trim()) {
+        parts.push(
+          <div key={`text-${lastIndex}`} className="text-sm text-gray-200 whitespace-pre-wrap pl-1">
+            {before}
+          </div>
+        )
+      }
+    }
+    // Think block
+    parts.push(
+      <div
+        key={`think-${match.index}`}
+        className="text-sm text-gray-400 whitespace-pre-wrap pl-3 border-l-2 border-amber-700/60 bg-gray-800/60 rounded-r py-1 pr-2 italic"
+      >
+        <span className="text-xs text-amber-500/80 font-semibold not-italic uppercase tracking-wide mr-1">thinking:</span>
+        {match[1]}
+      </div>
+    )
+    lastIndex = match.index + match[0].length
+  }
+
+  // Remaining text after last think block
+  if (lastIndex < content.length) {
+    const remaining = content.slice(lastIndex)
+    if (remaining.trim()) {
+      parts.push(
+        <div key={`text-end`} className="text-sm text-gray-200 whitespace-pre-wrap pl-1">
+          {remaining}
+        </div>
+      )
+    }
+  }
+
+  // If no think blocks found, render as plain text
+  if (parts.length === 0) {
+    return <div className="text-sm text-gray-200 whitespace-pre-wrap pl-1">{content}</div>
+  }
+
+  return <div className="space-y-1">{parts}</div>
 }
 
 function statusLabel(

@@ -62,11 +62,62 @@ class StubAgent:
         return self._responses.pop(0)
 
 
+class _PythonProvider:
+    """Minimal ToolProvider that runs the ``python`` executable via subprocess."""
+
+    def __init__(self, python_path: str) -> None:
+        self._python = python_path
+
+    def discover(self, **_kwargs):
+        return {}
+
+    def can_execute(self, tool_name: str) -> bool:
+        return tool_name == "python"
+
+    def execute(self, command: str, context=None):
+        import shlex
+        import subprocess
+        import time
+        from pithos.tools.models import ToolResult
+
+        start = time.monotonic()
+        try:
+            parts = shlex.split(command)
+            parts[0] = self._python
+            proc = subprocess.run(parts, capture_output=True, text=True, timeout=60)
+            return ToolResult(
+                success=proc.returncode == 0,
+                stdout=proc.stdout,
+                stderr=proc.stderr,
+                exit_code=proc.returncode,
+                execution_time=time.monotonic() - start,
+                command=command,
+            )
+        except Exception as exc:
+            return ToolResult(
+                success=False,
+                stdout="",
+                stderr=str(exc),
+                exit_code=-1,
+                execution_time=time.monotonic() - start,
+                command=command,
+            )
+
+
 class StubToolRegistry:
     """Registry stub allowing only ``python`` for the RunTests node."""
 
     def __init__(self, python_path: str) -> None:
         self._python = python_path
+        self._provider = _PythonProvider(python_path)
+
+    def is_allowed(self, name: str) -> bool:
+        return name == "python"
+
+    def get_provider(self, name: str):
+        if name == "python":
+            return self._provider
+        return None
 
     def get_tool(self, name: str):
         if name != "python":
@@ -77,6 +128,9 @@ class StubToolRegistry:
 
     def list_tools(self) -> list[str]:
         return ["python"]
+
+    def requires_confirmation(self, name: str) -> bool:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -222,7 +276,7 @@ def test_general_coding_flowchart_drives_repo_to_green(tmp_path: Path) -> None:
     sc["repo_root"] = repo.as_posix()
     sc["test_target"] = (repo / "test_mymod.py").as_posix()
     sc["task"] = "Fix the add() function so that the tests pass."
-    sc["tool_executor"] = ToolExecutor(timeout=30)
+    sc["tool_executor"] = ToolExecutor()
     sc["tool_registry"] = StubToolRegistry(python_path=sys.executable)
 
     # ---- run ------------------------------------------------------------

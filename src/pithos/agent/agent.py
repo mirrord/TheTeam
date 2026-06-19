@@ -7,12 +7,13 @@ import uuid
 import yaml
 
 from ..config_manager import ConfigManager
-from ..tools import ToolRegistry, ToolExecutor, MemoryOpRequest, MemoryOpExtractor
-from ..tools.flowchart_tool import FlowchartToolExecutor
+from ..tools import ToolRegistry, ToolExecutor
+from ..tools.provider import ToolProvider
 from ..context import AgentContext
 from .history import ConversationStore, HistorySearchResult
-from .compaction import CompactionConfig, MemoryCompactor
-from .recall import RecallConfig, AutoRecall
+from .compaction import CompactionConfig
+from .recall import RecallConfig
+from .memory import MemoryModule
 from ..metrics import MetricsCollector
 
 try:
@@ -52,26 +53,22 @@ class Agent(ABC):
         self.tools_enabled = False
         self.tool_registry: Optional[ToolRegistry] = None
         self.tool_executor: Optional[ToolExecutor] = None
-        self.flowchart_executor: Optional[FlowchartToolExecutor] = None
-        # Web-research virtual tool executor (set by enable_tools when enabled)
-        self.web_research_executor: Optional[Any] = None
         self.tool_auto_loop = False
         self.tool_max_iterations = 5
         # Memory tool support
         self.memory_enabled = False
         self.memory_store: Optional[Any] = None  # MemoryStore instance
+        # Memory module — manages recall, compaction, and context prompt injection.
+        # Created lazily by enable_memory() / enable_recall() / enable_compaction().
+        self._memory_module: Optional[MemoryModule] = None
+        # Memory provider — set by enable_memory(); used for post-stream op extraction.
+        self._memory_provider: Optional[Any] = None
         # Conversation history support
         self.history_store: Optional[ConversationStore] = None
         self.session_id: Optional[str] = None
         self._last_history_message_id: Optional[str] = None
         # Metrics collection (optional, attached via attach_metrics())
         self.metrics: Optional[MetricsCollector] = None
-        # Automatic context compaction (optional, enabled via enable_compaction())
-        self.compaction_enabled = False
-        self._compactor: Optional[MemoryCompactor] = None
-        # Automatic memory recall (optional, enabled via enable_recall())
-        self.recall_enabled = False
-        self._auto_recall: Optional[AutoRecall] = None
         # Chain-of-thought inference flowchart (optional)
         self.inference_flowchart: Optional[Any] = None
         self._inference_config: Optional[Any] = None
@@ -302,6 +299,44 @@ class Agent(ABC):
         """
         self.metrics = collector
 
+    # ------------------------------------------------------------------
+    # Memory module helpers
+    # ------------------------------------------------------------------
+
+    def _get_or_create_memory_module(self) -> MemoryModule:
+        """Return the existing :class:`~pithos.agent.memory.MemoryModule` or create one."""
+        if self._memory_module is None:
+            self._memory_module = MemoryModule()
+        return self._memory_module
+
+    @property
+    def recall_enabled(self) -> bool:
+        """Return ``True`` if automatic memory recall is active."""
+        return self._memory_module is not None and self._memory_module.recall_enabled
+
+    @property
+    def compaction_enabled(self) -> bool:
+        """Return ``True`` if automatic context compaction is active."""
+        return (
+            self._memory_module is not None and self._memory_module.compaction_enabled
+        )
+
+    @property
+    def _auto_recall(self) -> Optional[Any]:
+        """Return the :class:`~pithos.agent.recall.AutoRecall` instance, or ``None``."""
+        return (
+            self._memory_module._auto_recall
+            if self._memory_module is not None
+            else None
+        )
+
+    @property
+    def _compactor(self) -> Optional[Any]:
+        """Return the :class:`~pithos.agent.compaction.MemoryCompactor` instance, or ``None``."""
+        return (
+            self._memory_module._compactor if self._memory_module is not None else None
+        )
+
     def enable_compaction(self, config: Optional[CompactionConfig] = None) -> None:
         """Enable automatic context compaction.
 
@@ -314,13 +349,12 @@ class Agent(ABC):
                 :class:`~pithos.agent.compaction.CompactionConfig` with its
                 default values when not supplied.
         """
-        self.compaction_enabled = True
-        self._compactor = MemoryCompactor(config or CompactionConfig())
+        self._get_or_create_memory_module().enable_compaction(config)
 
     def disable_compaction(self) -> None:
         """Disable automatic context compaction."""
-        self.compaction_enabled = False
-        self._compactor = None
+        if self._memory_module is not None:
+            self._memory_module.disable_compaction()
 
     def enable_recall(self, config: Optional[RecallConfig] = None) -> None:
         """Enable automatic memory recall.
@@ -340,13 +374,12 @@ class Agent(ABC):
                 :class:`~pithos.agent.recall.RecallConfig` with its default
                 values when not supplied.
         """
-        self.recall_enabled = True
-        self._auto_recall = AutoRecall(config or RecallConfig())
+        self._get_or_create_memory_module().enable_recall(config)
 
     def disable_recall(self) -> None:
         """Disable automatic memory recall."""
-        self.recall_enabled = False
-        self._auto_recall = None
+        if self._memory_module is not None:
+            self._memory_module.disable_recall()
 
     def set_inference_flowchart(
         self,
@@ -535,13 +568,10 @@ class Agent(ABC):
         context = self.contexts[ctx]
 
         # Auto-recall: inject relevant memories before the user message.
-        if self.recall_enabled and self._auto_recall:
-            try:
-                self._auto_recall.inject_recall(
-                    agent=self, context=context, content=content, model=model
-                )
-            except Exception as exc:
-                logger.warning("Auto-recall failed (non-fatal): %s", exc)
+        if self._memory_module is not None:
+            self._memory_module.before_send(
+                agent=self, context=context, content=content, model=model
+            )
 
         # Inference flowchart short-circuit (single-chunk yield).
         if self.inference_flowchart and not self._running_inference:
@@ -674,18 +704,16 @@ class Agent(ABC):
         self._history_persist(ctx, "assistant", accumulated, set_as_last=True)
 
         # Memory operations post-stream.
-        if self.memory_enabled and self.memory_store:
-            mem_ops = self._extract_memory_ops(accumulated)
-            if mem_ops:
-                result_msg = self._execute_memory_ops(mem_ops)
-                context.add_message(Msg("system", result_msg))
+        if self.memory_enabled and self._memory_provider is not None:
+            mem_result = self._memory_provider.extract_and_execute(accumulated, self)
+            if mem_result:
+                context.add_message(Msg("system", mem_result))
 
         # Auto-compaction.
-        if self.compaction_enabled and self._compactor:
-            try:
-                self._compactor.compact(agent=self, context=context, context_name=ctx)
-            except Exception as exc:
-                logger.warning("Auto-compaction failed (non-fatal): %s", exc)
+        if self._memory_module is not None:
+            self._memory_module.after_send(
+                agent=self, context=context, response=accumulated, context_name=ctx
+            )
 
     # ------------------------------------------------------------------
     # Inference flowchart path (non-streaming; yields a single chunk)
@@ -762,22 +790,20 @@ class Agent(ABC):
                     )
 
         # Memory operations post-processing.
-        if self.memory_enabled and self.memory_store:
-            mem_ops = self._extract_memory_ops(response)
-            if mem_ops:
-                result_msg = self._execute_memory_ops(mem_ops)
-                context.add_message(Msg("system", result_msg))
+        if self.memory_enabled and self._memory_provider is not None:
+            mem_result = self._memory_provider.extract_and_execute(response, self)
+            if mem_result:
+                context.add_message(Msg("system", mem_result))
                 if self.tool_auto_loop:
                     return self.send(
                         "", context_name=ctx, workspace=workspace, verbose=verbose
                     )
 
         # Auto-compaction.
-        if self.compaction_enabled and self._compactor:
-            try:
-                self._compactor.compact(agent=self, context=context, context_name=ctx)
-            except Exception as exc:
-                logger.warning("Auto-compaction failed (non-fatal): %s", exc)
+        if self._memory_module is not None:
+            self._memory_module.after_send(
+                agent=self, context=context, response=response, context_name=ctx
+            )
 
         return response
 
@@ -841,16 +867,11 @@ class Agent(ABC):
             parts = req.command.split(None, 1) if req.command else []
             tool_name = parts[0] if parts else ""
 
-            if tool_name == "flowchart":
-                result = self._execute_flowchart_tool(
-                    parts[1] if len(parts) > 1 else ""
-                )
-            elif tool_name == "web-research":
-                result = self._execute_web_research_tool(
-                    parts[1] if len(parts) > 1 else ""
-                )
-            else:
-                result = self.tool_executor.run(req.command, self.tool_registry)
+            result = self.tool_executor.run(
+                req.command,
+                self.tool_registry,
+                context={"agent": self},
+            )
 
             # Record tool call metrics
             if self.metrics is not None:
@@ -865,89 +886,6 @@ class Agent(ABC):
             results.append(self._format_tool_result(result))
 
         return "\n\n".join(results)
-
-    def _execute_flowchart_tool(self, args_str: str) -> Any:
-        """Run a flowchart invoked via the ``flowchart`` virtual tool.
-
-        Expected format: ``<flowchart_name> [input text ...]``
-
-        The calling agent is injected into the flowchart's agent dict under
-        every required agent name so single-agent flowcharts work
-        out-of-the-box.  For multi-agent flowcharts the caller is used as a
-        fallback for any unresolved agent name.
-        """
-        from ..tools.models import ToolResult
-
-        if not self.flowchart_executor:
-            return ToolResult(
-                success=False,
-                stdout="",
-                stderr="Flowchart tools are not enabled.",
-                exit_code=-1,
-                execution_time=0.0,
-                command=f"flowchart {args_str}",
-                error_hint="Enable flowcharts in tool_config.yaml under 'flowcharts.enabled: true'.",
-            )
-
-        parts = args_str.strip().split(None, 1)
-        if not parts:
-            available = self.flowchart_executor.list_flowcharts()
-            return ToolResult(
-                success=False,
-                stdout="",
-                stderr="No flowchart name provided.",
-                exit_code=-1,
-                execution_time=0.0,
-                command="flowchart",
-                error_hint=f"Usage: flowchart <name> [input]\nAvailable: {', '.join(available)}",
-            )
-
-        fc_name = parts[0]
-        fc_input = parts[1] if len(parts) > 1 else ""
-
-        # Build an agents dict: map every required agent name to *self* so
-        # that single-agent flowcharts (prompt nodes) just work.
-        from ..flowchart import Flowchart
-        from ..flownode import AgentPromptNode, GetHistoryNode, SetHistoryNode
-
-        try:
-            fc = Flowchart.from_registered(
-                fc_name, self.flowchart_executor.config_manager
-            )
-            required: set[str] = set()
-            for nid in fc.graph.nodes:
-                nobj = fc.graph.nodes[nid]["nodeobj"]
-                if isinstance(nobj, (AgentPromptNode, GetHistoryNode, SetHistoryNode)):
-                    required.add(nobj.agent)
-            agents_dict = {name: self for name in required}
-        except Exception:
-            agents_dict = {}
-
-        return self.flowchart_executor.run(fc_name, fc_input, agents_dict)
-
-    def _execute_web_research_tool(self, args_str: str) -> Any:
-        """Run a research pass via the ``web-research`` virtual tool.
-
-        Expected format: ``<inquiry text...>``.
-        """
-        from ..tools.models import ToolResult
-
-        if not self.web_research_executor:
-            return ToolResult(
-                success=False,
-                stdout="",
-                stderr="Web research tool is not enabled.",
-                exit_code=-1,
-                execution_time=0.0,
-                command=f"web-research {args_str}",
-                error_hint=(
-                    "Enable it under 'web_research.enabled: true' in tool_config.yaml "
-                    "and install the optional web deps: pip install .[web]"
-                ),
-            )
-
-        inquiry = (args_str or "").strip()
-        return self.web_research_executor.run(inquiry)
 
     def _format_tool_result(self, result) -> str:
         """Format a tool result with clear error feedback for the agent.
@@ -982,33 +920,47 @@ class Agent(ABC):
     ) -> None:
         """Enable tool calling for this agent.
 
+        Builds a list of ToolProviders from the tool configuration, creates a
+        ToolRegistry populated with those providers, then creates a ToolExecutor
+        that routes all tool calls through the registry.
+
         Args:
             config_manager: ConfigManager for loading tool configurations.
             auto_loop: Whether to automatically continue conversation after tool execution.
             max_iterations: Maximum number of tool calling iterations to prevent loops.
         """
-        self.tools_enabled = True
-        self.tool_registry = ToolRegistry(config_manager)
+        from ..tools.cli_provider import CLIToolProvider
+        from ..tools.flowchart_tool import FlowchartToolExecutor
+        from ..tools.safety import CommandSafetyChecker
 
-        # Get timeout and max_output_size from config
-        tool_config = self.tool_registry.config
+        # Load config via a temporary registry (reads tool_config.yaml).
+        _tmp = ToolRegistry(config_manager, providers=[])
+        tool_config = _tmp.config
+
         timeout = tool_config.get("timeout", 30)
         max_output_size = tool_config.get("max_output_size", 10000)
 
-        self.tool_executor = ToolExecutor(timeout, max_output_size)
-        self.tool_auto_loop = auto_loop
-        self.tool_max_iterations = max_iterations
+        # Always register a CLI provider.
+        safety = CommandSafetyChecker(tool_config.get("safety", {}))
+        cli = CLIToolProvider(
+            config=tool_config,
+            timeout=timeout,
+            max_output_size=max_output_size,
+            safety_checker=safety,
+        )
+        providers: list[ToolProvider] = [cli]
 
-        # Set up flowchart tool executor if flowcharts are enabled
+        # Optionally add a flowchart provider.
         fc_config = tool_config.get("flowcharts", {})
         if fc_config.get("enabled", False):
-            self.flowchart_executor = FlowchartToolExecutor(
-                config_manager=config_manager,
-                timeout=fc_config.get("timeout", 120),
-                max_steps=fc_config.get("max_steps", 100),
+            providers.append(
+                FlowchartToolExecutor(
+                    config_manager=config_manager,
+                    max_steps=fc_config.get("max_steps", 100),
+                )
             )
 
-        # Set up web-research virtual tool executor when enabled.
+        # Optionally add a web-research provider.
         wr_config = tool_config.get("web_research", {})
         if wr_config.get("enabled", False):
             try:
@@ -1018,13 +970,17 @@ class Agent(ABC):
                 )
 
                 if WEB_RESEARCH_AVAILABLE:
-                    self.web_research_executor = WebResearcherToolExecutor(
-                        config_manager=config_manager
+                    providers.append(
+                        WebResearcherToolExecutor(config_manager=config_manager)
                     )
             except Exception:
-                # Optional feature - if deps are missing, the tool simply
-                # remains unavailable; the agent continues to work.
-                self.web_research_executor = None
+                pass  # optional feature — silently skip if deps are missing
+
+        self.tool_registry = ToolRegistry(config_manager, providers=providers)
+        self.tool_executor = ToolExecutor()
+        self.tools_enabled = True
+        self.tool_auto_loop = auto_loop
+        self.tool_max_iterations = max_iterations
 
         # Enhance system prompt with tool usage instructions
         self._add_tool_prompt_to_contexts()
@@ -1035,6 +991,7 @@ class Agent(ABC):
             return
 
         tool_prompt = self._get_tool_usage_prompt()
+        print("Tool usage prompt:\n", tool_prompt)  # Debug output
 
         for ctx_name, context in self.contexts.items():
             current_prompt = context.get_system_prompt()
@@ -1092,11 +1049,22 @@ Only use tools when necessary. If a tool fails, you will receive clear error fee
                 "Memory tool is not available. Install with: pip install chromadb"
             )
 
+        from ..tools.memory_provider import MemoryToolProvider
+
         self.memory_enabled = True
         self.memory_store = MemoryStore(config_manager, persist_directory)
 
-        # Enhance system prompt with memory usage instructions
-        self._add_memory_prompt_to_contexts()
+        # Create the provider and register it with the tool registry (if tools enabled).
+        provider_config = (
+            self.tool_registry.config if self.tool_registry is not None else {}
+        )
+        self._memory_provider = MemoryToolProvider(provider_config)
+        if self.tool_registry is not None:
+            self.tool_registry.register_provider(self._memory_provider)
+
+        # Create module if not already present and inject memory usage instructions.
+        module = self._get_or_create_memory_module()
+        module.inject_memory_prompt(self)
 
     def enable_tag_suggestions(
         self,
@@ -1135,157 +1103,6 @@ Only use tools when necessary. If a tool fails, you will receive clear error fee
             temperature=temperature,
             timeout=timeout,
         )
-
-    def _add_memory_prompt_to_contexts(self) -> None:
-        """Add memory usage instructions to all context system prompts."""
-        if not self.memory_store:
-            return
-
-        memory_prompt = self._get_memory_usage_prompt()
-
-        for ctx_name, context in self.contexts.items():
-            current_prompt = context.get_system_prompt()
-            if "You have access to a knowledge memory system" not in current_prompt:
-                new_prompt = (
-                    current_prompt + "\n\n" + memory_prompt
-                    if current_prompt
-                    else memory_prompt
-                )
-                context.set_system_prompt(new_prompt)
-
-    def _get_memory_usage_prompt(self) -> str:
-        """Generate memory usage instructions for system prompt.
-
-        Returns:
-            Formatted prompt with memory usage instructions.
-        """
-        if not hasattr(self, "_memory_extractor"):
-            self._memory_extractor = MemoryOpExtractor()
-
-        categories = []
-        if self.memory_store:
-            try:
-                categories = self.memory_store.list_categories()
-            except Exception:
-                pass
-
-        categories_text = ", ".join(categories) if categories else "No categories yet"
-        format_examples = self._memory_extractor.get_usage_examples()
-
-        return f"""You have access to a knowledge memory system organized by categories.
-
-{format_examples}
-
-Current categories: {categories_text}
-
-Use memory to:
-1. Store important facts, insights, or learnings
-2. Retrieve relevant context from previous interactions
-3. Build up domain knowledge over time
-
-Results will be provided to you automatically. If an operation fails, you will receive clear error feedback."""
-
-    def _extract_memory_ops(self, content: str) -> list[MemoryOpRequest]:
-        """Extract memory operations from agent response using multiple formats.
-
-        Args:
-            content: Agent response text.
-
-        Returns:
-            List of MemoryOpRequest objects.
-        """
-        if not hasattr(self, "_memory_extractor"):
-            self._memory_extractor = MemoryOpExtractor()
-
-        return self._memory_extractor.extract(content)
-
-    def _execute_memory_ops(self, operations: list[MemoryOpRequest]) -> str:
-        """Execute memory operations and format results with clear error feedback.
-
-        Args:
-            operations: List of MemoryOpRequest objects.
-
-        Returns:
-            Formatted string with operation results.
-        """
-        if not self.memory_store:
-            return "Memory system is not available."
-
-        results = []
-        for op in operations:
-            try:
-                if op.operation == "store":
-                    if not op.content:
-                        results.append(
-                            f"✗ Store operation failed: No content provided\n"
-                            f"💡 Hint: Use format like STORE[{op.category}]: your content here"
-                        )
-                        continue
-
-                    entry_id = self.memory_store.store(op.category, op.content)
-                    # Record store metric
-                    if self.metrics is not None:
-                        try:
-                            self.metrics.record_memory_store()
-                        except Exception:
-                            pass
-                    store_msg = f"✓ Stored in {op.category}: {op.content[:50]}... (ID: {entry_id})"
-                    # Append suggested tags to the result message when available.
-                    if self.memory_store.tag_suggestions_enabled:
-                        try:
-                            entry_meta = self.memory_store.get_all_entries(op.category)
-                            tags: list[str] = []
-                            for e in entry_meta:
-                                if e.get("id") == entry_id:
-                                    tags = e.get("metadata", {}).get(
-                                        "suggested_tags", []
-                                    )
-                                    break
-                            if tags:
-                                store_msg += f"\n  🏷 Suggested tags: {', '.join(tags)}"
-                        except Exception:
-                            pass
-                    results.append(store_msg)
-
-                elif op.operation == "retrieve":
-                    if not op.query:
-                        results.append(
-                            f"✗ Retrieve operation failed: No query provided\n"
-                            f"💡 Hint: Use format like RETRIEVE[{op.category}]: your search query"
-                        )
-                        continue
-
-                    search_results = self.memory_store.retrieve(op.category, op.query)
-                    # Record retrieve metric (hit if ≥1 result returned)
-                    if self.metrics is not None:
-                        try:
-                            self.metrics.record_memory_retrieve(
-                                result_count=len(search_results)
-                            )
-                        except Exception:
-                            pass
-                    if search_results:
-                        results.append(
-                            f"✓ Retrieved {len(search_results)} results from {op.category} for query: {op.query}"
-                        )
-                        for i, result in enumerate(search_results[:3], 1):
-                            results.append(
-                                f"  {i}. [Score: {result.relevance_score:.2f}] {result.content}"
-                            )
-                        if len(search_results) > 3:
-                            results.append(f"  ... and {len(search_results) - 3} more")
-                    else:
-                        results.append(
-                            f"✗ No relevant results found in {op.category} for: {op.query}"
-                        )
-
-            except Exception as e:
-                results.append(
-                    f"✗ Error in {op.operation} operation: {str(e)}\n"
-                    f"💡 Hint: Check that the category name is valid and content/query is properly formatted"
-                )
-
-        return "\n".join(results)
 
     # ------------------------------------------------------------------
     # Conversation history

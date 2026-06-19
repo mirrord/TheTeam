@@ -1,12 +1,15 @@
 """Tool calling system for pithos agents - CLI tool discovery and execution."""
 
 from .models import ToolMetadata, ToolCallRequest, ToolResult
+from .provider import ToolProvider
 from .registry import ToolRegistry
 from .executor import ToolExecutor, format_tool_result_for_agent
 from .extractor import ToolCallExtractor
 from .memory_ops import MemoryOpRequest, MemoryOpExtractor
 from .memory_tool import MemoryStore, MemoryEntry, SearchResult, CHROMADB_AVAILABLE
+from .memory_provider import MemoryToolProvider
 from .tag_suggester import CategoryTagSuggester, TagSuggestion
+from .cli_provider import CLIToolProvider
 from .flowchart_tool import FlowchartToolExecutor
 from .cli import tool_cli_main, main
 
@@ -14,6 +17,7 @@ __all__ = [
     "ToolMetadata",
     "ToolCallRequest",
     "ToolResult",
+    "ToolProvider",
     "ToolRegistry",
     "ToolExecutor",
     "format_tool_result_for_agent",
@@ -23,8 +27,10 @@ __all__ = [
     "MemoryStore",
     "MemoryEntry",
     "SearchResult",
+    "MemoryToolProvider",
     "CategoryTagSuggester",
     "TagSuggestion",
+    "CLIToolProvider",
     "FlowchartToolExecutor",
     "tool_cli_main",
     "main",

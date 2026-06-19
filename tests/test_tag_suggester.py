@@ -20,7 +20,11 @@ from pithos.tools.tag_suggester import (
 _VALID_RESPONSE = json.dumps(
     [
         {"category": "python", "confidence": 0.95, "rationale": "Discusses Python."},
-        {"category": "programming", "confidence": 0.8, "rationale": "General code topic."},
+        {
+            "category": "programming",
+            "confidence": 0.8,
+            "rationale": "General code topic.",
+        },
     ]
 )
 
@@ -83,7 +87,10 @@ class TestParseSuggestions:
 
     def test_capped_at_max(self):
         raw = json.dumps(
-            [{"category": f"tag{i}", "confidence": 0.5, "rationale": ""} for i in range(10)]
+            [
+                {"category": f"tag{i}", "confidence": 0.5, "rationale": ""}
+                for i in range(10)
+            ]
         )
         assert len(_parse_suggestions(raw, 2)) == 2
 
@@ -169,7 +176,9 @@ class TestCategoryTagSuggester:
         suggester = CategoryTagSuggester(model="llama3")
         mock_response = _mock_ollama_chat(_VALID_RESPONSE)
 
-        with patch("pithos.tools.tag_suggester.ollama_chat", return_value=mock_response):
+        with patch(
+            "pithos.tools.tag_suggester.ollama_chat", return_value=mock_response
+        ):
             # The module imports ollama.chat as ollama_chat, so we patch via the module.
             # We verify separately via the unit tests above that _parse_suggestions works.
             suggester.suggest("Python uses indentation for blocks.")
@@ -263,7 +272,9 @@ class TestMemoryStoreTagSuggestions:
             "pithos.tools.tag_suggester.ollama_chat",
             return_value=mock_response,
         ):
-            results = store.suggest_categories("Python indentation rules.", model="llama3")
+            results = store.suggest_categories(
+                "Python indentation rules.", model="llama3"
+            )
         assert isinstance(results, list)
         # Results may be empty if patch path doesn't align at runtime; no exception is the goal.
 
@@ -359,8 +370,14 @@ class TestAgentTagSuggestions:
             return_value=mock_response,
         ):
             agent.enable_tag_suggestions(model="llama3")
-            ops = [MemoryOpRequest(operation="store", category="code", content="Python indentation")]
-            result = agent._execute_memory_ops(ops)
+            ops = [
+                MemoryOpRequest(
+                    operation="store", category="code", content="Python indentation"
+                )
+            ]
+            result = agent._memory_provider._execute_ops(
+                ops, agent.memory_store, agent.metrics
+            )
 
         assert "Stored in code" in result
         # Suggested tags line appears only when ChromaDB + LLM patch both work.

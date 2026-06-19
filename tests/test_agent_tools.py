@@ -19,8 +19,6 @@ class TestAgentToolCalling:
         config_file = config_dir / "tool_config.yaml"
         config_content = """
 enabled: true
-timeout: 5
-max_output_size: 1000
 mode: include
 include:
   - echo

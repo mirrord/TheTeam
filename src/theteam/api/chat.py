@@ -97,6 +97,26 @@ def send_message(conversation_id):
         return jsonify({"error": str(e)}), 500
 
 
+@bp.route("/conversations/<conversation_id>/title", methods=["PUT"])
+def rename_conversation(conversation_id):
+    """Rename a conversation."""
+    try:
+        data = request.get_json() or {}
+        title = data.get("title", "").strip()
+        if not title:
+            return jsonify({"error": "title must be a non-empty string"}), 400
+
+        success = chat_service.rename_conversation(conversation_id, title)
+        if not success:
+            return jsonify({"error": "Conversation not found"}), 404
+        return jsonify({"message": "Conversation renamed"}), 200
+    except Exception as e:
+        logger.error(
+            f"Error renaming conversation {conversation_id}: {e}", exc_info=True
+        )
+        return jsonify({"error": str(e)}), 500
+
+
 @bp.route("/conversations/<conversation_id>/agent", methods=["PUT"])
 def update_conversation_agent(conversation_id):
     """Update the agent (or base model) for a conversation.

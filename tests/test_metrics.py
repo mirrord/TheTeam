@@ -16,7 +16,6 @@ from pithos.metrics import (
     FlowchartPathEntry,
 )
 
-
 # ---------------------------------------------------------------------------
 # TokenMetrics unit tests
 # ---------------------------------------------------------------------------
@@ -589,6 +588,8 @@ class TestAgentMetricsIntegration:
         c = MetricsCollector()
         agent.attach_metrics(c)
 
+        from pithos.tools.memory_provider import MemoryToolProvider
+
         mock_store = MagicMock()
         mock_store.store.return_value = "id123"
         agent.memory_store = mock_store
@@ -598,7 +599,7 @@ class TestAgentMetricsIntegration:
                 operation="store", category="facts", content="hello world", query=None
             )
         ]
-        agent._execute_memory_ops(ops)
+        MemoryToolProvider()._execute_ops(ops, mock_store, c)
 
         snap = c.get_snapshot()
         assert snap["memory"]["store_count"] == 1
@@ -615,6 +616,8 @@ class TestAgentMetricsIntegration:
         mock_result.relevance_score = 0.9
         mock_result.content = "some fact"
 
+        from pithos.tools.memory_provider import MemoryToolProvider
+
         mock_store = MagicMock()
         mock_store.retrieve.return_value = [mock_result, mock_result]
         agent.memory_store = mock_store
@@ -624,7 +627,7 @@ class TestAgentMetricsIntegration:
                 operation="retrieve", category="facts", query="hello", content=None
             )
         ]
-        agent._execute_memory_ops(ops)
+        MemoryToolProvider()._execute_ops(ops, mock_store, c)
 
         snap = c.get_snapshot()
         assert snap["memory"]["retrieve_hits"] == 1
@@ -638,6 +641,8 @@ class TestAgentMetricsIntegration:
         c = MetricsCollector()
         agent.attach_metrics(c)
 
+        from pithos.tools.memory_provider import MemoryToolProvider
+
         mock_store = MagicMock()
         mock_store.retrieve.return_value = []
         agent.memory_store = mock_store
@@ -647,7 +652,7 @@ class TestAgentMetricsIntegration:
                 operation="retrieve", category="facts", query="nothing", content=None
             )
         ]
-        agent._execute_memory_ops(ops)
+        MemoryToolProvider()._execute_ops(ops, mock_store, c)
 
         snap = c.get_snapshot()
         assert snap["memory"]["retrieve_hits"] == 0

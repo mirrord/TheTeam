@@ -13,6 +13,7 @@ from .cli import interactive_chat, main
 from .history import ConversationStore, HistorySearchResult, MessageRecord
 from .compaction import CompactionConfig, MemoryCompactor
 from .recall import RecallConfig, AutoRecall
+from .memory import MemoryModule
 from ..context import Msg, UserMsg, AgentMsg, AgentContext
 
 __all__ = [
@@ -29,6 +30,7 @@ __all__ = [
     "MemoryCompactor",
     "RecallConfig",
     "AutoRecall",
+    "MemoryModule",
     "interactive_chat",
     "main",
 ]

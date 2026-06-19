@@ -238,6 +238,7 @@ class TestFetcher:
 
 class TestExtractor:
     def test_bs4_fallback_when_trafilatura_empty(self) -> None:
+        pytest.importorskip("bs4")
         html = (
             "<!doctype html><html><head><title>T</title></head>"
             "<body><article><p>Hello world.</p>"

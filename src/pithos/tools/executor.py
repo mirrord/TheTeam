@@ -1,195 +1,205 @@
-"""Tool executor for running CLI tools safely with timeout and output capture."""
+"""Tool executor - routes tool calls to the appropriate ToolProvider.
 
-import platform
-import subprocess
-import time
-from typing import Optional
+ToolExecutor is the single entry point for all tool execution.  It:
 
-from .models import ToolResult
+1. Parses the leading token from the command string to identify the tool.
+2. Validates the tool is registered.
+3. Looks up the owning ToolProvider via the ToolRegistry.
+4. Prompts for user confirmation when the registry or a REVIEW safety verdict
+   requires it.
+5. Delegates the actual execution to provider.execute(command, context).
+
+Safety analysis (BLOCK/REVIEW) is the responsibility of each provider; the
+CLI provider applies heuristic checks.  A safety_verdict of REVIEW on the
+returned ToolResult causes ToolExecutor to prompt for confirmation before
+delegating to the next call.
+"""
+
+import shlex
+from typing import Any, Callable, Optional
+
+from .models import RiskLevel, ToolResult
 from .registry import ToolRegistry
 
 
 class ToolExecutor:
-    """Executes CLI tools safely with timeout and output capture."""
+    """Routes tool calls to registered ToolProviders with confirmation support."""
 
-    def __init__(self, timeout: int = 30, max_output_size: int = 10000):
-        """Initialize tool executor.
+    def __init__(
+        self,
+        confirm_callback: Optional[Callable[[str], bool]] = None,
+    ) -> None:
+        """Initialise the executor.
 
         Args:
-            timeout: Maximum execution time in seconds.
-            max_output_size: Maximum size of captured output in bytes.
-
-        Raises:
-            ValueError: If timeout or max_output_size is invalid.
+            confirm_callback: Optional callable invoked when a tool requires
+                confirmation.  Receives the full command string and must return
+                True (approved) or False (denied).  When None, falls back to
+                interactive CLI prompting.
         """
-        if timeout <= 0:
-            raise ValueError("timeout must be > 0")
-        if max_output_size <= 0:
-            raise ValueError("max_output_size must be > 0")
+        self.confirm_callback = confirm_callback
 
-        self.timeout = timeout
-        self.max_output_size = max_output_size
-        self.platform = platform.system().lower()
-
-    def run(self, command: str, tool_registry: ToolRegistry) -> ToolResult:
-        """Execute a command safely with detailed error feedback.
+    def run(
+        self,
+        command: str,
+        tool_registry: ToolRegistry,
+        context: Optional[dict[str, Any]] = None,
+    ) -> ToolResult:
+        """Execute command by dispatching to the appropriate ToolProvider.
 
         Args:
-            command: Command string to execute (e.g., "python --version").
-            tool_registry: ToolRegistry for validation.
+            command: Full command string (e.g. "python --version").
+            tool_registry: Registry used to look up the owning provider.
+            context: Optional runtime context passed through to the provider
+                (e.g. {"agent": agent_instance}).
 
         Returns:
-            ToolResult with execution details and error hints.
+            ToolResult from the provider.
         """
-        start_time = time.time()
-
-        # Parse and validate command
-        tool_name, args = self._parse_command(command)
+        tool_name, _args = self._parse_command(command)
         if not tool_name:
             return ToolResult(
                 success=False,
                 stdout="",
-                stderr=f"Invalid command format: '{command}'",
+                stderr=f"Invalid command format: {command!r}",
                 exit_code=-1,
                 execution_time=0.0,
                 command=command,
-                error_hint="Command should be in format: toolname [arguments]\nExample: python --version",
+                error_hint=(
+                    "Command should be in format: toolname [arguments]\n"
+                    "Example: python --version"
+                ),
             )
 
-        # Validate tool is allowed
-        tool_meta = tool_registry.get_tool(tool_name)
-        if not tool_meta:
-            # Try to get available tools for hint
+        # Validate tool is registered.
+        if not tool_registry.is_allowed(tool_name):
             try:
                 available = tool_registry.list_tools()
-                available_tools = (
+                available_str = (
                     ", ".join(available[:10]) if available else "No tools available"
                 )
-            except (AttributeError, TypeError):
-                available_tools = "Unable to list available tools"
-
-            hint = f"Tool '{tool_name}' not found or not allowed.\n"
-            hint += f"Available tools include: {available_tools}...\n"
-            hint += "Use exact tool names from the available list."
+            except Exception:
+                available_str = "Unable to list available tools"
 
             return ToolResult(
                 success=False,
                 stdout="",
-                stderr=f"Tool '{tool_name}' is not available or not allowed",
+                stderr=f"Tool {tool_name!r} is not available or not allowed",
                 exit_code=-1,
                 execution_time=0.0,
                 command=command,
-                error_hint=hint,
+                error_hint=(
+                    f"Tool {tool_name!r} not found or not allowed.\n"
+                    f"Available tools include: {available_str}...\n"
+                    "Use exact tool names from the available list."
+                ),
             )
 
-        # Execute command
-        try:
-            result = subprocess.run(
-                [tool_meta.path] + args,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout,
-                errors="ignore",
-            )
-
-            execution_time = time.time() - start_time
-
-            # Truncate output if necessary
-            stdout = self._truncate_output(result.stdout)
-            stderr = self._truncate_output(result.stderr)
-
-            # Add hint for non-zero exit codes
-            error_hint = None
-            if result.returncode != 0:
-                error_hint = f"Command exited with code {result.returncode}. Check stderr for details."
-
-            return ToolResult(
-                success=result.returncode == 0,
-                stdout=stdout,
-                stderr=stderr,
-                exit_code=result.returncode,
-                execution_time=execution_time,
-                command=command,
-                error_hint=error_hint,
-            )
-
-        except subprocess.TimeoutExpired:
-            execution_time = time.time() - start_time
+        provider = tool_registry.get_provider(tool_name)
+        if provider is None:
             return ToolResult(
                 success=False,
                 stdout="",
-                stderr=f"Command timed out after {self.timeout} seconds",
+                stderr=f"No provider found for tool {tool_name!r}",
                 exit_code=-1,
-                execution_time=execution_time,
+                execution_time=0.0,
                 command=command,
-                error_hint="Command took too long. Try simplifying or use a faster operation.",
+                error_hint="The tool is registered but has no execution provider.",
             )
-        except (OSError, FileNotFoundError) as e:
-            execution_time = time.time() - start_time
+
+        # Registry-level confirmation check (mode == confirm).
+        needs_confirm = tool_registry.requires_confirmation(tool_name)
+        if needs_confirm and not self._prompt_confirm(command):
             return ToolResult(
                 success=False,
-                stdout="",
-                stderr=f"Failed to execute command: {str(e)}",
+                stdout="Denied by user.",
+                stderr="",
                 exit_code=-1,
-                execution_time=execution_time,
+                execution_time=0.0,
                 command=command,
-                error_hint="Tool path may be invalid or tool may not be installed properly.",
             )
 
-    def _parse_command(self, command: str) -> tuple[str | None, list[str]]:
-        """Parse command string into tool name and arguments.
+        result = provider.execute(command, context)
 
-        Args:
-            command: Command string (e.g., "python --version").
+        # Provider may have flagged the result as REVIEW (e.g. CLIToolProvider
+        # detected a destructive flag).  Prompt if not already confirmed.
+        if (
+            result.safety_verdict is not None
+            and result.safety_verdict.level == RiskLevel.REVIEW
+            and not needs_confirm
+        ):
+            if not self._prompt_confirm(command):
+                return ToolResult(
+                    success=False,
+                    stdout="Denied by user.",
+                    stderr="",
+                    exit_code=-1,
+                    execution_time=result.execution_time,
+                    command=command,
+                    safety_verdict=result.safety_verdict,
+                )
 
-        Returns:
-            Tuple of (tool_name, args_list) or (None, []) if invalid.
+        return result
+
+    # ------------------------------------------------------------------
+    # Confirmation helpers
+    # ------------------------------------------------------------------
+
+    def _prompt_confirm(self, command: str) -> bool:
+        """Ask the user whether to allow a tool call.
+
+        Resolution order:
+        1. self.confirm_callback - injected at construction time.
+        2. rich.prompt.Confirm - styled interactive CLI prompt.
+        3. Plain input() fallback.
+
+        Returns False automatically when stdin is unavailable.
         """
+        if self.confirm_callback is not None:
+            return self.confirm_callback(command)
+
+        prompt_text = f"Allow tool call: {command!r}?"
+        try:
+            from rich.prompt import Confirm
+
+            return Confirm.ask(prompt_text)
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
+        try:
+            answer = input(f"{prompt_text} [y/N]: ").strip().lower()
+            return answer in ("y", "yes")
+        except (EOFError, OSError):
+            return False
+
+    # ------------------------------------------------------------------
+    # Command parsing
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_command(command: str) -> tuple[Optional[str], list[str]]:
+        """Parse command string into (tool_name, args_list)."""
         command = command.strip()
         if not command:
             return None, []
-
-        # Split command respecting quotes
         try:
-            parts = self._split_args(command)
+            parts = shlex.split(command)
             if not parts:
                 return None, []
             return parts[0], parts[1:]
         except ValueError:
-            return None, []
+            parts = command.split()
+            return (parts[0], parts[1:]) if parts else (None, [])
 
-    def _split_args(self, command: str) -> list[str]:
-        """Split command string into arguments, respecting quotes.
-
-        Args:
-            command: Command string.
-
-        Returns:
-            List of argument strings.
-        """
-        import shlex
-
+    @staticmethod
+    def _split_args(command: str) -> list[str]:
+        """Split command string into arguments, respecting quotes."""
         try:
             return shlex.split(command)
         except ValueError:
-            # If shlex fails, fall back to simple split
             return command.split()
-
-    def _truncate_output(self, output: str) -> str:
-        """Truncate output to maximum size.
-
-        Args:
-            output: Output string.
-
-        Returns:
-            Truncated output with note if truncated.
-        """
-        if len(output) <= self.max_output_size:
-            return output
-
-        truncated = output[: self.max_output_size]
-        note = f"\n\n[Output truncated - exceeded {self.max_output_size} bytes]"
-        return truncated + note
 
 
 def format_tool_result_for_agent(result: ToolResult) -> str:
@@ -211,7 +221,6 @@ def format_tool_result_for_agent(result: ToolResult) -> str:
     if result.stderr:
         lines.append(f"\nStderr:\n{result.stderr}")
 
-    # Add error hints if present
     if result.error_hint:
         lines.append(f"\n💡 Hint: {result.error_hint}")
 

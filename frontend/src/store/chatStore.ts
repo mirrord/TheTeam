@@ -45,6 +45,7 @@ interface ChatState {
   updateAgent: (conversationId: string, agent_id: string) => Promise<void>
   updateBaseModel: (conversationId: string, base_model: string) => Promise<void>
   updateEnabledTools: (conversationId: string, enabled_tools: string[] | null) => Promise<void>
+  renameConversation: (id: string, title: string) => Promise<void>
   setCurrentConversation: (conversation: ConversationDetail | null) => void
   addMessage: (message: Message) => void
   setProcessing: (conversationId: string, processing: boolean) => void
@@ -208,6 +209,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({ error: error.message })
       throw error
     }
+  },
+
+  renameConversation: async (id: string, title: string) => {
+    const response = await fetch(`/api/v1/chat/conversations/${id}/title`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    })
+    if (!response.ok) throw new Error('Failed to rename conversation')
+    set((state) => ({
+      conversations: state.conversations.map((c) =>
+        c.id === id ? { ...c, title } : c
+      ),
+      currentConversation:
+        state.currentConversation?.id === id
+          ? { ...state.currentConversation, title }
+          : state.currentConversation,
+    }))
   },
 
   setCurrentConversation: (conversation: ConversationDetail | null) => {

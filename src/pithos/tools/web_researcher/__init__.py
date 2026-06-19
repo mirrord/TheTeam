@@ -12,8 +12,10 @@ when those deps are missing; consumers should check
 """
 
 from .models import (
+    CitationCheck,
     Excerpt,
     ResearchReport,
+    SourceStatus,
     WebResearchConfig,
     WebResearchRequest,
 )
@@ -26,6 +28,9 @@ try:
     WEB_RESEARCH_AVAILABLE = True
 except ImportError:
     WEB_RESEARCH_AVAILABLE = False
+    print(
+        "Web research tool unavailable: missing dependencies. Install with: pip install -e .[web]"
+    )
 
 
 # Lazy imports for the heavy components - they pull in requests/bs4/trafilatura.
@@ -54,8 +59,10 @@ def __getattr__(name):  # pragma: no cover - thin lazy-import shim
 
 
 __all__ = [
+    "CitationCheck",
     "Excerpt",
     "ResearchReport",
+    "SourceStatus",
     "WebResearchConfig",
     "WebResearchRequest",
     "WEB_RESEARCH_AVAILABLE",

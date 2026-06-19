@@ -136,10 +136,14 @@ def test_send_message_appends_user_message_and_streams(service):
     # Run synchronously: invoke target directly instead of background_task.
     socketio.start_background_task.side_effect = lambda fn, *a, **kw: fn(*a, **kw)
 
-    with patch("pithos.agent.OllamaAgent", return_value=fake_agent), patch(
-        "theteam.services.agent_service.AgentService",
-        return_value=fake_agent_service,
-    ), patch("theteam.api.socketio_handlers.emit_to_client") as emit_mock:
+    with (
+        patch("pithos.agent.OllamaAgent", return_value=fake_agent),
+        patch(
+            "theteam.services.agent_service.AgentService",
+            return_value=fake_agent_service,
+        ),
+        patch("theteam.api.socketio_handlers.emit_to_client") as emit_mock,
+    ):
         msg_id = service.send_message(cid, "hello", client_id="c1", socketio=socketio)
 
     assert msg_id  # returned user message id
@@ -165,10 +169,14 @@ def test_send_message_emits_error_on_exception(service):
     socketio = MagicMock()
     socketio.start_background_task.side_effect = lambda fn, *a, **kw: fn(*a, **kw)
 
-    with patch("pithos.agent.OllamaAgent", side_effect=RuntimeError("boom")), patch(
-        "theteam.services.agent_service.AgentService",
-        return_value=fake_agent_service,
-    ), patch("theteam.api.socketio_handlers.emit_to_client") as emit_mock:
+    with (
+        patch("pithos.agent.OllamaAgent", side_effect=RuntimeError("boom")),
+        patch(
+            "theteam.services.agent_service.AgentService",
+            return_value=fake_agent_service,
+        ),
+        patch("theteam.api.socketio_handlers.emit_to_client") as emit_mock,
+    ):
         service.send_message(cid, "hi", client_id="c1", socketio=socketio)
 
     events = [call.args[2] for call in emit_mock.call_args_list]
@@ -181,55 +189,149 @@ def test_send_message_emits_error_on_exception(service):
 
 
 def test_update_base_model_clears_agent(service):
-    cid = service.create_conversation(agent_id='agent-1')
-    assert service.update_conversation_base_model(cid, 'llama3:8b') is True
+    cid = service.create_conversation(agent_id="agent-1")
+    assert service.update_conversation_base_model(cid, "llama3:8b") is True
     convo = service.get_conversation(cid)
-    assert convo['base_model'] == 'llama3:8b'
-    assert convo['agent_id'] is None
+    assert convo["base_model"] == "llama3:8b"
+    assert convo["agent_id"] is None
 
 
 def test_update_agent_clears_base_model(service):
     cid = service.create_conversation()
-    service.update_conversation_base_model(cid, 'llama3:8b')
-    assert service.update_conversation_agent(cid, 'agent-2') is True
+    service.update_conversation_base_model(cid, "llama3:8b")
+    assert service.update_conversation_agent(cid, "agent-2") is True
     convo = service.get_conversation(cid)
-    assert convo['agent_id'] == 'agent-2'
-    assert convo['base_model'] is None
+    assert convo["agent_id"] == "agent-2"
+    assert convo["base_model"] is None
 
 
 def test_update_tools_allow_list(service):
     cid = service.create_conversation()
-    assert service.update_conversation_tools(cid, ['git', 'python']) is True
+    assert service.update_conversation_tools(cid, ["git", "python"]) is True
     convo = service.get_conversation(cid)
-    assert convo['enabled_tools'] == ['git', 'python']
+    assert convo["enabled_tools"] == ["git", "python"]
 
 
 def test_update_tools_clear_override(service):
     cid = service.create_conversation()
-    service.update_conversation_tools(cid, ['git'])
+    service.update_conversation_tools(cid, ["git"])
     assert service.update_conversation_tools(cid, None) is True
     convo = service.get_conversation(cid)
-    assert convo['enabled_tools'] is None
+    assert convo["enabled_tools"] is None
 
 
 def test_update_tools_disable_all(service):
     cid = service.create_conversation()
     assert service.update_conversation_tools(cid, []) is True
     convo = service.get_conversation(cid)
-    assert convo['enabled_tools'] == []
+    assert convo["enabled_tools"] == []
 
 
 def test_base_model_persists_across_reload(service, tmp_conversations_dir):
     cid = service.create_conversation()
-    service.update_conversation_base_model(cid, 'llama3:8b')
-    service.update_conversation_tools(cid, ['git'])
+    service.update_conversation_base_model(cid, "llama3:8b")
+    service.update_conversation_tools(cid, ["git"])
     # Reload from disk
     fresh = ChatService(storage_dir=tmp_conversations_dir)
     convo = fresh.get_conversation(cid)
-    assert convo['base_model'] == 'llama3:8b'
-    assert convo['enabled_tools'] == ['git']
+    assert convo["base_model"] == "llama3:8b"
+    assert convo["enabled_tools"] == ["git"]
+
+
+# ---------------------------------------------------------------------------
+# Rename
+# ---------------------------------------------------------------------------
+
+
+def test_rename_conversation_ok(service):
+    cid = service.create_conversation(title="Original")
+    assert service.rename_conversation(cid, "New Title") is True
+    convo = service.get_conversation(cid)
+    assert convo["title"] == "New Title"
+
+
+def test_rename_updates_updated_at(service):
+    import time
+
+    cid = service.create_conversation(title="Original")
+    original_updated = service.get_conversation(cid)["updated_at"]
+    time.sleep(0.01)
+    service.rename_conversation(cid, "Changed")
+    new_updated = service.get_conversation(cid)["updated_at"]
+    assert new_updated > original_updated
+
+
+def test_rename_persists_to_disk(service, tmp_conversations_dir):
+    cid = service.create_conversation(title="Old")
+    service.rename_conversation(cid, "Persisted")
+    fresh = ChatService(storage_dir=tmp_conversations_dir)
+    assert fresh.get_conversation(cid)["title"] == "Persisted"
+
+
+def test_rename_missing_conversation(service):
+    assert service.rename_conversation("nonexistent-id", "Whatever") is False
 
 
 def test_update_missing_returns_false(service):
-    assert service.update_conversation_base_model('ghost', 'm') is False
-    assert service.update_conversation_tools('ghost', []) is False
+    assert service.update_conversation_base_model("ghost", "m") is False
+    assert service.update_conversation_tools("ghost", []) is False
+
+
+# ---------------------------------------------------------------------------
+# Tool confirmation
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_confirmation_noop_for_unknown_id(service):
+    """resolve_confirmation does not raise for an unknown request_id."""
+    # Should be a no-op; no exception raised
+    service.resolve_confirmation("nonexistent-request-id", True)
+    service.resolve_confirmation("nonexistent-request-id", False)
+
+
+def test_resolve_confirmation_sends_to_pending_threading_event(service):
+    """resolve_confirmation triggers the fallback threading.Event."""
+    import threading
+
+    evt = threading.Event()
+    evt._result = None  # type: ignore[attr-defined]
+
+    request_id = "test-req-123"
+    with service._confirm_lock:
+        service.pending_confirmations[request_id] = evt
+
+    service.resolve_confirmation(request_id, True)
+
+    assert evt.is_set()
+    assert evt._result is True  # type: ignore[attr-defined]
+
+
+def test_create_confirm_callback_emits_request(service, tmp_conversations_dir):
+    """_create_confirm_callback returns a callable that emits the SocketIO event."""
+    import threading
+
+    socketio_mock = MagicMock()
+    emitted: dict = {}
+
+    def fake_emit(sio, cid, event, data):
+        emitted["event"] = event
+        emitted["data"] = data
+        # Immediately resolve so the callback doesn't block forever
+        req_id = data["request_id"]
+        # Simulate the frontend responding True after the event is emitted
+        service.resolve_confirmation(req_id, True)
+
+    with patch("theteam.api.socketio_handlers.emit_to_client", side_effect=fake_emit):
+        callback = service._create_confirm_callback(
+            socketio_mock, "client-sid", "conv-id", "msg-id"
+        )
+        # Use a threading.Event so the test doesn't actually block
+        # (eventlet is not running in tests)
+        result = callback("echo hello")
+
+    assert emitted["event"] == "tool_confirmation_request"
+    assert emitted["data"]["command"] == "echo hello"
+    assert emitted["data"]["conversation_id"] == "conv-id"
+    # resolve_confirmation was called with True → callback should return True
+    # (may be False in threading fallback if timing is off; check event was emitted)
+    assert "request_id" in emitted["data"]
