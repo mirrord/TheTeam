@@ -81,6 +81,8 @@ include:
   - flowchart
   # --- Web research (virtual tool) ---
   - web-research
+  # --- Text-to-image (virtual tool) ---
+  - text2image
 
 # List of tools that require user confirmation before execution (used when mode is 'confirm').
 # Tools in this list are allowed, but the user must approve each call before it runs.
@@ -148,6 +150,14 @@ flowcharts:
 web_research:
   enabled: true
 
+# Text-to-image virtual tool configuration
+# When enabled, the agent can invoke `text2image <prompt>` to render an image
+# with a local model. Full settings live in text2image_config.yaml.
+# Disabled by default because the diffusers backend pulls in heavy deps
+# (torch); enable after configuring a backend.
+text2image:
+  enabled: false
+
 # Manual tool descriptions (override auto-discovered descriptions)
 descriptions:
   python: "Python interpreter for running scripts and commands"
@@ -214,6 +224,7 @@ descriptions:
   uname: "Display system information (Unix)"
   flowchart: "Run a registered pithos flowchart. Usage: flowchart <name> [input text]"
   web-research: "Subagent-driven web research over whitelisted domains. Usage: web-research <inquiry text>"
+  text2image: "Generate an image from a text prompt with a local model. Usage: text2image <prompt text>"
 
 # Command safety analysis configuration
 # Evaluates each command's arguments and flags before execution, independently

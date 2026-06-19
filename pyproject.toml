@@ -57,6 +57,13 @@ web = [
   "beautifulsoup4>=4.12.0",
   "trafilatura>=1.6.0",
 ]
+image = [
+  "diffusers>=0.27.0",
+  "torch>=2.0.0",
+  "Pillow>=10.0.0",
+  "accelerate>=0.27.0",
+  "transformers>=4.40.0",
+]
 talos = [
   "rich>=13.0.0",
   "numpy>=1.24.0",

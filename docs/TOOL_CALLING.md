@@ -91,18 +91,30 @@ runcommand('git status')
 
 ## Virtual Tools
 
-In addition to CLI binaries, pithos ships two **virtual tools** that are
+In addition to CLI binaries, pithos ships three **virtual tools** that are
 dispatched in-process rather than as subprocesses:
 
 - **`flowchart`** — invokes a saved flowchart as if it were a tool.
 - **`web-research`** — subagent-driven web crawler over a configurable
   domain whitelist. See [WEB_RESEARCH.md](WEB_RESEARCH.md). Requires the
   optional `web` extra (`pip install -e ".[web]"`).
+- **`text2image`** — generates a PNG from a text prompt using a local
+  image model. See [TEXT2IMAGE.md](TEXT2IMAGE.md). Three backends are
+  supported:
+  - `http` — Automatic1111/Forge (`/sdapi/v1/txt2img`). Only needs
+    `requests` (included in the `web` extra).
+  - `comfyui` — ComfyUI node-graph API (`/prompt` → `/history` → `/view`).
+    Also only needs `requests`.
+  - `diffusers` — Hugging Face `diffusers` pipeline loaded in-process.
+    Requires the `image` extra (`pip install -e ".[image]"`).
+
+  Usage: `RUN: text2image <prompt text>`. All generation parameters
+  (size, steps, backend, output directory, …) are set in
+  `configs/tools/text2image_config.yaml`.
 
 Virtual tools appear in `pithos-tools list` alongside CLI tools and use
-the same call syntax (`RUN: web-research <inquiry>`). They are gated in
-`configs/tools/tool_config.yaml` and skipped if their optional
-dependencies are not installed.
+the same call syntax. They are gated in `configs/tools/tool_config.yaml`
+and skipped if their optional dependencies are not installed.
 
 ## Tool Discovery
 

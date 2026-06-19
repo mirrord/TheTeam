@@ -976,6 +976,22 @@ class Agent(ABC):
             except Exception:
                 pass  # optional feature — silently skip if deps are missing
 
+        # Optionally add a text2image provider.
+        t2i_config = tool_config.get("text2image", {})
+        if t2i_config.get("enabled", False):
+            try:
+                from ..tools.text2image import (
+                    TEXT2IMAGE_AVAILABLE,
+                    Text2ImageToolProvider,
+                )
+
+                if TEXT2IMAGE_AVAILABLE:
+                    providers.append(
+                        Text2ImageToolProvider(config_manager=config_manager)
+                    )
+            except Exception:
+                pass  # optional feature — silently skip if deps are missing
+
         self.tool_registry = ToolRegistry(config_manager, providers=providers)
         self.tool_executor = ToolExecutor()
         self.tools_enabled = True

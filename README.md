@@ -123,6 +123,7 @@ pithos-agent chat glm-4.7-flash:latest --flowchart simple_reflect
 - **Message-Based Routing**: Advanced data flow with explicit message passing between nodes
 - **Tool Calling**: Enable agents to execute CLI commands dynamically
 - **Web Research Tool**: Subagent-driven web crawler (`web-research`) restricted to a configurable domain whitelist, with deduplicated excerpt storage and a cited summary report
+- **Text-to-Image Tool**: Generate images from text prompts with a local model (`text2image`). Pluggable backends: Automatic1111/Forge HTTP API, ComfyUI node-graph API, or in-process Hugging Face `diffusers`
 - **Conditions**: Define conditional logic for flowchart branching
 - **Configuration**: YAML-based configuration for agents, flowcharts, and conditions
 - **Serialization**: Save and load agent states, contexts, and flowcharts
@@ -685,6 +686,13 @@ pithos-research "Python GIL removal status" --json
 
 See [docs/WEB_RESEARCH.md](docs/WEB_RESEARCH.md) for architecture, configuration,
 and the in-flowchart `webresearch` node.
+
+### pithos-text2image (coming soon)
+
+Image generation is currently available as an agent virtual tool (`text2image`).
+A standalone CLI entry point is planned.
+
+See [docs/TEXT2IMAGE.md](docs/TEXT2IMAGE.md) for backends, configuration, and usage.
 
 ### pithos-memory
 
