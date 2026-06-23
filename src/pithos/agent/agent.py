@@ -1007,7 +1007,7 @@ class Agent(ABC):
             return
 
         tool_prompt = self._get_tool_usage_prompt()
-        print("Tool usage prompt:\n", tool_prompt)  # Debug output
+        # print("Tool usage prompt:\n", tool_prompt)  # Debug output
 
         for ctx_name, context in self.contexts.items():
             current_prompt = context.get_system_prompt()

@@ -3,6 +3,7 @@
 TheTeam is a local-first LLM agent coordination and development suite. It includes:
 - **pithos**: An agentic LLM interaction framework for managing models, contexts, and flowchart-driven workflows
 - **TheTeam**: Modern web interface for agent coordination, drag-and-drop flowchart interaction, and real-time workflow execution
+- **Talos**: Local-first AI assistant with shell, voice (wake-word speech-to-speech), and Telegram bot interfaces — all powered by pithos
 
 [![PyPI - Version](https://img.shields.io/pypi/v/theteam.svg)](https://pypi.org/project/theteam)
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/theteam.svg)](https://pypi.org/project/theteam)
@@ -16,6 +17,7 @@ TheTeam is a local-first LLM agent coordination and development suite. It includ
 - [Features](#features)
 - [Testing](#testing)
 - [CLI Commands](#cli-commands)
+- [Talos](#talos)
 - [License](#license)
 
 ## Installation
@@ -52,7 +54,18 @@ TheTeam is a local-first LLM agent coordination and development suite. It includ
    pip install -e ".[test]"
    ```
 
-5. **Install optional LLM backends (optional):**
+5. **Install Talos interfaces (optional):**
+
+   Talos provides shell, voice, and Telegram bot interfaces built on pithos.
+   The voice interface requires heavy ML dependencies (`torch`, `whisper`, `kokoro-onnx`):
+
+   ```bash
+   pip install -e ".[talos]"    # all Talos interfaces (voice, telegram, shell)
+   ```
+
+   See [docs/TALOS.md](docs/TALOS.md) for a full breakdown of what each interface needs.
+
+6. **Install optional LLM backends (optional):**
 
    The default install talks to a running [Ollama](https://ollama.ai) server.
    Two additional in-process backends are available behind extras:
@@ -132,6 +145,18 @@ pithos-agent chat glm-4.7-flash:latest --flowchart simple_reflect
 - **Automatic Context Compaction**: Summarise and archive old messages when history grows too large, keeping the context window manageable
 - **Automatic Memory Recall**: Surface relevant past memories via RAG before each response, without manual retrieval calls
 - **Structured Logging**: Runtime diagnostics via Python's `logging` module throughout all library modules
+
+### Talos
+
+Talos is a local-first AI assistant built on pithos. It provides three ready-to-use interfaces, all sharing the same configurable agent.
+
+- **Shell Interface**: Interactive stdin/stdout chat with no extra dependencies
+- **Voice Interface**: Always-on wake-word assistant — Whisper STT detects the wake word, pithos generates the reply, Kokoro-ONNX TTS speaks it
+- **Telegram Bot**: Per-user persistent contexts on a shared pithos agent
+- **Setup Wizard**: Guided first-run wizard creates `~/.talos/config.yaml` interactively
+- **Rich Configuration**: YAML-based config for agent, voice, and Telegram settings with sensible defaults
+
+See [docs/TALOS.md](docs/TALOS.md) for full documentation.
 
 ### Conversation History
 
@@ -859,6 +884,55 @@ Built-in datasets ship under `src/pithos/eval/datasets/builtins/`:
 
 **See [docs/EVALUATION.md](docs/EVALUATION.md) for full documentation.**
 
+### talos
+
+Local-first AI assistant with shell, voice, and Telegram interfaces.
+
+```bash
+# First run — launches the setup wizard then starts the shell
+talos shell
+
+# Wake-word voice assistant (speech-to-speech)
+talos voice
+
+# Telegram bot
+talos telegram
+
+# Re-run the setup wizard
+talos --reconfigure
+
+# Run wizard only (no interface started)
+talos config
+
+# Test microphone input
+talos mic-test
+```
+
+Requires `pip install -e ".[talos]"` for the voice and Telegram interfaces.
+
+**See [docs/TALOS.md](docs/TALOS.md) for full documentation.**
+
+## Talos
+
+Talos is a local-first AI assistant built on pithos. Run `talos shell` for an instant interactive chat, `talos voice` for a wake-word speech-to-speech assistant, or `talos telegram` to host a Telegram bot. All three interfaces share a single `~/.talos/config.yaml` created by the guided setup wizard on first run.
+
+**Quick start:**
+
+```bash
+pip install -e ".[talos]"   # installs voice + telegram deps
+talos shell                 # wizard runs if config doesn't exist yet
+```
+
+**Interfaces:**
+
+| Command | Description |
+|---------|-------------|
+| `talos shell` | Interactive terminal chat (no extra deps) |
+| `talos voice` | Always-on wake-word assistant (Whisper STT + Kokoro TTS) |
+| `talos telegram` | Telegram bot with per-user persistent contexts |
+
+**See [docs/TALOS.md](docs/TALOS.md) for full documentation.**
+
 ## Configuration
 
 Configurations are stored as YAML files in the `configs/` directory:
@@ -1045,6 +1119,14 @@ src/
     api/                 # REST API blueprints
     services/            # Business logic layer
     static/              # Built frontend assets
+  talos/                 # Local-first AI assistant
+    config.py            # TalosConfig dataclasses, wizard, build_agent helper
+    tts.py               # Kokoro-ONNX text-to-speech wrapper
+    utils.py             # clean_agent_response helper
+    interfaces/
+      shell.py           # Interactive stdin/stdout chat
+      voice.py           # Wake-word speech-to-speech
+      telegram.py        # Telegram bot (per-user contexts)
 tests/                   # Comprehensive test suite
 configs/                 # YAML configurations (agents, flowcharts, eval, tools)
 frontend/                # React web interface
