@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from pithos.agent import Agent
@@ -64,6 +65,17 @@ class TelegramInterface:
         for i in range(0, len(response) or 1, 4000):
             chunk = response[i : i + 4000] or "(no response)"
             await update.message.reply_text(chunk)
+        # Send any images generated during the agent's response.
+        for image_path in self.agent.last_image_paths:
+            p = Path(image_path)
+            if not p.exists():
+                logger.warning("Generated image not found, skipping: %s", image_path)
+                continue
+            try:
+                with p.open("rb") as fh:
+                    await update.message.reply_photo(photo=fh)
+            except Exception as exc:
+                logger.warning("Failed to send image %s: %s", image_path, exc)
 
     # ------------------------------------------------------------------
     # Public entry point

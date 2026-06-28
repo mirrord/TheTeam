@@ -425,3 +425,179 @@ def test_build_agent_no_talos_overrides_default_mode_uses_plain_cm() -> None:
         build_agent(cfg)
     plain_cm.assert_called_once()
     override_cm.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# New fields: allow / deny / text2image
+# ---------------------------------------------------------------------------
+
+
+def test_tools_config_allow_deny_text2image_defaults() -> None:
+    tc = ToolsConfig()
+    assert tc.allow == []
+    assert tc.deny == []
+    assert tc.text2image is None
+
+
+def test_tools_config_allow_deny_roundtrip(tmp_path: Path) -> None:
+    cfg = TalosConfig(
+        agent=AgentConfig(
+            tools=ToolsConfig(
+                enabled=True,
+                allow=["extra-tool", "another"],
+                deny=["dangerous"],
+                text2image={"enabled": True},
+                web_research={"enabled": False},
+            ),
+        ),
+    )
+    path = tmp_path / "config.yaml"
+    save_config(cfg, path)
+    restored = load_config(path)
+    assert restored.agent.tools.allow == ["extra-tool", "another"]
+    assert restored.agent.tools.deny == ["dangerous"]
+    assert restored.agent.tools.text2image == {"enabled": True}
+    assert restored.agent.tools.web_research == {"enabled": False}
+    assert restored == cfg
+
+
+def test_tools_config_allow_deny_in_full_roundtrip() -> None:
+    cfg = TalosConfig(
+        agent=AgentConfig(
+            tools=ToolsConfig(
+                enabled=True,
+                mode="all",
+                allow=["mytool"],
+                deny=["badtool"],
+                text2image={"enabled": True},
+            ),
+        ),
+    )
+    restored = TalosConfig.from_dict(cfg.to_dict())
+    assert restored == cfg
+
+
+def test_mode_override_cm_allow_extends_include(tmp_path: Path) -> None:
+    tool_dir = tmp_path / "tools"
+    tool_dir.mkdir()
+    (tool_dir / "tool_config.yaml").write_text(
+        "enabled: true\nmode: strict\ninclude:\n  - python\n  - curl\n"
+    )
+    cm = _ModeOverrideConfigManager(
+        tool_mode_override="strict",
+        config_dir=str(tmp_path),
+        allow=["extra-tool"],
+    )
+    cfg = cm.get_config("tool_config", "tools")
+    assert cfg is not None
+    assert "extra-tool" in cfg["include"]
+    assert "python" in cfg["include"]
+    assert "curl" in cfg["include"]
+
+
+def test_mode_override_cm_allow_idempotent(tmp_path: Path) -> None:
+    tool_dir = tmp_path / "tools"
+    tool_dir.mkdir()
+    (tool_dir / "tool_config.yaml").write_text(
+        "enabled: true\nmode: strict\ninclude:\n  - python\n"
+    )
+    cm = _ModeOverrideConfigManager(
+        tool_mode_override="strict",
+        config_dir=str(tmp_path),
+        allow=["python"],  # already in include — should not duplicate
+    )
+    cfg = cm.get_config("tool_config", "tools")
+    assert cfg is not None
+    assert cfg["include"].count("python") == 1
+
+
+def test_mode_override_cm_deny_extends_exclude(tmp_path: Path) -> None:
+    tool_dir = tmp_path / "tools"
+    tool_dir.mkdir()
+    (tool_dir / "tool_config.yaml").write_text(
+        "enabled: true\nmode: strict\ninclude:\n  - python\nexclude:\n  - rm\n"
+    )
+    cm = _ModeOverrideConfigManager(
+        tool_mode_override="strict",
+        config_dir=str(tmp_path),
+        deny=["python"],  # remove python from allow and add to exclude
+    )
+    cfg = cm.get_config("tool_config", "tools")
+    assert cfg is not None
+    assert "python" not in cfg["include"]
+    assert "python" in cfg["exclude"]
+    assert "rm" in cfg["exclude"]
+
+
+def test_mode_override_cm_deny_idempotent(tmp_path: Path) -> None:
+    tool_dir = tmp_path / "tools"
+    tool_dir.mkdir()
+    (tool_dir / "tool_config.yaml").write_text(
+        "enabled: true\nmode: strict\nexclude:\n  - rm\n"
+    )
+    cm = _ModeOverrideConfigManager(
+        tool_mode_override="strict",
+        config_dir=str(tmp_path),
+        deny=["rm"],  # already in exclude
+    )
+    cfg = cm.get_config("tool_config", "tools")
+    assert cfg is not None
+    assert cfg["exclude"].count("rm") == 1
+
+
+def test_build_agent_allow_list_passes_to_override_cm() -> None:
+    cfg = TalosConfig(
+        agent=AgentConfig(
+            model="m",
+            tools=ToolsConfig(enabled=True, mode="include", allow=["mytool"]),
+        ),
+    )
+    with (
+        patch("talos.config.OllamaAgent.enable_tools"),
+        patch("talos.config._ModeOverrideConfigManager") as override_cm,
+    ):
+        build_agent(cfg)
+    override_cm.assert_called_once_with(
+        tool_mode_override="include",
+        allow=["mytool"],
+    )
+
+
+def test_build_agent_deny_list_passes_to_override_cm() -> None:
+    cfg = TalosConfig(
+        agent=AgentConfig(
+            model="m",
+            tools=ToolsConfig(enabled=True, mode="include", deny=["badtool"]),
+        ),
+    )
+    with (
+        patch("talos.config.OllamaAgent.enable_tools"),
+        patch("talos.config._ModeOverrideConfigManager") as override_cm,
+    ):
+        build_agent(cfg)
+    override_cm.assert_called_once_with(
+        tool_mode_override="include",
+        deny=["badtool"],
+    )
+
+
+def test_build_agent_text2image_override_uses_override_cm() -> None:
+    cfg = TalosConfig(
+        agent=AgentConfig(
+            model="m",
+            tools=ToolsConfig(
+                enabled=True,
+                mode="include",
+                text2image={"enabled": True},
+            ),
+        ),
+    )
+    with (
+        patch("talos.config.OllamaAgent.enable_tools"),
+        patch("talos.config._ModeOverrideConfigManager") as override_cm,
+    ):
+        build_agent(cfg)
+    override_cm.assert_called_once_with(
+        tool_mode_override="include",
+        tool_config_overrides={"text2image": {"enabled": True}},
+    )

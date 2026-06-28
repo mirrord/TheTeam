@@ -537,3 +537,31 @@ class TestText2ImageToolProvider:
         assert provider.config.backend == "diffusers"
         assert provider.config.steps == 5
         cm.get_config.assert_called_once_with("text2image_config", "tools")
+
+    def test_execute_success_populates_image_paths(self) -> None:
+        gen = Mock()
+        gen.generate = Mock(
+            return_value={
+                "path": "/tmp/out.png",
+                "backend": "fake",
+                "model": "m",
+                "width": 512,
+                "height": 512,
+                "steps": 30,
+                "seed": 1,
+                "elapsed": 0.1,
+            }
+        )
+        result = self._provider(gen=gen).execute("text2image a red apple")
+        assert result.image_paths == ["/tmp/out.png"]
+
+    def test_execute_failure_has_empty_image_paths(self) -> None:
+        gen = Mock()
+        gen.generate = Mock(side_effect=Text2ImageError("offline"))
+        result = self._provider(gen=gen).execute("text2image a red apple")
+        assert result.success is False
+        assert result.image_paths == []
+
+    def test_execute_empty_prompt_has_empty_image_paths(self) -> None:
+        result = self._provider(gen=Mock()).execute("text2image")
+        assert result.image_paths == []

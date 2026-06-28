@@ -96,6 +96,68 @@ def test_telegram_start_creates_context_and_greets() -> None:
     update.message.reply_text.assert_awaited_once()
 
 
+def _make_update_with_photo(user_id: int, text: str) -> MagicMock:
+    update = _make_update(user_id, text)
+    update.message.reply_photo = AsyncMock()
+    return update
+
+
+def test_telegram_sends_image_when_agent_generates_one(tmp_path) -> None:
+    """reply_photo is called for each image path returned by the agent."""
+    img = tmp_path / "photo.png"
+    img.write_bytes(b"\x89PNG fake")
+
+    agent = _make_agent()
+    iface = TelegramInterface(agent, TelegramConfig(bot_token="t"))
+
+    def fake_send(text, context_name=None, **kwargs):
+        return "here is your image"
+
+    agent.send = fake_send  # type: ignore[assignment]
+    agent._pending_image_paths = [str(img)]
+
+    update = _make_update_with_photo(1, "generate a cat")
+    asyncio.run(iface._handle_message(update, MagicMock()))
+
+    update.message.reply_text.assert_awaited()
+    assert update.message.reply_photo.await_count == 1
+
+
+def test_telegram_no_image_sent_when_none_generated() -> None:
+    """reply_photo is never called when the agent produces no images."""
+    agent = _make_agent()
+    iface = TelegramInterface(agent, TelegramConfig(bot_token="t"))
+
+    def fake_send(text, context_name=None, **kwargs):
+        return "just text"
+
+    agent.send = fake_send  # type: ignore[assignment]
+    agent._pending_image_paths = []
+
+    update = _make_update_with_photo(2, "hello")
+    asyncio.run(iface._handle_message(update, MagicMock()))
+
+    update.message.reply_photo.assert_not_awaited()
+
+
+def test_telegram_skips_missing_image_without_crash(tmp_path) -> None:
+    """A non-existent image path is skipped gracefully; text reply still sent."""
+    agent = _make_agent()
+    iface = TelegramInterface(agent, TelegramConfig(bot_token="t"))
+
+    def fake_send(text, context_name=None, **kwargs):
+        return "response"
+
+    agent.send = fake_send  # type: ignore[assignment]
+    agent._pending_image_paths = [str(tmp_path / "ghost.png")]  # does not exist
+
+    update = _make_update_with_photo(3, "make something")
+    asyncio.run(iface._handle_message(update, MagicMock()))
+
+    update.message.reply_text.assert_awaited()
+    update.message.reply_photo.assert_not_awaited()
+
+
 # ---------------------------------------------------------------------------
 # Voice — only test the constructor wiring; full pipeline requires audio deps.
 # ---------------------------------------------------------------------------

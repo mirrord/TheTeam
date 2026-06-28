@@ -68,14 +68,28 @@ class ToolsConfig:
             call so the agent can react to the result without a new user
             message.
         max_iterations: Safety cap on auto-loop iterations per turn.
+        allow: Extra tool names to add to the effective ``include`` list at
+            runtime.  Persisted in ``~/.talos/config.yaml``; managed by
+            ``talos tools enable``.
+        deny: Extra tool names to add to the effective ``exclude`` list at
+            runtime.  Persisted in ``~/.talos/config.yaml``; managed by
+            ``talos tools disable``.
+        web_research: Optional override for the web-research virtual tool
+            (``{"enabled": true/false}``).
+        flowcharts: Optional override for the flowchart virtual tool.
+        text2image: Optional override for the text-to-image virtual tool
+            (``{"enabled": true/false}``).
     """
 
     enabled: bool = DEFAULT_TOOLS
     mode: str = DEFAULT_TOOLS_MODE
     auto_loop: bool = DEFAULT_TOOLS_AUTO_LOOP
     max_iterations: int = DEFAULT_TOOLS_MAX_ITERATIONS
+    allow: list = field(default_factory=list)  # talos-local tool additions
+    deny: list = field(default_factory=list)  # talos-local tool blocks
     web_research: Optional[dict[str, bool]] = None  # enable web search tool
     flowcharts: Optional[dict[str, Any]] = None
+    text2image: Optional[dict[str, bool]] = None  # enable text-to-image tool
 
 
 @dataclass
@@ -345,11 +359,20 @@ def build_agent(config: TalosConfig) -> OllamaAgent:
         tool_overrides["flowcharts"] = tc.flowcharts
     if tc.web_research is not None:
         tool_overrides["web_research"] = tc.web_research
+    if tc.text2image is not None:
+        tool_overrides["text2image"] = tc.text2image
 
-    if tc.enabled and (tc.mode != DEFAULT_TOOLS_MODE or tool_overrides):
+    needs_override = tc.enabled and (
+        tc.mode != DEFAULT_TOOLS_MODE or tool_overrides or tc.allow or tc.deny
+    )
+    if needs_override:
         cm_kwargs: dict[str, Any] = {"tool_mode_override": tc.mode}
         if tool_overrides:
             cm_kwargs["tool_config_overrides"] = tool_overrides
+        if tc.allow:
+            cm_kwargs["allow"] = tc.allow
+        if tc.deny:
+            cm_kwargs["deny"] = tc.deny
         cm: ConfigManager = _ModeOverrideConfigManager(**cm_kwargs)
     else:
         cm = ConfigManager()
@@ -388,7 +411,9 @@ class _ModeOverrideConfigManager(ConfigManager):
     ``tool_config_overrides`` (if provided) are shallow-merged on top of
     the full config so that Talos-level feature flags (e.g.
     ``flowcharts.enabled``, ``web_research.enabled``) always take
-    precedence over registry defaults.
+    precedence over registry defaults.  ``allow`` items are merged into
+    the ``include`` list and ``deny`` items into the ``exclude`` list
+    without touching the shared YAML.
     """
 
     def __init__(
@@ -396,10 +421,14 @@ class _ModeOverrideConfigManager(ConfigManager):
         tool_mode_override: str,
         config_dir: Optional[str] = None,
         tool_config_overrides: Optional[dict[str, Any]] = None,
+        allow: Optional[list] = None,
+        deny: Optional[list] = None,
     ) -> None:
         super().__init__(config_dir)
         self._tool_mode_override = tool_mode_override
         self._tool_config_overrides: dict[str, Any] = tool_config_overrides or {}
+        self._allow: list = list(allow) if allow else []
+        self._deny: list = list(deny) if deny else []
 
     def get_config(
         self, config_name: str, namespace: Optional[str] = None
@@ -408,6 +437,22 @@ class _ModeOverrideConfigManager(ConfigManager):
         if cfg is not None and config_name == "tool_config" and namespace == "tools":
             cfg = dict(cfg)
             cfg["mode"] = self._tool_mode_override
+            # Merge talos-local allow list into include.
+            if self._allow:
+                base_include: list = list(cfg.get("include", []))
+                for tool in self._allow:
+                    if tool not in base_include:
+                        base_include.append(tool)
+                cfg["include"] = base_include
+            # Merge talos-local deny list into exclude; strip from include.
+            if self._deny:
+                base_exclude: list = list(cfg.get("exclude", []))
+                for tool in self._deny:
+                    if tool not in base_exclude:
+                        base_exclude.append(tool)
+                cfg["exclude"] = base_exclude
+                if "include" in cfg:
+                    cfg["include"] = [t for t in cfg["include"] if t not in self._deny]
             cfg.update(self._tool_config_overrides)
         return cfg
 

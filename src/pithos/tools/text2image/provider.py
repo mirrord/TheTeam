@@ -131,6 +131,7 @@ class Text2ImageToolProvider(ToolProvider):
             exit_code=0,
             execution_time=time.time() - start,
             command=command,
+            image_paths=[metadata["path"]],
         )
 
     @staticmethod
