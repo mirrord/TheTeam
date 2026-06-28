@@ -127,12 +127,13 @@ class ToolRegistry:
         return tool_name in self.tools
 
     def requires_confirmation(self, tool_name: str) -> bool:
-        """Return True when the tool config marks tool_name for confirmation.
+        """Return True when the tool requires interactive user confirmation.
 
-        Only active when ``mode`` is ``"confirm"`` and the tool appears in the
-        ``confirm`` list.
+        Active in ``strict`` and ``standard`` modes when the tool appears in
+        the ``confirm`` list.  In ``permissive`` mode, confirm-listed tools are
+        auto-approved and this method returns ``False``.
         """
-        if self.config.get("mode") != "confirm":
+        if self.config.get("mode") == "permissive":
             return False
         return tool_name in self.config.get("confirm", [])
 
@@ -187,7 +188,7 @@ class ToolRegistry:
                 "enabled": True,
                 "timeout": 30,
                 "max_output_size": 10000,
-                "mode": "include",
+                "mode": "strict",
                 "include": [
                     "python",
                     "pip",

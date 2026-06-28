@@ -9,14 +9,14 @@ timeout: 30
 # Maximum size of captured output (bytes)
 max_output_size: 10000
 
-# Filtering mode: 'include', 'exclude', 'all', or 'confirm'
-# - 'include': Only tools in the include list are allowed
-# - 'exclude': All tools except those in exclude list are allowed
-# - 'all': All discovered tools are allowed (apply exclude list only)
-# - 'confirm': Only tools in the confirm list are allowed, but each call
-#              requires explicit user approval before execution. If the user
-#              denies, the agent receives "Denied by user." as the result.
-mode: include
+# Filtering mode: 'strict', 'standard', or 'permissive'
+# - 'strict':     Only tools in the include list are allowed.
+#                 Tools in the confirm group require user approval before running.
+# - 'standard':   All discovered tools are allowed except those in the exclude list.
+#                 Tools in the confirm group require user approval before running.
+# - 'permissive': All discovered tools are allowed except those in the exclude list.
+#                 Tools in the confirm group are auto-approved (no user prompt).
+mode: strict
 
 # List of tools to include (used when mode is 'include')
 include:
@@ -84,8 +84,9 @@ include:
   # --- Text-to-image (virtual tool) ---
   - text2image
 
-# List of tools that require user confirmation before execution (used when mode is 'confirm').
-# Tools in this list are allowed, but the user must approve each call before it runs.
+# List of tools that require interactive user confirmation before execution.
+# In 'strict' and 'standard' modes the user must approve each call before it runs.
+# In 'permissive' mode these tools are auto-approved (no prompt shown).
 # If denied, the agent receives "Denied by user." as the tool result.
 # Example: uncomment the line below to require confirmation for shell access.
 # confirm:

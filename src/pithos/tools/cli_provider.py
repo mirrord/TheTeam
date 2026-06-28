@@ -331,20 +331,17 @@ class CLIToolProvider(ToolProvider):
     # ------------------------------------------------------------------
 
     def _is_allowed(self, tool_name: str) -> bool:
-        """Apply include/exclude/all/confirm mode filtering."""
-        mode = self.config.get("mode", "include")
+        """Apply strict/standard/permissive mode filtering."""
+        mode = self.config.get("mode", "strict")
         include_list = self.config.get("include", [])
         exclude_list = self.config.get("exclude", [])
-        confirm_list = self.config.get("confirm", [])
 
-        if mode == "all":
+        if mode == "permissive":
             return tool_name not in exclude_list
-        elif mode == "include":
+        elif mode == "strict":
             return tool_name in include_list
-        elif mode == "exclude":
+        elif mode == "standard":
             return tool_name not in exclude_list
-        elif mode == "confirm":
-            return tool_name in confirm_list
         return False
 
     # ------------------------------------------------------------------

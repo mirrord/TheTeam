@@ -130,7 +130,7 @@ agent:
   temperature: 0.7
   tools:
     enabled: false              # Enable CLI tool calling
-    mode: include               # "all" | "include" | "exclude" | "confirm"
+    mode: strict               # "strict" | "standard" | "permissive"
     auto_loop: false            # Re-prompt after tool calls automatically
     max_iterations: 5           # Safety cap on auto-loop iterations
   memory:
@@ -146,11 +146,10 @@ agent:
 When `tools.enabled` is `true`, the agent can execute CLI commands. The `mode` field mirrors the tool-config modes from pithos:
 
 | mode | behaviour |
-|------|-----------|
-| `all` | every discovered tool is available |
-| `include` | only tools in `configs/tools/tool_config.yaml` include list |
-| `exclude` | all tools except those in the exclude list |
-| `confirm` | prompts the user before executing each call |
+|------|----------|
+| `strict` | only tools in `configs/tools/tool_config.yaml` include list; confirm-listed tools need user approval |
+| `standard` | all tools except those in the exclude list; confirm-listed tools need user approval |
+| `permissive` | all tools except those in the exclude list; confirm-listed tools are auto-approved |
 
 See [TOOL_CALLING.md](TOOL_CALLING.md) for full tool configuration documentation.
 
