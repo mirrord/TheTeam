@@ -67,13 +67,13 @@ default_metadata:
 
         enhanced_prompt = agent.contexts["default"].get_system_prompt()
         assert len(enhanced_prompt) > len(initial_prompt)
-        assert "storemem" in enhanced_prompt
-        assert "retrievemem" in enhanced_prompt
+        assert "STORE[" in enhanced_prompt
+        assert "RETRIEVE[" in enhanced_prompt
         assert "knowledge memory system" in enhanced_prompt
 
     def test_extract_memory_ops_store(self, agent):
         """Test extracting store memory operations."""
-        extractor = MemoryOpExtractor()
+        extractor = MemoryOpExtractor("legacy")
         content1 = (
             'Let me save this: storemem(facts, "Python is a programming language")'
         )
@@ -85,7 +85,7 @@ default_metadata:
 
     def test_extract_memory_ops_retrieve(self, agent):
         """Test extracting retrieve memory operations."""
-        extractor = MemoryOpExtractor()
+        extractor = MemoryOpExtractor("legacy")
         content = 'Let me check: retrievemem(facts, "programming language")'
         ops = extractor.extract(content)
         assert len(ops) == 1
@@ -95,7 +95,7 @@ default_metadata:
 
     def test_extract_memory_ops_multiple(self, agent):
         """Test extracting multiple memory operations."""
-        extractor = MemoryOpExtractor()
+        extractor = MemoryOpExtractor("legacy")
         content = """First storemem(notes, "Important fact") then retrievemem(notes, "fact")"""
         ops = extractor.extract(content)
         assert len(ops) == 2
@@ -104,7 +104,7 @@ default_metadata:
 
     def test_extract_memory_ops_none(self, agent):
         """Test extracting when no memory operations present."""
-        extractor = MemoryOpExtractor()
+        extractor = MemoryOpExtractor("legacy")
         content = "Just a regular response with no memory operations"
         ops = extractor.extract(content)
         assert len(ops) == 0
@@ -197,7 +197,7 @@ default_metadata:
         # Both should be in the prompt
         prompt = agent.contexts["default"].get_system_prompt()
         assert "runcommand" in prompt
-        assert "storemem" in prompt
+        assert "STORE[" in prompt
 
     def test_memory_prompt_includes_categories(self, agent, config_manager, temp_dir):
         """Test that memory prompt is injected into the context system prompt."""
@@ -242,9 +242,7 @@ default_metadata:
 
         # Mock LLM response with memory operation
         mock_chunk = Mock()
-        mock_chunk.message.content = (
-            'I\'ll save that: storemem(facts, "The sky is blue")'
-        )
+        mock_chunk.message.content = "I'll save that: STORE[facts]: The sky is blue"
         mock_chat.return_value = iter([mock_chunk])
 
         # Send a message
@@ -436,7 +434,7 @@ class TestMemoryToolProviderUnit:
         mock_agent.metrics = None
 
         result = provider.extract_and_execute(
-            'Saving this: storemem(facts, "Important thing")', mock_agent
+            "Saving this: STORE[facts]: Important thing", mock_agent
         )
         assert result is not None
         assert "Stored in facts" in result
