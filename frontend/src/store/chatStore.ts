@@ -26,6 +26,11 @@ export interface ConversationDetail extends Conversation {
   messages: Message[]
 }
 
+export interface ToolBlock {
+  command: string
+  output: string
+}
+
 interface ChatState {
   conversations: Conversation[]
   currentConversation: ConversationDetail | null
@@ -34,7 +39,7 @@ interface ChatState {
   processing: boolean
   error: string | null
   /** Active streaming messages keyed by conversation id. */
-  streamingMessages: Record<string, { id: string; content: string }>
+  streamingMessages: Record<string, { id: string; content: string; toolBlocks: ToolBlock[] }>
 
   // Actions
   fetchConversations: () => Promise<void>
@@ -51,6 +56,7 @@ interface ChatState {
   setProcessing: (conversationId: string, processing: boolean) => void
   startStreaming: (conversationId: string, messageId: string) => void
   appendStreamChunk: (conversationId: string, messageId: string, chunk: string) => void
+  appendToolBlock: (conversationId: string, messageId: string, command: string, output: string) => void
   finalizeStreaming: (conversationId: string, message: Message) => void
 }
 
@@ -254,7 +260,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) => ({
       streamingMessages: {
         ...state.streamingMessages,
-        [conversationId]: { id: messageId, content: '' },
+        [conversationId]: { id: messageId, content: '', toolBlocks: [] },
       },
       sending: true,
       processing: false,
@@ -270,6 +276,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
         streamingMessages: {
           ...state.streamingMessages,
           [conversationId]: { ...current, content: current.content + chunk },
+        },
+      }
+    })
+  },
+
+  appendToolBlock: (conversationId: string, _messageId: string, command: string, output: string) => {
+    set((state) => {
+      const current = state.streamingMessages[conversationId]
+      if (!current) return state
+      return {
+        streamingMessages: {
+          ...state.streamingMessages,
+          [conversationId]: {
+            ...current,
+            toolBlocks: [...current.toolBlocks, { command, output }],
+          },
         },
       }
     })
