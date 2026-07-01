@@ -76,7 +76,13 @@ def _make_config_manager(tc: ToolsConfig) -> ConfigManager:
     if not needs_override:
         return ConfigManager()
 
-    kwargs: dict[str, Any] = {"tool_mode_override": tc.mode}
+    kwargs: dict[str, Any] = {}
+    # Only propagate a mode change when the user actually changed it from the
+    # default ("include").  Passing "include" as an override would write an
+    # unrecognised mode name into tool_config, causing CLIToolProvider to
+    # block all tools silently.
+    if tc.mode != DEFAULT_TOOLS_MODE:
+        kwargs["tool_mode_override"] = tc.mode
     if tool_overrides:
         kwargs["tool_config_overrides"] = tool_overrides
     if tc.allow:
@@ -234,7 +240,13 @@ def cmd_disable(tool_name: str, config: TalosConfig, config_path: Path) -> None:
 
 
 def cmd_list(config: TalosConfig, config_path: Path) -> None:
-    """Print tools that are currently available to the Talos agent."""
+    """Print tools that are currently available to the Talos agent.
+
+    Displays CLI tools and virtual tools in separate sections, mirroring
+    exactly what the agent's ToolRegistry contains at startup.  Configured
+    flowcharts are always listed, even when the flowchart virtual tool is
+    disabled in the Talos config, so users can see what workflows exist.
+    """
     tc = config.agent.tools
 
     if not tc.enabled:
@@ -246,41 +258,167 @@ def cmd_list(config: TalosConfig, config_path: Path) -> None:
 
     cm = _make_config_manager(tc)
     try:
-        registry, _ = _build_registry(tc, cm)
+        registry, tool_config = _build_registry(tc, cm)
     except Exception as exc:
         print(f"Could not build tool registry: {exc}")
         return
 
-    tools = registry.list_tools()
-    if not tools:
-        print("No tools available with current settings.")
-        return
+    # --- Partition the registry by tool type --------------------------------
+    cli_entries: list[tuple[str, Any]] = []
+    flowchart_entries: list[tuple[str, Any]] = []
+    virtual_entries: list[tuple[str, Any]] = []
 
+    for name in registry.list_tools():
+        meta = registry.get_tool(name)
+        ttype = meta.tool_type if meta else "cli"
+        if ttype == "flowchart":
+            flowchart_entries.append((name, meta))
+        elif ttype in ("web_research", "memory", "text2image"):
+            virtual_entries.append((name, meta))
+        else:
+            cli_entries.append((name, meta))
+
+    # --- Collect ALL configured flowcharts (even when tool is disabled) -----
+    # Use a plain ConfigManager so the talos flowcharts.enabled override
+    # doesn't hide flowchart YAML files that the user may want to see.
+    try:
+        plain_cm = ConfigManager()
+        all_fc_names: list[str] = sorted(plain_cm.get_registered_flowchart_names())
+    except Exception:
+        all_fc_names = []
+
+    active_fc_names: set[str] = {
+        name.removeprefix("flowchart:")
+        for name, _ in flowchart_entries
+        if name.startswith("flowchart:")
+    }
+    fc_tool_enabled: bool = tool_config.get("flowcharts", {}).get("enabled", False)
+
+    # --- Render -------------------------------------------------------------
     rich_result = _try_rich()
     if rich_result:
+        from rich.panel import Panel
+
         console, Table, Text = rich_result
-        table = Table(title="Talos — Available Tools", show_header=True)
-        table.add_column("Tool", style="bold cyan", no_wrap=True)
-        table.add_column("Type", style="dim")
-        table.add_column("Description")
-        for name in tools:
-            meta = registry.get_tool(name)
-            desc = meta.description if meta else ""
-            ttype = meta.tool_type if meta else "cli"
-            confirm_mark = (
-                " [bold yellow](confirm)[/bold yellow]"
-                if registry.requires_confirmation(name)
+
+        # CLI tools table
+        if cli_entries:
+            cli_table = Table(
+                show_header=True, header_style="bold", box=None, padding=(0, 1)
+            )
+            cli_table.add_column("Tool", style="bold cyan", no_wrap=True)
+            cli_table.add_column("Description")
+            for name, meta in cli_entries:
+                desc = meta.description if meta else ""
+                suffix = (
+                    "  [bold yellow][confirm][/bold yellow]"
+                    if registry.requires_confirmation(name)
+                    else ""
+                )
+                cli_table.add_row(name, desc + suffix)
+            console.print(
+                Panel(
+                    cli_table,
+                    title=f"[bold]CLI tools[/bold] ({len(cli_entries)})",
+                    border_style="blue",
+                )
+            )
+        else:
+            console.print("[dim]No CLI tools available.[/dim]")
+
+        # Flowcharts section
+        if all_fc_names or flowchart_entries:
+            fc_table = Table(
+                show_header=True, header_style="bold", box=None, padding=(0, 1)
+            )
+            fc_table.add_column("Flowchart", style="bold cyan", no_wrap=True)
+            fc_table.add_column("Status")
+            fc_table.add_column("Description")
+            if not fc_tool_enabled:
+                fc_table.add_column("[dim]note[/dim]")
+            for fc_name in all_fc_names:
+                status = (
+                    "[green]active[/green]"
+                    if fc_name in active_fc_names
+                    else "[dim]inactive[/dim]"
+                )
+                meta = registry.get_tool(f"flowchart:{fc_name}")
+                desc = (
+                    meta.description
+                    if meta
+                    else f"Run the '{fc_name}' flowchart workflow"
+                )
+                if not fc_tool_enabled:
+                    fc_table.add_row(
+                        fc_name,
+                        "[dim]disabled[/dim]",
+                        desc,
+                        "[dim]enable with: talos tools enable flowcharts[/dim]",
+                    )
+                else:
+                    fc_table.add_row(fc_name, status, desc)
+            title_note = (
+                " [dim](flowchart tool disabled)[/dim]" if not fc_tool_enabled else ""
+            )
+            console.print(
+                Panel(
+                    fc_table,
+                    title=f"[bold]Flowchart tools[/bold]{title_note}",
+                    border_style="blue",
+                )
+            )
+        else:
+            console.print("[dim]No flowcharts configured.[/dim]")
+
+        # Other virtual tools (web-research, memory, text2image)
+        if virtual_entries:
+            vt_table = Table(
+                show_header=True, header_style="bold", box=None, padding=(0, 1)
+            )
+            vt_table.add_column("Tool", style="bold cyan", no_wrap=True)
+            vt_table.add_column("Description")
+            for name, meta in virtual_entries:
+                desc = meta.description if meta else ""
+                vt_table.add_row(name, desc)
+            console.print(
+                Panel(vt_table, title="[bold]Virtual tools[/bold]", border_style="blue")
+            )
+
+    else:
+        # Plain-text fallback
+        mode = tool_config.get("mode", "strict")
+        print(f"Talos — Active Tools  (mode: {mode})\n")
+
+        if cli_entries:
+            print(f"CLI tools ({len(cli_entries)}):")
+            for name, meta in cli_entries:
+                desc = meta.description if meta else ""
+                confirm_mark = (
+                    "  [confirm]" if registry.requires_confirmation(name) else ""
+                )
+                print(f"  {name:<22} {desc}{confirm_mark}")
+        else:
+            print("  (no CLI tools available)")
+
+        print()
+        if all_fc_names:
+            note = (
+                "  (flowchart tool disabled — run: talos tools enable flowcharts)"
+                if not fc_tool_enabled
                 else ""
             )
-            table.add_row(name, ttype, desc + confirm_mark)
-        console.print(table)
-    else:
-        print(f"Available tools ({len(tools)}):")
-        for name in tools:
-            meta = registry.get_tool(name)
-            desc = meta.description if meta else ""
-            confirm_mark = " [confirm]" if registry.requires_confirmation(name) else ""
-            print(f"  {name}{confirm_mark}: {desc}")
+            print(f"Flowchart tools:{note}")
+            for fc_name in all_fc_names:
+                active = "active" if fc_name in active_fc_names else "inactive"
+                print(f"  {fc_name:<22} [{active}]")
+        else:
+            print("Flowchart tools:\n  (none configured)")
+
+        if virtual_entries:
+            print("\nVirtual tools:")
+            for name, meta in virtual_entries:
+                desc = meta.description if meta else ""
+                print(f"  {name:<22} {desc}")
 
 
 def cmd_list_all(config: TalosConfig, config_path: Path) -> None:

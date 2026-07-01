@@ -366,7 +366,14 @@ def build_agent(config: TalosConfig) -> OllamaAgent:
         tc.mode != DEFAULT_TOOLS_MODE or tool_overrides or tc.allow or tc.deny
     )
     if needs_override:
-        cm_kwargs: dict[str, Any] = {"tool_mode_override": tc.mode}
+        cm_kwargs: dict[str, Any] = {}
+        # Only propagate a mode change when the user actually changed it from
+        # the default.  Passing the default mode name ("include") as an
+        # override would set cfg["mode"] = "include" in tool_config, but
+        # CLIToolProvider only recognises "strict"/"standard"/"permissive",
+        # causing all tools to be silently blocked.
+        if tc.mode != DEFAULT_TOOLS_MODE:
+            cm_kwargs["tool_mode_override"] = tc.mode
         if tool_overrides:
             cm_kwargs["tool_config_overrides"] = tool_overrides
         if tc.allow:
@@ -406,8 +413,9 @@ class _ModeOverrideConfigManager(ConfigManager):
     """ConfigManager that overrides tool discovery settings at read time.
 
     Used by :func:`build_agent` to honour ``ToolsConfig`` values without
-    modifying the shared ``configs/tools/tool_config.yaml`` file.  The
-    ``tool_mode_override`` always wins over the YAML ``mode`` field;
+    modifying the shared ``configs/tools/tool_config.yaml`` file.  When
+    ``tool_mode_override`` is supplied it wins over the YAML ``mode`` field;
+    pass ``None`` (or omit it) to leave the YAML mode unchanged.
     ``tool_config_overrides`` (if provided) are shallow-merged on top of
     the full config so that Talos-level feature flags (e.g.
     ``flowcharts.enabled``, ``web_research.enabled``) always take
@@ -418,7 +426,7 @@ class _ModeOverrideConfigManager(ConfigManager):
 
     def __init__(
         self,
-        tool_mode_override: str,
+        tool_mode_override: Optional[str] = None,
         config_dir: Optional[str] = None,
         tool_config_overrides: Optional[dict[str, Any]] = None,
         allow: Optional[list] = None,
@@ -436,7 +444,11 @@ class _ModeOverrideConfigManager(ConfigManager):
         cfg = super().get_config(config_name, namespace)
         if cfg is not None and config_name == "tool_config" and namespace == "tools":
             cfg = dict(cfg)
-            cfg["mode"] = self._tool_mode_override
+            # Only override the mode when the caller explicitly requested it.
+            # Passing the default mode name through would set an unrecognised
+            # value in tool_config, causing CLIToolProvider to block all tools.
+            if self._tool_mode_override is not None:
+                cfg["mode"] = self._tool_mode_override
             # Merge talos-local allow list into include.
             if self._allow:
                 base_include: list = list(cfg.get("include", []))

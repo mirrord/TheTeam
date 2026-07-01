@@ -204,11 +204,15 @@ def test_list_empty_registry(tmp_path: Path, capsys) -> None:
     path = tmp_path / "config.yaml"
     mock_registry = MagicMock()
     mock_registry.list_tools.return_value = []
+    mock_plain_cm = MagicMock()
+    mock_plain_cm.get_registered_flowchart_names.return_value = []
     with patch("talos.tools_cmd._build_registry", return_value=(mock_registry, {})):
         with patch("talos.tools_cmd._try_rich", return_value=None):
-            cmd_list(cfg, path)
+            with patch("talos.tools_cmd.ConfigManager", return_value=mock_plain_cm):
+                cmd_list(cfg, path)
     captured = capsys.readouterr()
-    assert "no tools" in captured.out.lower()
+    # No CLI tools → shows the "no CLI tools available" line
+    assert "no cli tools" in captured.out.lower()
 
 
 def test_list_shows_tools(tmp_path: Path, capsys) -> None:
@@ -221,12 +225,42 @@ def test_list_shows_tools(tmp_path: Path, capsys) -> None:
     mock_registry.list_tools.return_value = ["python"]
     mock_registry.get_tool.return_value = mock_meta
     mock_registry.requires_confirmation.return_value = False
+    mock_plain_cm = MagicMock()
+    mock_plain_cm.get_registered_flowchart_names.return_value = []
     with patch("talos.tools_cmd._build_registry", return_value=(mock_registry, {})):
         with patch("talos.tools_cmd._try_rich", return_value=None):
-            cmd_list(cfg, path)
+            with patch("talos.tools_cmd.ConfigManager", return_value=mock_plain_cm):
+                cmd_list(cfg, path)
     captured = capsys.readouterr()
     assert "python" in captured.out
     assert "Python interpreter" in captured.out
+
+
+def test_list_shows_flowcharts_even_when_disabled(tmp_path: Path, capsys) -> None:
+    """Configured flowcharts appear in list even when the flowchart tool is disabled."""
+    cfg = _make_config(enabled=True, flowcharts={"enabled": False})
+    path = tmp_path / "config.yaml"
+    # Registry has NO flowchart entries (tool disabled).
+    mock_registry = MagicMock()
+    mock_registry.list_tools.return_value = []
+    # But plain ConfigManager finds two flowcharts on disk.
+    mock_plain_cm = MagicMock()
+    mock_plain_cm.get_registered_flowchart_names.return_value = [
+        "research",
+        "summarize",
+    ]
+    tool_cfg = {"flowcharts": {"enabled": False}}
+    with patch(
+        "talos.tools_cmd._build_registry", return_value=(mock_registry, tool_cfg)
+    ):
+        with patch("talos.tools_cmd._try_rich", return_value=None):
+            with patch("talos.tools_cmd.ConfigManager", return_value=mock_plain_cm):
+                cmd_list(cfg, path)
+    out = capsys.readouterr().out
+    assert "research" in out
+    assert "summarize" in out
+    # Should indicate they're disabled / not active
+    assert "disabled" in out.lower() or "inactive" in out.lower()
 
 
 # ---------------------------------------------------------------------------

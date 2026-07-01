@@ -354,8 +354,9 @@ def test_build_agent_flowcharts_disabled_in_talos_config_uses_override_cm() -> N
         patch("talos.config._ModeOverrideConfigManager") as override_cm,
     ):
         build_agent(cfg)
+    # mode=include is the DEFAULT_TOOLS_MODE so tool_mode_override is NOT passed;
+    # only the flowcharts override is forwarded.
     override_cm.assert_called_once_with(
-        tool_mode_override="include",
         tool_config_overrides={"flowcharts": {"enabled": False}},
     )
 
@@ -377,7 +378,6 @@ def test_build_agent_web_research_disabled_in_talos_config_uses_override_cm() ->
     ):
         build_agent(cfg)
     override_cm.assert_called_once_with(
-        tool_mode_override="include",
         tool_config_overrides={"web_research": {"enabled": False}},
     )
 
@@ -557,10 +557,8 @@ def test_build_agent_allow_list_passes_to_override_cm() -> None:
         patch("talos.config._ModeOverrideConfigManager") as override_cm,
     ):
         build_agent(cfg)
-    override_cm.assert_called_once_with(
-        tool_mode_override="include",
-        allow=["mytool"],
-    )
+    # mode=include is the default — tool_mode_override is NOT forwarded.
+    override_cm.assert_called_once_with(allow=["mytool"])
 
 
 def test_build_agent_deny_list_passes_to_override_cm() -> None:
@@ -575,10 +573,7 @@ def test_build_agent_deny_list_passes_to_override_cm() -> None:
         patch("talos.config._ModeOverrideConfigManager") as override_cm,
     ):
         build_agent(cfg)
-    override_cm.assert_called_once_with(
-        tool_mode_override="include",
-        deny=["badtool"],
-    )
+    override_cm.assert_called_once_with(deny=["badtool"])
 
 
 def test_build_agent_text2image_override_uses_override_cm() -> None:
@@ -598,6 +593,5 @@ def test_build_agent_text2image_override_uses_override_cm() -> None:
     ):
         build_agent(cfg)
     override_cm.assert_called_once_with(
-        tool_mode_override="include",
         tool_config_overrides={"text2image": {"enabled": True}},
     )
