@@ -1035,6 +1035,22 @@ class Agent(ABC):
             except Exception:
                 pass  # optional feature — silently skip if deps are missing
 
+        # Optionally add a news-research provider.
+        news_config = tool_config.get("news_research", {})
+        if news_config.get("enabled", False):
+            try:
+                from ..tools.news_researcher import (
+                    NEWS_RESEARCH_AVAILABLE,
+                    NewsResearcherToolExecutor,
+                )
+
+                if NEWS_RESEARCH_AVAILABLE:
+                    providers.append(
+                        NewsResearcherToolExecutor(config_manager=config_manager)
+                    )
+            except Exception:
+                pass  # optional feature — silently skip if deps are missing
+
         # Optionally add a text2image provider.
         t2i_config = tool_config.get("text2image", {})
         if t2i_config.get("enabled", False):

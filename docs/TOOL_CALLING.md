@@ -98,6 +98,9 @@ dispatched in-process rather than as subprocesses:
 - **`web-research`** — subagent-driven web crawler over a configurable
   domain whitelist. See [WEB_RESEARCH.md](WEB_RESEARCH.md). Requires the
   optional `web` extra (`pip install -e ".[web]"`).
+- **`research-news`** — collects and summarises recent news articles from a
+  whitelist of domains/RSS feeds, judging each for relevance. See
+  [NEWS_RESEARCH.md](NEWS_RESEARCH.md). Requires the optional `web` extra.
 - **`text2image`** — generates a PNG from a text prompt using a local
   image model. See [TEXT2IMAGE.md](TEXT2IMAGE.md). Three backends are
   supported:

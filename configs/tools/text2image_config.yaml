@@ -7,7 +7,7 @@
 
 # Whether the tool is active (the registration gate in tool_config.yaml takes
 # precedence; this mirrors it for standalone/CLI use).
-enabled: false
+enabled: true
 
 # Backend selection: "http", "comfyui", or "diffusers"
 #   http      - POSTs to a running Automatic1111/Forge server (/sdapi/v1/txt2img).
@@ -16,7 +16,7 @@ enabled: false
 #               (/prompt + /history + /view). Only needs the `web` extra.
 #   diffusers - Loads a Hugging Face diffusers pipeline in-process.
 #               Heavy: needs the `image` extra (torch + diffusers + Pillow).
-backend: http
+backend: comfyui
 
 # Directory where generated PNGs are written (created if missing).
 output_dir: ./data/generated_images
@@ -25,7 +25,7 @@ output_dir: ./data/generated_images
 #   diffusers: a HF repo id or local path, e.g. "stabilityai/sd-turbo".
 #   http:      optional checkpoint name; leave empty to use the server's
 #              currently loaded model.
-model: ""
+model: "REED_XXX_illustrious_SDXL_-_v11-0.safetensors"
 
 # Default generation parameters (the agent only supplies the prompt).
 width: 512
@@ -51,7 +51,7 @@ timeout: 120
 
 # --- comfyui backend only ---
 # Base URL of the ComfyUI server.
-comfyui_base_url: "http://127.0.0.1:8188"
+comfyui_base_url: "http://localhost:7802/ComfyBackendDirect"
 # Optional path to a ComfyUI API-format workflow JSON. Input values may contain
 # placeholder tokens that are substituted per call:
 #   %prompt% %negative_prompt% %seed% %steps% %cfg% %width% %height%

@@ -136,6 +136,7 @@ pithos-agent chat glm-4.7-flash:latest --flowchart simple_reflect
 - **Message-Based Routing**: Advanced data flow with explicit message passing between nodes
 - **Tool Calling**: Enable agents to execute CLI commands dynamically
 - **Web Research Tool**: Subagent-driven web crawler (`web-research`) restricted to a configurable domain whitelist, with deduplicated excerpt storage and a cited summary report
+- **News Research Tool**: Recent-news collector (`research-news`) that derives search terms with a small model, scrapes recent (configurable age) articles from whitelisted domains/RSS feeds into the knowledge base, and summarises + relevance-judges each article via a subagent
 - **Text-to-Image Tool**: Generate images from text prompts with a local model (`text2image`). Pluggable backends: Automatic1111/Forge HTTP API, ComfyUI node-graph API, or in-process Hugging Face `diffusers`
 - **Conditions**: Define conditional logic for flowchart branching
 - **Configuration**: YAML-based configuration for agents, flowcharts, and conditions
@@ -711,6 +712,33 @@ pithos-research "Python GIL removal status" --json
 
 See [docs/WEB_RESEARCH.md](docs/WEB_RESEARCH.md) for architecture, configuration,
 and the in-flowchart `webresearch` node.
+
+### pithos-research-news
+
+Recent-news research CLI. Requires the optional `web` extra: `pip install -e ".[web]"`.
+
+```bash
+# Collect recent articles relevant to a topic from the configured whitelist
+pithos-research-news "recent advances in cache quantization"
+
+# Restrict the age window and domains for this run
+pithos-research-news "new transformer architectures" \
+    --recency-days 7 --domains arxiv.org
+
+# Override the RSS/Atom feeds used for discovery
+pithos-research-news "open-source LLM releases" \
+    --feed https://huggingface.co/blog/feed.xml
+
+# Machine-readable JSON output (terms + relevant articles + stats)
+pithos-research-news "diffusion model efficiency" --json
+```
+
+A small model derives technical search terms, a scraper downloads recent
+articles (RSS/Atom feeds first, search fallback otherwise) into the knowledge
+base, and a subagent summarises and relevance-judges each one. Relevant
+articles are collected into a Markdown document under `data/research/news/`.
+See [docs/NEWS_RESEARCH.md](docs/NEWS_RESEARCH.md) for architecture,
+configuration, and the in-flowchart `researchnews` node.
 
 ### pithos-text2image
 

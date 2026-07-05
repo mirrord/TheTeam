@@ -818,6 +818,110 @@ class WebResearchNode(FlowNode):
         return {self.save_to: payload, "current_input": payload["markdown"]}
 
 
+class NewsResearchNode(FlowNode):
+    """Node that runs the NewsResearcher tool on an inquiry.
+
+    The inquiry template is formatted from the current execution context
+    (so ``{current_input}`` and other state variables are supported). The
+    resulting :class:`NewsReport` is stored under ``save_to`` as a dict and
+    the rendered Markdown report becomes the ``current_input`` for
+    downstream nodes.
+    """
+
+    def __init__(
+        self,
+        inquiry: str = "{current_input}",
+        save_to: str = "news_report",
+        domains: Optional[list[str]] = None,
+        feeds: Optional[list[str]] = None,
+        recency_days: Optional[int] = None,
+        error_handling: str = "continue",
+        extraction: Optional[dict[str, str]] = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(extraction, **kwargs)
+        self.inquiry = inquiry
+        self.save_to = save_to
+        self.domains = list(domains) if domains else None
+        self.feeds = list(feeds) if feeds else None
+        self.recency_days = recency_days
+        self.error_handling = error_handling
+
+    def _execute(self, context: dict[str, Any]) -> Any:
+        """Run a news research pass and return the report payload."""
+        inquiry_text = self._stateful_format(self.inquiry, context)
+
+        researcher = context.get("news_researcher")
+        config_manager = context.get("config_manager")
+
+        if researcher is None and config_manager is not None:
+            try:
+                from .tools.news_researcher import (
+                    NEWS_RESEARCH_AVAILABLE,
+                    NewsResearcher,
+                )
+
+                if NEWS_RESEARCH_AVAILABLE:
+                    researcher = NewsResearcher(config_manager)
+            except Exception as exc:
+                if self.error_handling == "stop":
+                    raise RuntimeError(f"news research unavailable: {exc}") from exc
+                researcher = None
+
+        if researcher is None:
+            err = {
+                "summary": "News research is not available in this flowchart context.",
+                "relevant": [],
+                "errors": ["news_researcher not configured"],
+                "stats": {},
+            }
+            if self.error_handling == "stop":
+                raise RuntimeError("News research is not available")
+            return {self.save_to: err, "current_input": err["summary"]}
+
+        from .tools.news_researcher.models import NewsResearchRequest
+
+        request = NewsResearchRequest(
+            inquiry=inquiry_text,
+            domains_override=self.domains,
+            feeds_override=self.feeds,
+            recency_days_override=self.recency_days,
+        )
+
+        try:
+            report = researcher.research(request)
+        except Exception as exc:
+            if self.error_handling == "stop":
+                raise
+            err = {
+                "summary": f"News research failed: {exc}",
+                "relevant": [],
+                "errors": [str(exc)],
+                "stats": {},
+            }
+            return {self.save_to: err, "current_input": err["summary"]}
+
+        markdown = report.to_markdown()
+        payload = {
+            "inquiry": report.inquiry,
+            "terms": list(report.terms),
+            "markdown": markdown,
+            "relevant": [
+                {
+                    "url": a.url,
+                    "title": a.title,
+                    "published": a.published_iso,
+                    "summary": a.summary,
+                }
+                for a in report.relevant
+            ],
+            "document_path": report.document_path,
+            "stats": dict(report.stats),
+            "errors": list(report.errors),
+        }
+        return {self.save_to: payload, "current_input": markdown}
+
+
 class TextParseNode(FlowNode):
     """Node that parses and extracts information from text input.
 
@@ -1295,6 +1399,9 @@ def create_node(node_type: str, data: dict[str, Any]) -> Optional[FlowNode]:
         "toolcallnode": ToolCallNode,
         "webresearch": WebResearchNode,
         "webresearchnode": WebResearchNode,
+        "researchnews": NewsResearchNode,
+        "newsresearch": NewsResearchNode,
+        "newsresearchnode": NewsResearchNode,
         "textparse": TextParseNode,
         "textparsenode": TextParseNode,
         "agentprompt": AgentPromptNode,

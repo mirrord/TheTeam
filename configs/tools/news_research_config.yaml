@@ -1,0 +1,77 @@
+# NewsResearcher tool configuration
+#
+# Drives the `research-news` virtual tool: a small model derives technical
+# search terms, a scraper downloads recent articles from the whitelisted
+# domains/feeds below, and a subagent summarises each article and judges its
+# relevance to the inquiry. Articles and summaries are stored in the
+# knowledge base (the ChromaDB memory store); relevant articles are collected
+# into a Markdown document under `output_dir`.
+#
+# Only URLs whose host is an exact match or subdomain of a `domains` entry are
+# ever fetched. `robots.txt` is honoured for article pages by default.
+
+enabled: true
+
+# --- Whitelisted source domains -------------------------------------------
+domains:
+  - arstechnica.com
+  - theverge.com
+  - techcrunch.com
+  - news.mit.edu
+  - huggingface.co
+  # Research paper preprint and proceedings sites
+  - arxiv.org
+  - openreview.net
+  - proceedings.mlr.press
+  - papers.neurips.cc
+
+# --- RSS/Atom feeds (preferred, dated source of article links) ------------
+# Feed hosts are fetched even if they differ from the domains above, but the
+# articles they link to must still be on a whitelisted domain.
+feeds:
+  - https://feeds.arstechnica.com/arstechnica/index
+  - https://www.theverge.com/rss/index.xml
+  - https://techcrunch.com/feed/
+  - https://news.mit.edu/rss/feed
+  - https://huggingface.co/blog/feed.xml
+  # arXiv new-submissions feeds for AI/ML categories
+  - https://arxiv.org/rss/cs.AI
+  - https://arxiv.org/rss/cs.LG
+  - https://arxiv.org/rss/cs.CL
+  - https://arxiv.org/rss/cs.CV
+  - https://arxiv.org/rss/stat.ML
+
+# --- Recency --------------------------------------------------------------
+recency_days: 14            # only keep articles newer than this many days
+skip_undated: true          # drop articles whose publication date is unknown
+
+# --- Discovery budget -----------------------------------------------------
+max_articles: 15            # hard cap on articles processed per run
+max_articles_per_source: 5  # cap per host to keep sources balanced
+search_fallback: true       # search whitelisted domains when feeds are thin
+search_results_per_domain: 5
+
+# --- HTTP behaviour -------------------------------------------------------
+request_timeout: 15.0       # seconds
+per_domain_rps: 1.0         # max requests per second per host
+max_page_bytes: 2000000     # 2 MiB cap; pages larger than this are skipped
+user_agent: "TheTeam-NewsResearcher/1.0 (+https://github.com/mirrord/theteam)"
+respect_robots: true
+
+# --- Term extraction (small language model) -------------------------------
+term_model: glm-4.7-flash:latest            # small model for search terms; null = subagent model
+term_config_name: null      # optional agent config for term extraction
+max_terms: 6
+
+# --- Summarise + relevance subagent ---------------------------------------
+subagent_config_name: "news_researcher"  # configs/agents/news_researcher.yaml
+subagent_model: null        # null = use the value from the agent config
+
+# --- Knowledge base (persistent memory store) -----------------------------
+article_category: "news_articles"    # KB category for full article text
+summary_category: "news_summaries"   # KB category for article summaries
+memory_persist_directory: null       # null = MemoryStore default (./data/memory)
+
+# --- Output ---------------------------------------------------------------
+output_dir: "./data/research/news"   # where the collected Markdown doc is saved
+write_document: true                 # set false to skip writing the doc to disk
