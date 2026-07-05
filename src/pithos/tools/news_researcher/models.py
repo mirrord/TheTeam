@@ -86,13 +86,15 @@ class NewsResearchConfig:
     max_articles_per_source: int = 5
     search_fallback: bool = True  # search whitelisted domains when feeds are thin
     search_results_per_domain: int = 5
+    max_candidates: int = 60  # cap on candidate URLs ranked before download
 
     # --- HTTP behaviour ----------------------------------------------------
     request_timeout: float = 15.0
-    per_domain_rps: float = 1.0
+    per_domain_rps: float = 2.0
     max_page_bytes: int = 2_000_000
     user_agent: str = "TheTeam-NewsResearcher/1.0 (+https://github.com/mirrord/theteam)"
     respect_robots: bool = True
+    download_concurrency: int = 4  # parallel article downloads (across hosts)
 
     # --- Term extraction (small language model) ----------------------------
     term_model: Optional[str] = None  # small model used to derive search terms
@@ -102,6 +104,20 @@ class NewsResearchConfig:
     # --- Summarise + relevance subagent ------------------------------------
     subagent_config_name: str = "news_researcher"
     subagent_model: Optional[str] = None
+    # Emit the summary and relevance verdict in a single LLM call per article.
+    combine_summary_and_judgement: bool = True
+    # Truncate article body sent to the model (head+tail slice) to this many
+    # characters. Shorter context = faster local inference.
+    summary_char_cap: int = 3500
+    # Only run the (expensive) LLM assessment on the top-K candidates ranked by
+    # a cheap relevance gate. 0 disables pre-filtering (assess everything).
+    prefilter_top_k: int = 6
+    # Parallel LLM assessments. Keep at 1 for single-request backends
+    # (e.g. single-GPU Ollama); raise if the backend serves concurrent requests.
+    assess_concurrency: int = 1
+    # Reuse article bodies + summaries already stored in the knowledge base on a
+    # previous run instead of re-downloading and re-summarising them.
+    reuse_cached_articles: bool = True
 
     # --- Knowledge base (persistent MemoryStore) ---------------------------
     article_category: str = "news_articles"

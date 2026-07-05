@@ -101,8 +101,17 @@ Two YAML files ship by default:
   skip_undated: true             # drop articles with no parseable date
   max_articles: 15               # hard cap on articles processed per run
   max_articles_per_source: 5     # per-host cap
+  max_candidates: 60             # cap candidate links before downloading
+  download_concurrency: 4        # parallel article downloads
+  per_domain_rps: 2.0            # per-host request rate limit
   search_fallback: true          # search whitelisted domains when feeds are thin
   term_model: null               # small model for search terms (null = subagent model)
+  # --- efficiency knobs ---
+  combine_summary_and_judgement: true  # summarise + judge in ONE LLM call
+  summary_char_cap: 3500         # truncate article body sent to the LLM
+  prefilter_top_k: 6             # only assess the top-K ranked articles
+  assess_concurrency: 1          # parallel LLM assessment workers (1 = serial)
+  reuse_cached_articles: true    # reuse KB-cached bodies/summaries across runs
   subagent_config_name: news_researcher
   article_category: news_articles      # KB category for article bodies
   summary_category: news_summaries     # KB category for summaries
@@ -154,9 +163,35 @@ Articles older than `recency_days` are skipped. Articles with **no** parseable
 date are skipped when `skip_undated` is `true` (the default) and kept
 otherwise.
 
-## Safety guardrails
+## Performance
 
-All fetching goes through the shared `web_researcher.Fetcher`, so the same
+Earlier versions could take hours per run because every candidate link was
+downloaded serially and each surviving article cost two LLM calls (one to
+summarise, one to judge relevance). The pipeline now applies several
+efficiency measures, all controlled by the config knobs above:
+
+- **Candidate capping** — feed + search links are deduplicated by normalised
+  URL and capped (`max_candidates`, plus a per-host cap) *before* any
+  downloading, so obviously excess links never hit the network.
+- **Parallel downloads** — article pages are fetched concurrently
+  (`download_concurrency`) while dedup, per-source caps, the `max_articles`
+  budget, and KB writes stay single-threaded in the caller for correctness.
+  Candidate order is preserved in the returned articles.
+- **Pre-filter ranking** — before assessment, articles are ranked by search-
+  term and inquiry keyword overlap and only the top `prefilter_top_k` are sent
+  to the LLM. The rest are recorded as not-assessed rather than dropped.
+- **Combined summarise + judge** — with `combine_summary_and_judgement` a
+  single LLM call returns both a `SUMMARY:` and a `VERDICT:`, halving the LLM
+  round-trips per article. Long bodies are truncated to `summary_char_cap`
+  (head + tail) before being sent.
+- **Optional assessment concurrency** — `assess_concurrency > 1` runs LLM
+  assessment across worker threads, each with its own agent instance (requires
+  an `agent_factory`). It defaults to `1` for single-request backends.
+- **Cross-run reuse** — when `reuse_cached_articles` is set, article bodies and
+  summaries already in the KB (matched by URL) are reused instead of being
+  re-fetched or re-summarised.
+
+## Safety guardrailsAll fetching goes through the shared `web_researcher.Fetcher`, so the same
 protections apply: HTTPS-only, whitelist enforcement on every redirect hop,
 `robots.txt` respected for article pages, per-domain rate limiting, and a byte
 cap. Feed documents themselves are fetched with `robots.txt` bypassed (like the

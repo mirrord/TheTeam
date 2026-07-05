@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Optional
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Callable, Optional
 
 from .models import ArticleAssessment, NewsArticle, NewsResearchConfig
 
@@ -44,7 +46,39 @@ Where VERDICT is one of:
 Output nothing else.
 """
 
+_COMBINED_SYSTEM_PROMPT = """\
+You are a technical news analyst. Given a research inquiry and one article,
+do BOTH of the following in a single response:
+
+1. Write a concise summary (3-6 sentences) capturing the key technical
+   points, findings, and any named methods, models, or results.
+2. Decide whether the article is relevant to the inquiry.
+
+Reply in EXACTLY this format and nothing else:
+
+  SUMMARY: <the summary as a single plain-prose paragraph>
+  VERDICT: <RELEVANT or NOT RELEVANT> - <one short sentence of reasoning>
+
+Where RELEVANT means the article materially addresses the inquiry and NOT
+RELEVANT means it does not.
+"""
+
 _ARTICLE_CHAR_CAP = 8000
+
+
+def _truncate_body(text: str, char_cap: int) -> str:
+    """Trim article text to ``char_cap`` chars using a head+tail slice.
+
+    Keeping both the opening and the closing of an article preserves the
+    lede and the conclusions while cutting the (usually less informative)
+    middle, giving the model a shorter prompt for faster inference.
+    """
+    body = (text or "").strip()
+    if char_cap <= 0 or len(body) <= char_cap:
+        return body
+    head = (char_cap * 2) // 3
+    tail = char_cap - head
+    return body[:head].rstrip() + "\n...\n" + body[-tail:].lstrip()
 
 
 def _send(agent: Any, prompt: str, model: Optional[str]) -> str:
@@ -61,9 +95,10 @@ def summarize_article(
     article: NewsArticle,
     agent: Any,
     model: Optional[str] = None,
+    char_cap: int = _ARTICLE_CHAR_CAP,
 ) -> str:
     """Return a concise summary of ``article`` produced by the subagent."""
-    body = (article.text or "").strip()[:_ARTICLE_CHAR_CAP]
+    body = _truncate_body(article.text, char_cap)
     if not body:
         return ""
     try:
@@ -81,6 +116,64 @@ def summarize_article(
     except Exception as exc:
         logger.warning("article summarisation failed [%s]: %s", article.url, exc)
         return ""
+
+
+def summarize_and_judge(
+    inquiry: str,
+    article: NewsArticle,
+    agent: Any,
+    model: Optional[str] = None,
+    char_cap: int = _ARTICLE_CHAR_CAP,
+) -> tuple[str, bool, str]:
+    """Summarise ``article`` and judge its relevance in a single LLM call.
+
+    Returns ``(summary, relevant, reason)``. Halves the per-article LLM cost
+    versus separate summarise + judge calls.
+    """
+    body = _truncate_body(article.text, char_cap)
+    if not body:
+        return "", False, "no article text"
+    try:
+        agent.set_system_prompt(_COMBINED_SYSTEM_PROMPT)
+    except Exception:
+        pass
+    prompt = (
+        f"Inquiry: {inquiry}\n\n"
+        f"Article title: {article.title or article.url}\n"
+        f"Source: {article.url}\n\n"
+        f"Article text:\n{body}\n\n"
+        "Respond with the SUMMARY and VERDICT lines now."
+    )
+    try:
+        reply = _send(agent, prompt, model).strip()
+    except Exception as exc:
+        logger.warning("combined assessment failed [%s]: %s", article.url, exc)
+        return "", False, f"assessment failed: {exc}"
+    return _parse_combined(reply)
+
+
+def _parse_combined(reply: str) -> tuple[str, bool, str]:
+    """Parse a ``SUMMARY: ... / VERDICT: ...`` reply.
+
+    Robust to the model omitting labels: when no ``VERDICT`` marker is
+    present the whole reply is treated as the summary and relevance is
+    inferred by scanning the text.
+    """
+    if not reply:
+        return "", False, "no response returned"
+    # Locate the VERDICT marker (case-insensitive).
+    m = re.search(r"(?im)^\s*verdict\s*[:\-]\s*(.+)$", reply)
+    if m:
+        verdict_text = m.group(1).strip()
+        summary = reply[: m.start()].strip()
+    else:
+        # No explicit verdict line; infer from the whole reply.
+        verdict_text = reply
+        summary = reply
+    # Strip a leading "SUMMARY:" label from the summary block.
+    summary = re.sub(r"(?is)^\s*summary\s*[:\-]\s*", "", summary).strip()
+    relevant, reason = _parse_verdict(verdict_text)
+    return summary, relevant, reason
 
 
 def judge_relevance(
@@ -142,35 +235,136 @@ def assess_articles(
     config: NewsResearchConfig,
     memory_store: Optional[Any] = None,
     errors: Optional[list[str]] = None,
+    agent_factory: Optional[Callable[[], Any]] = None,
 ) -> list[ArticleAssessment]:
     """Summarise and judge each article, storing summaries in the KB.
 
     Returns one :class:`ArticleAssessment` per article, in input order.
+
+    When ``config.assess_concurrency`` > 1 and ``agent_factory`` is provided,
+    articles are assessed in parallel with one agent per worker thread. When
+    ``config.reuse_cached_articles`` is set and a summary for the article's URL
+    already exists in the knowledge base, that summary is reused (the article
+    is only re-judged against the current inquiry).
     """
     errors = errors if errors is not None else []
-    assessments: list[ArticleAssessment] = []
-    model = config.subagent_model
+    if not articles:
+        return []
 
-    for article in articles:
-        summary = summarize_article(article, agent, model)
+    def _assess_one(article: NewsArticle, ag: Any) -> ArticleAssessment:
+        return _assess_single(inquiry, article, ag, config, memory_store, errors)
+
+    concurrency = max(1, int(config.assess_concurrency or 1))
+    if concurrency > 1 and agent_factory is not None and len(articles) > 1:
+        assessments = _assess_parallel(
+            articles, _assess_one, agent_factory, concurrency
+        )
+    else:
+        assessments = [_assess_one(a, agent) for a in articles]
+    return assessments
+
+
+def _assess_single(
+    inquiry: str,
+    article: NewsArticle,
+    agent: Any,
+    config: NewsResearchConfig,
+    memory_store: Optional[Any],
+    errors: list[str],
+) -> ArticleAssessment:
+    """Produce a single :class:`ArticleAssessment` for ``article``."""
+    model = config.subagent_model
+    cap = config.summary_char_cap
+    summary_entry_id: Optional[str] = None
+
+    cached_summary, cached_id = (None, None)
+    if config.reuse_cached_articles:
+        cached_summary, cached_id = _lookup_cached_summary(
+            article, config, memory_store
+        )
+
+    if cached_summary:
+        # Summary is inquiry-independent and already stored: reuse it and only
+        # re-judge relevance against the current inquiry (a short call).
+        summary = cached_summary
+        summary_entry_id = cached_id
+        relevant, reason = judge_relevance(inquiry, article, summary, agent, model)
+    elif config.combine_summary_and_judgement:
+        summary, relevant, reason = summarize_and_judge(
+            inquiry, article, agent, model, cap
+        )
+        summary_entry_id = _store_summary(
+            article, summary, inquiry, config, memory_store, errors
+        )
+    else:
+        summary = summarize_article(article, agent, model, cap)
         summary_entry_id = _store_summary(
             article, summary, inquiry, config, memory_store, errors
         )
         relevant, reason = judge_relevance(inquiry, article, summary, agent, model)
-        assessments.append(
-            ArticleAssessment(
-                url=article.url,
-                title=article.title,
-                summary=summary,
-                relevant=relevant,
-                reason=reason,
-                published_iso=article.published_iso,
-                source_host=article.source_host,
-                article_entry_id=article.metadata.get("article_entry_id"),
-                summary_entry_id=summary_entry_id,
-            )
+
+    return ArticleAssessment(
+        url=article.url,
+        title=article.title,
+        summary=summary,
+        relevant=relevant,
+        reason=reason,
+        published_iso=article.published_iso,
+        source_host=article.source_host,
+        article_entry_id=article.metadata.get("article_entry_id"),
+        summary_entry_id=summary_entry_id,
+    )
+
+
+def _assess_parallel(
+    articles: list[NewsArticle],
+    assess_one: Callable[[NewsArticle, Any], ArticleAssessment],
+    agent_factory: Callable[[], Any],
+    concurrency: int,
+) -> list[ArticleAssessment]:
+    """Assess ``articles`` across a thread pool, one agent per worker thread."""
+    local = threading.local()
+
+    def worker(article: NewsArticle) -> ArticleAssessment:
+        ag = getattr(local, "agent", None)
+        if ag is None:
+            ag = agent_factory()
+            local.agent = ag
+        return assess_one(article, ag)
+
+    results: list[Optional[ArticleAssessment]] = [None] * len(articles)
+    workers = min(concurrency, len(articles))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(worker, a): i for i, a in enumerate(articles)}
+        for fut in as_completed(futures):
+            results[futures[fut]] = fut.result()
+    return [r for r in results if r is not None]
+
+
+def _lookup_cached_summary(
+    article: NewsArticle,
+    config: NewsResearchConfig,
+    memory_store: Optional[Any],
+) -> tuple[Optional[str], Optional[str]]:
+    """Return ``(summary, entry_id)`` for a previously stored summary, if any."""
+    if memory_store is None or not hasattr(memory_store, "retrieve"):
+        return None, None
+    try:
+        results = memory_store.retrieve(
+            config.summary_category,
+            article.title or article.url,
+            n_results=3,
+            where={"url": article.url},
+            min_relevance=0.0,
         )
-    return assessments
+    except Exception:
+        return None, None
+    for r in results or []:
+        meta = getattr(r, "metadata", None) or {}
+        content = getattr(r, "content", "") or ""
+        if meta.get("url") == article.url and content.strip():
+            return content, getattr(r, "id", None)
+    return None, None
 
 
 def _store_summary(

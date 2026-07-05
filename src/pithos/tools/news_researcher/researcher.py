@@ -16,6 +16,8 @@ from ..web_researcher.fetcher import Fetcher
 from ..web_researcher.search import DuckDuckGoSearch
 from .assessor import assess_articles
 from .models import NewsReport, NewsResearchConfig, NewsResearchRequest
+from .models import ArticleAssessment, NewsArticle
+from .ranking import rank_articles
 from .scraper import NewsScraper
 from .terms import extract_terms
 
@@ -155,16 +157,29 @@ class NewsResearcher:
             articles = []
         errors.extend(scraper.errors)
 
-        # Steps 3-5: summarise + judge each article.
+        # Pre-filter: only spend the (expensive) LLM assessment on the top-K
+        # most relevant articles by a cheap term-overlap score. The remainder
+        # are recorded as reviewed-but-not-assessed for transparency.
+        to_assess = articles
+        skipped: list[NewsArticle] = []
+        top_k = run_cfg.prefilter_top_k
+        if top_k and len(articles) > top_k:
+            ranked = rank_articles(request.inquiry, terms, articles)
+            to_assess = ranked[:top_k]
+            skipped = ranked[top_k:]
+
+        # Steps 3-5: summarise + judge each retained article.
         subagent = self._build_agent()
         assessments = assess_articles(
             inquiry=request.inquiry,
-            articles=articles,
+            articles=to_assess,
             agent=subagent,
             config=run_cfg,
             memory_store=memory_store,
             errors=errors,
+            agent_factory=self._build_agent,
         )
+        assessments.extend(_skipped_assessments(skipped))
 
         # Step 6: write the collected document.
         document_path = None
@@ -172,6 +187,7 @@ class NewsResearcher:
         stats = {
             "terms": terms,
             "articles_downloaded": len(articles),
+            "articles_assessed": len(to_assess),
             "articles_relevant": len(relevant),
             "recency_days": recency_days,
             "duration_seconds": round(time.time() - started, 2),
@@ -287,6 +303,23 @@ class NewsResearcher:
             agent_name="news_terms",
             system_prompt="",
         )
+
+
+def _skipped_assessments(articles: list[NewsArticle]) -> list[ArticleAssessment]:
+    """Record pre-filtered articles as reviewed-but-not-assessed (non-relevant)."""
+    return [
+        ArticleAssessment(
+            url=a.url,
+            title=a.title,
+            summary="",
+            relevant=False,
+            reason="not assessed (below pre-filter threshold)",
+            published_iso=a.published_iso,
+            source_host=a.source_host,
+            article_entry_id=a.metadata.get("article_entry_id"),
+        )
+        for a in articles
+    ]
 
 
 def _slugify(text: str) -> str:

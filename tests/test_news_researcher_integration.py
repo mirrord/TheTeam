@@ -53,14 +53,20 @@ class FakeAgent:
 
     def __init__(self) -> None:
         self.system = ""
+        self.calls = 0
 
     def set_system_prompt(self, p: str) -> None:
         self.system = p
 
     def send(self, prompt: str, model=None) -> str:
+        self.calls += 1
         s = self.system.lower()
         if "search terms" in s:
             return "term one, term two"
+        # Combined summarise + judge (single call).
+        if "analyst" in s:
+            verdict = "RELEVANT: on topic" if "KEEP" in prompt else "NOT RELEVANT: off"
+            return f"SUMMARY: A concise technical summary.\nVERDICT: {verdict}"
         if "summariser" in s or "summarise" in s:
             return "A concise technical summary."
         if "relevant" in s:
@@ -207,6 +213,112 @@ class TestAssessor:
         assert all(c[0] == "news_summaries" for c in store.calls)
         assert all(a.summary_entry_id for a in assessments)
 
+    def test_combined_path_uses_one_call_per_article(self) -> None:
+        agent = FakeAgent()
+        articles = [
+            NewsArticle(url="https://a/keep", title="KEEP me", text="body one"),
+            NewsArticle(url="https://a/drop", title="ignore", text="body two"),
+        ]
+        cfg = NewsResearchConfig(combine_summary_and_judgement=True)
+        assess_articles("inq", articles, agent, cfg, FakeMemoryStore(), errors=[])
+        # One combined LLM call per article (not two).
+        assert agent.calls == 2
+
+    def test_separate_path_uses_two_calls_per_article(self) -> None:
+        agent = FakeAgent()
+        articles = [NewsArticle(url="https://a/x", title="KEEP", text="body")]
+        cfg = NewsResearchConfig(combine_summary_and_judgement=False)
+        assess_articles("inq", articles, agent, cfg, FakeMemoryStore(), errors=[])
+        assert agent.calls == 2  # summarise + judge
+
+
+class _Result:
+    """Minimal stand-in for MemoryStore SearchResult."""
+
+    def __init__(self, id_: str, content: str, metadata: dict) -> None:
+        self.id = id_
+        self.content = content
+        self.metadata = metadata
+
+
+class CachingMemoryStore(FakeMemoryStore):
+    """Memory store that can return canned retrieve() hits keyed by url."""
+
+    def __init__(self, hits: dict | None = None) -> None:
+        super().__init__()
+        # {(category, url): _Result}
+        self.hits = hits or {}
+        self.retrieve_calls: list = []
+
+    def retrieve(self, category, query, n_results=None, where=None, min_relevance=None):
+        self.retrieve_calls.append((category, query, where))
+        url = (where or {}).get("url")
+        hit = self.hits.get((category, url))
+        return [hit] if hit is not None else []
+
+
+class TestAssessorCache:
+    def test_reuses_cached_summary_and_skips_store(self) -> None:
+        cfg = NewsResearchConfig(reuse_cached_articles=True)
+        article = NewsArticle(url="https://a/keep", title="KEEP", text="body")
+        store = CachingMemoryStore(
+            {
+                (cfg.summary_category, "https://a/keep"): _Result(
+                    "sum_1", "cached summary text", {"url": "https://a/keep"}
+                )
+            }
+        )
+        agent = FakeAgent()
+        assessments = assess_articles("inq", [article], agent, cfg, store, errors=[])
+        assert assessments[0].summary == "cached summary text"
+        assert assessments[0].summary_entry_id == "sum_1"
+        # Reused summary => no new store() write; only a relevance judgement call.
+        assert store.calls == []
+        assert agent.calls == 1
+
+    def test_no_reuse_when_disabled(self) -> None:
+        cfg = NewsResearchConfig(reuse_cached_articles=False)
+        article = NewsArticle(url="https://a/keep", title="KEEP", text="body")
+        store = CachingMemoryStore(
+            {
+                (cfg.summary_category, "https://a/keep"): _Result(
+                    "sum_1", "cached summary text", {"url": "https://a/keep"}
+                )
+            }
+        )
+        assess_articles("inq", [article], FakeAgent(), cfg, store, errors=[])
+        # Fresh summary stored despite a cache hit being available.
+        assert len(store.calls) == 1
+
+
+class TestAssessConcurrency:
+    def test_parallel_assessment_uses_factory_and_covers_all(self) -> None:
+        cfg = NewsResearchConfig(assess_concurrency=3)
+        articles = [
+            NewsArticle(url=f"https://a/{i}", title="KEEP", text=f"body {i}")
+            for i in range(6)
+        ]
+        made = []
+
+        def factory():
+            ag = FakeAgent()
+            made.append(ag)
+            return ag
+
+        assessments = assess_articles(
+            "inq",
+            articles,
+            FakeAgent(),
+            cfg,
+            FakeMemoryStore(),
+            errors=[],
+            agent_factory=factory,
+        )
+        assert len(assessments) == 6
+        assert all(a.relevant for a in assessments)
+        # Worker agents came from the factory (not the single serial agent).
+        assert made
+
 
 # ---------------------------------------------------------------------------
 # facade
@@ -266,6 +378,60 @@ class TestNewsResearcherFacade:
         assert "KEEP this" in content
         assert report.stats["articles_relevant"] == 1
 
+    def test_prefilter_limits_assessed_articles(self, monkeypatch) -> None:
+        # Six downloaded articles; only the top-2 by term overlap get assessed.
+        _FakeScraper.articles = [
+            NewsArticle(
+                url="https://example.com/keep-a",
+                title="cache quantization KEEP",
+                text="transformer cache quantization body",
+                published=datetime.now(timezone.utc),
+                source_host="example.com",
+            ),
+            NewsArticle(
+                url="https://example.com/keep-b",
+                title="quantization KEEP",
+                text="cache quantization details",
+                published=datetime.now(timezone.utc),
+                source_host="example.com",
+            ),
+        ] + [
+            NewsArticle(
+                url=f"https://example.com/misc{i}",
+                title="unrelated gadget",
+                text="nothing on topic here",
+                published=datetime.now(timezone.utc),
+                source_host="example.com",
+            )
+            for i in range(4)
+        ]
+        monkeypatch.setattr(researcher_mod, "NewsScraper", _FakeScraper)
+
+        cfg = NewsResearchConfig(
+            domains=["example.com"],
+            feeds=[],
+            write_document=False,
+            search_fallback=False,
+            prefilter_top_k=2,
+        )
+        r = NewsResearcher(
+            MagicMock(),
+            config=cfg,
+            agent_factory=lambda: FakeAgent(),
+            term_agent_factory=lambda: FakeAgent(),
+            memory_store=FakeMemoryStore(),
+        )
+        report = r.research(NewsResearchRequest(inquiry="cache quantization"))
+
+        assert report.stats["articles_downloaded"] == 6
+        assert report.stats["articles_assessed"] == 2
+        # All six still appear in the report (4 recorded as not-assessed).
+        assert len(report.assessments) == 6
+        not_assessed = [
+            a for a in report.assessments if "not assessed" in (a.reason or "")
+        ]
+        assert len(not_assessed) == 4
+
 
 # ---------------------------------------------------------------------------
 # arXiv URL normalisation
@@ -301,7 +467,6 @@ class TestNormalizeUrl:
 
     def test_arxiv_pdf_url_fetched_as_abs(self) -> None:
         """End-to-end: an arXiv PDF link is re-routed to the abstract page."""
-        recent = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
         feed = (
             '<?xml version="1.0"?><rss version="2.0"><channel>'
             f"<item><title>Paper</title>"
@@ -326,3 +491,125 @@ class TestNormalizeUrl:
         articles = scraper.gather("transformer research", ["transformer"])
         assert len(articles) == 1
         assert "arxiv.org/abs/" in articles[0].url
+
+
+# ---------------------------------------------------------------------------
+# Scraper: cross-run cache reuse + parallel download
+# ---------------------------------------------------------------------------
+
+
+class TestScraperCache:
+    def _config(self, **overrides) -> NewsResearchConfig:
+        base = dict(
+            domains=["example.com"],
+            feeds=["https://feeds.example.com/rss"],
+            search_fallback=False,
+            recency_days=14,
+            reuse_cached_articles=True,
+        )
+        base.update(overrides)
+        return NewsResearchConfig(**base)
+
+    def test_cached_article_reused_without_fetch(self) -> None:
+        cfg = self._config()
+        recent_iso = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+        feed = _rss([("Cached", "https://example.com/c1", _recent_rfc822(1))])
+        # The feed is served, but the article page itself is NOT — so a reuse
+        # miss would surface as a fetch failure rather than a returned article.
+        pages = {"https://feeds.example.com/rss": feed}
+        store = CachingMemoryStore(
+            {
+                (cfg.article_category, "https://example.com/c1"): _Result(
+                    "art_1",
+                    "previously stored body text",
+                    {
+                        "url": "https://example.com/c1",
+                        "title": "Cached",
+                        "published": recent_iso,
+                        "source_host": "example.com",
+                    },
+                )
+            }
+        )
+        scraper = NewsScraper(cfg, FakeFetcher(pages, ["example.com"]), None, store)
+        articles = scraper.gather("q", ["x"])
+        assert len(articles) == 1
+        assert articles[0].text == "previously stored body text"
+        assert articles[0].metadata.get("cached") is True
+        # Reused article is not re-stored.
+        assert store.calls == []
+
+    def test_stale_cached_article_skipped(self) -> None:
+        cfg = self._config()
+        old_iso = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
+        feed = _rss([("Old", "https://example.com/old", _recent_rfc822(1))])
+        pages = {"https://feeds.example.com/rss": feed}
+        store = CachingMemoryStore(
+            {
+                (cfg.article_category, "https://example.com/old"): _Result(
+                    "art_old",
+                    "stale body",
+                    {
+                        "url": "https://example.com/old",
+                        "published": old_iso,
+                        "source_host": "example.com",
+                    },
+                )
+            }
+        )
+        scraper = NewsScraper(cfg, FakeFetcher(pages, ["example.com"]), None, store)
+        assert scraper.gather("q", ["x"]) == []
+
+
+class TestScraperParallel:
+    def test_parallel_download_preserves_order_and_count(self) -> None:
+        items = [
+            (f"Item {i}", f"https://example.com/a{i}", _recent_rfc822(i + 1))
+            for i in range(5)
+        ]
+        feed = _rss(items)
+        pages = {"https://feeds.example.com/rss": feed}
+        for i in range(5):
+            pages[f"https://example.com/a{i}"] = _article_html(
+                f"Item {i}", f"unique body number {i}"
+            )
+        cfg = NewsResearchConfig(
+            domains=["example.com"],
+            feeds=["https://feeds.example.com/rss"],
+            search_fallback=False,
+            recency_days=30,
+            download_concurrency=4,
+            max_articles_per_source=10,
+        )
+        store = FakeMemoryStore()
+        scraper = NewsScraper(cfg, FakeFetcher(pages, ["example.com"]), None, store)
+        articles = scraper.gather("q", ["item"])
+        assert len(articles) == 5
+        # Feed order is preserved despite concurrent fetching.
+        assert [a.url for a in articles] == [
+            f"https://example.com/a{i}" for i in range(5)
+        ]
+
+    def test_candidate_cap_limits_downloads(self) -> None:
+        items = [
+            (f"Item {i}", f"https://example.com/a{i}", _recent_rfc822(1))
+            for i in range(20)
+        ]
+        feed = _rss(items)
+        pages = {"https://feeds.example.com/rss": feed}
+        for i in range(20):
+            pages[f"https://example.com/a{i}"] = _article_html(f"Item {i}", f"body {i}")
+        cfg = NewsResearchConfig(
+            domains=["example.com"],
+            feeds=["https://feeds.example.com/rss"],
+            search_fallback=False,
+            recency_days=30,
+            max_candidates=5,
+            max_articles=100,
+            max_articles_per_source=100,
+        )
+        store = FakeMemoryStore()
+        scraper = NewsScraper(cfg, FakeFetcher(pages, ["example.com"]), None, store)
+        articles = scraper.gather("q", ["item"])
+        # Never fetch more than the candidate cap.
+        assert len(articles) <= 5

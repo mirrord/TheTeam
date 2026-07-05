@@ -10,6 +10,11 @@ from pithos.tools.news_researcher.dates import (
     parse_html_date,
     parse_iso_date,
 )
+from pithos.tools.news_researcher.assessor import (
+    _parse_combined,
+    _truncate_body,
+    summarize_and_judge,
+)
 from pithos.tools.news_researcher.feeds import parse_feed, _clean_title
 from pithos.tools.news_researcher.models import (
     ArticleAssessment,
@@ -17,6 +22,7 @@ from pithos.tools.news_researcher.models import (
     NewsReport,
     NewsResearchConfig,
 )
+from pithos.tools.news_researcher.ranking import rank_articles, score_article
 from pithos.tools.news_researcher.terms import _parse_terms, extract_terms
 
 # ---------------------------------------------------------------------------
@@ -312,3 +318,120 @@ class TestTerms:
 
     def test_extract_terms_empty_inquiry(self) -> None:
         assert extract_terms("", _TermAgent("x")) == []
+
+
+# ---------------------------------------------------------------------------
+# assessor: combined parse + truncation + single-call assessment
+# ---------------------------------------------------------------------------
+
+
+class TestTruncateBody:
+    def test_short_text_unchanged(self) -> None:
+        assert _truncate_body("hello world", 100) == "hello world"
+
+    def test_long_text_head_and_tail_kept(self) -> None:
+        body = "START " + ("x" * 5000) + " END"
+        out = _truncate_body(body, 200)
+        assert len(out) <= 220  # cap + ellipsis marker
+        assert out.startswith("START")
+        assert out.endswith("END")
+        assert "..." in out
+
+    def test_zero_cap_disables_truncation(self) -> None:
+        body = "a" * 500
+        assert _truncate_body(body, 0) == body
+
+
+class TestParseCombined:
+    def test_parses_summary_and_verdict(self) -> None:
+        reply = (
+            "SUMMARY: The paper introduces a new KV cache scheme.\n"
+            "VERDICT: RELEVANT - directly on topic"
+        )
+        summary, relevant, reason = _parse_combined(reply)
+        assert summary == "The paper introduces a new KV cache scheme."
+        assert relevant is True
+        assert "on topic" in reason
+
+    def test_parses_not_relevant(self) -> None:
+        reply = "SUMMARY: Unrelated gadget review.\nVERDICT: NOT RELEVANT - off topic"
+        summary, relevant, reason = _parse_combined(reply)
+        assert summary == "Unrelated gadget review."
+        assert relevant is False
+
+    def test_missing_verdict_marker_infers(self) -> None:
+        reply = "This is clearly RELEVANT to the inquiry."
+        summary, relevant, _ = _parse_combined(reply)
+        assert relevant is True
+        assert summary  # whole reply retained as summary
+
+    def test_empty_reply(self) -> None:
+        summary, relevant, reason = _parse_combined("")
+        assert summary == "" and relevant is False and reason
+
+
+class _CombinedAgent:
+    """Agent that returns a combined SUMMARY/VERDICT and counts calls."""
+
+    def __init__(self, relevant: bool = True) -> None:
+        self.system = ""
+        self.calls = 0
+        self._relevant = relevant
+
+    def set_system_prompt(self, p: str) -> None:
+        self.system = p
+
+    def send(self, prompt: str, model=None) -> str:
+        self.calls += 1
+        verdict = "RELEVANT - yes" if self._relevant else "NOT RELEVANT - no"
+        return f"SUMMARY: A summary.\nVERDICT: {verdict}"
+
+
+class TestSummarizeAndJudge:
+    def test_single_call_returns_all_three(self) -> None:
+        agent = _CombinedAgent(relevant=True)
+        article = NewsArticle(url="u", title="t", text="body text")
+        summary, relevant, reason = summarize_and_judge("inq", article, agent)
+        assert agent.calls == 1  # one LLM call, not two
+        assert summary == "A summary."
+        assert relevant is True
+
+    def test_empty_body_no_call(self) -> None:
+        agent = _CombinedAgent()
+        article = NewsArticle(url="u", text="")
+        summary, relevant, reason = summarize_and_judge("inq", article, agent)
+        assert agent.calls == 0
+        assert summary == "" and relevant is False
+
+
+# ---------------------------------------------------------------------------
+# ranking (pre-filter)
+# ---------------------------------------------------------------------------
+
+
+class TestRanking:
+    def test_score_rewards_term_matches(self) -> None:
+        hit = NewsArticle(url="a", title="Transformer cache", text="quantization work")
+        miss = NewsArticle(url="b", title="Cooking recipes", text="how to bake bread")
+        s_hit = score_article(
+            "cache quantization", ["transformer", "quantization"], hit
+        )
+        s_miss = score_article(
+            "cache quantization", ["transformer", "quantization"], miss
+        )
+        assert s_hit > s_miss
+
+    def test_rank_orders_by_relevance(self) -> None:
+        a = NewsArticle(url="a", title="unrelated", text="nothing here")
+        b = NewsArticle(url="b", title="transformer quantization", text="cache methods")
+        c = NewsArticle(url="c", title="quantization", text="some cache detail")
+        ranked = rank_articles(
+            "cache quantization", ["transformer", "quantization"], [a, b, c]
+        )
+        assert ranked[0].url == "b"
+        assert ranked[-1].url == "a"
+
+    def test_rank_stable_for_ties(self) -> None:
+        arts = [NewsArticle(url=str(i), text="zzz") for i in range(4)]
+        ranked = rank_articles("x", [], arts)
+        assert [a.url for a in ranked] == ["0", "1", "2", "3"]
