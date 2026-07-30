@@ -7,7 +7,7 @@ a fixed linear pipeline and persists everything it downloads to the knowledge
 base. It is exposed three ways:
 
 1. **CLI**: [`pithos-research-news`](#cli).
-2. **Agent tool call**: `RUN: research-news <inquiry>` (virtual tool, no
+2. **Agent tool call**: `[RUN]research-news <inquiry>[/RUN]` (virtual tool, no
    external binary required).
 3. **Flowchart node**: the [`researchnews` node](#flowchart-node).
 
@@ -270,7 +270,7 @@ response = agent.send(
 print(response)
 ```
 
-The agent emits a tool call such as `RUN: research-news cache quantization in
+The agent emits a tool call such as `[RUN]research-news cache quantization in
 transformers`. Dispatch is handled in-process and the returned markdown report
 is injected as a system message before generation resumes.
 

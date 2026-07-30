@@ -7,7 +7,7 @@ This script demonstrates the two new tool-calling capabilities:
    (ping, curl, git, tree, diff, etc.) directly.
 
 2. **Flowchart tools** — agents can invoke any registered pithos flowchart
-   as a tool via ``RUN: flowchart <name> <input>``, receiving the
+   as a tool via ``[RUN]flowchart <name> <input>[/RUN]``, receiving the
    flowchart's output as a tool result.
 
 Run:
@@ -171,10 +171,10 @@ def demo_extraction() -> None:
 
     sample_text = """\
 Let me check your Python version first.
-RUN: python --version
+[RUN]python --version[/RUN]
 
 I'll also look at the git log.
-tool(git log --oneline -5)
+<RUN>git log --oneline -5</RUN>
 
 And let me verify the directory contents:
 [RUN]echo hello world[/RUN]

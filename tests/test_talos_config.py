@@ -428,15 +428,15 @@ def test_build_agent_no_talos_overrides_default_mode_uses_plain_cm() -> None:
 
 
 # ---------------------------------------------------------------------------
-# New fields: allow / deny / text2image
+# New fields: allow / deny / prompt2image
 # ---------------------------------------------------------------------------
 
 
-def test_tools_config_allow_deny_text2image_defaults() -> None:
+def test_tools_config_allow_deny_prompt2image_defaults() -> None:
     tc = ToolsConfig()
     assert tc.allow == []
     assert tc.deny == []
-    assert tc.text2image is None
+    assert tc.prompt2image is None
 
 
 def test_tools_config_allow_deny_roundtrip(tmp_path: Path) -> None:
@@ -446,7 +446,7 @@ def test_tools_config_allow_deny_roundtrip(tmp_path: Path) -> None:
                 enabled=True,
                 allow=["extra-tool", "another"],
                 deny=["dangerous"],
-                text2image={"enabled": True},
+                prompt2image={"enabled": True},
                 web_research={"enabled": False},
             ),
         ),
@@ -456,7 +456,7 @@ def test_tools_config_allow_deny_roundtrip(tmp_path: Path) -> None:
     restored = load_config(path)
     assert restored.agent.tools.allow == ["extra-tool", "another"]
     assert restored.agent.tools.deny == ["dangerous"]
-    assert restored.agent.tools.text2image == {"enabled": True}
+    assert restored.agent.tools.prompt2image == {"enabled": True}
     assert restored.agent.tools.web_research == {"enabled": False}
     assert restored == cfg
 
@@ -469,7 +469,7 @@ def test_tools_config_allow_deny_in_full_roundtrip() -> None:
                 mode="all",
                 allow=["mytool"],
                 deny=["badtool"],
-                text2image={"enabled": True},
+                prompt2image={"enabled": True},
             ),
         ),
     )
@@ -576,14 +576,14 @@ def test_build_agent_deny_list_passes_to_override_cm() -> None:
     override_cm.assert_called_once_with(deny=["badtool"])
 
 
-def test_build_agent_text2image_override_uses_override_cm() -> None:
+def test_build_agent_prompt2image_override_uses_override_cm() -> None:
     cfg = TalosConfig(
         agent=AgentConfig(
             model="m",
             tools=ToolsConfig(
                 enabled=True,
                 mode="include",
-                text2image={"enabled": True},
+                prompt2image={"enabled": True},
             ),
         ),
     )
@@ -593,5 +593,5 @@ def test_build_agent_text2image_override_uses_override_cm() -> None:
     ):
         build_agent(cfg)
     override_cm.assert_called_once_with(
-        tool_config_overrides={"text2image": {"enabled": True}},
+        tool_config_overrides={"prompt2image": {"enabled": True}},
     )

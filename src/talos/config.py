@@ -77,7 +77,7 @@ class ToolsConfig:
         web_research: Optional override for the web-research virtual tool
             (``{"enabled": true/false}``).
         flowcharts: Optional override for the flowchart virtual tool.
-        text2image: Optional override for the text-to-image virtual tool
+        prompt2image: Optional override for the text-to-image virtual tool
             (``{"enabled": true/false}``).
     """
 
@@ -89,7 +89,7 @@ class ToolsConfig:
     deny: list = field(default_factory=list)  # talos-local tool blocks
     web_research: Optional[dict[str, bool]] = None  # enable web search tool
     flowcharts: Optional[dict[str, Any]] = None
-    text2image: Optional[dict[str, bool]] = None  # enable text-to-image tool
+    prompt2image: Optional[dict[str, bool]] = None  # enable text-to-image tool
 
 
 @dataclass
@@ -359,8 +359,8 @@ def build_agent(config: TalosConfig) -> OllamaAgent:
         tool_overrides["flowcharts"] = tc.flowcharts
     if tc.web_research is not None:
         tool_overrides["web_research"] = tc.web_research
-    if tc.text2image is not None:
-        tool_overrides["text2image"] = tc.text2image
+    if tc.prompt2image is not None:
+        tool_overrides["prompt2image"] = tc.prompt2image
 
     needs_override = tc.enabled and (
         tc.mode != DEFAULT_TOOLS_MODE or tool_overrides or tc.allow or tc.deny

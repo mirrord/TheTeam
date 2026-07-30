@@ -172,7 +172,7 @@ def test_mid_stream_tool_execution(fake_llama, tmp_path, monkeypatch):
     agent = LlamacppAgent(default_model="/models/x.gguf")
     agent.enable_tools(cm)
 
-    # First call: emit a RUN: tool invocation; second (continuation):
+    # First call: emit a bracket tool invocation; second (continuation):
     # produce a final answer.
     fake_llama_cls = fake_llama
     call_idx = {"n": 0}
@@ -180,7 +180,11 @@ def test_mid_stream_tool_execution(fake_llama, tmp_path, monkeypatch):
     def chunks_for_call(self_inst, **kw):  # noqa: ANN001
         call_idx["n"] += 1
         if call_idx["n"] == 1:
-            yield {"choices": [{"delta": {"content": "Let me check. RUN: echo hi\n"}}]}
+            yield {
+                "choices": [
+                    {"delta": {"content": "Let me check. [RUN]echo hi[/RUN]\n"}}
+                ]
+            }
             yield {
                 "choices": [{"delta": {}}],
                 "usage": {"prompt_tokens": 1, "completion_tokens": 6},

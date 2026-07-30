@@ -30,7 +30,6 @@ domains:
 # articles they link to must still be on a whitelisted domain.
 feeds:
   - https://feeds.arstechnica.com/arstechnica/index
-  - https://www.theverge.com/rss/index.xml
   - https://techcrunch.com/feed/
   - https://news.mit.edu/rss/feed
   - https://huggingface.co/blog/feed.xml

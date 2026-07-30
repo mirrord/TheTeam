@@ -35,11 +35,11 @@ theteam/
 │   │   │   ├── models.py      # Tool data models
 │   │   │   ├── cli.py         # CLI entry point for tools
 │   │   │   ├── web_researcher/# Virtual web-research tool (optional: [web])
-│   │   │   └── text2image/    # Virtual text2image tool (optional: [web]/[image])
-│   │   │       ├── config.py  # Text2ImageConfig dataclass
+│   │   │   └── prompt2image/    # Virtual prompt2image tool (optional: [web]/[image])
+│   │   │       ├── config.py  # Prompt2ImageConfig dataclass
 │   │   │       ├── backends.py# DiffusersBackend, HttpBackend, ComfyUIBackend
 │   │   │       ├── generator.py  # Orchestrates backend; writes PNG to disk
-│   │   │       └── provider.py   # Text2ImageToolProvider (ToolProvider)
+│   │   │       └── provider.py   # Prompt2ImageToolProvider (ToolProvider)
 │   │   ├── conditions.py      # Flowchart edge condition evaluation
 │   │   ├── config_manager.py  # YAML config loading with env-var support
 │   │   ├── context.py         # Agent context/conversation management
@@ -388,7 +388,7 @@ User: "What version of Python is installed?"
     v
 ┌──────────────────────────────────────┐
 │  Tool call detected mid-stream       │
-│  e.g. RUN: python --version          │
+│  e.g. [RUN]python --version[/RUN]    │
 └──────────────────────────────────────┘
     │
     v
@@ -565,7 +565,7 @@ tests/
 ├── test_validation.py         # Flowchart validation tests
 ├── test_server.py             # Web server and API tests
 ├── test_flowchart_service.py  # Flowchart service tests
-├── test_text2image.py         # text2image tool tests
+├── test_prompt2image.py         # prompt2image tool tests
 └── test_benchmark_*.py        # Benchmark harness tests
 ```
 

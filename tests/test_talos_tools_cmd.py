@@ -84,13 +84,13 @@ def test_enable_web_research_alias(tmp_path: Path) -> None:
     assert reloaded.agent.tools.web_research == {"enabled": True}
 
 
-def test_enable_text2image_virtual(tmp_path: Path) -> None:
+def test_enable_prompt2image_virtual(tmp_path: Path) -> None:
     cfg = _make_config(enabled=True)
     path = tmp_path / "config.yaml"
     save_config(cfg, path)
-    cmd_enable("text2image", cfg, path)
+    cmd_enable("prompt2image", cfg, path)
     reloaded = load_config(path)
-    assert reloaded.agent.tools.text2image == {"enabled": True}
+    assert reloaded.agent.tools.prompt2image == {"enabled": True}
 
 
 def test_enable_flowcharts_virtual(tmp_path: Path) -> None:
@@ -156,13 +156,13 @@ def test_disable_web_research_virtual(tmp_path: Path) -> None:
     assert "web-research" not in reloaded.agent.tools.deny
 
 
-def test_disable_text2image_virtual(tmp_path: Path) -> None:
-    cfg = _make_config(enabled=True, text2image={"enabled": True})
+def test_disable_prompt2image_virtual(tmp_path: Path) -> None:
+    cfg = _make_config(enabled=True, prompt2image={"enabled": True})
     path = tmp_path / "config.yaml"
     save_config(cfg, path)
-    cmd_disable("text2image", cfg, path)
+    cmd_disable("prompt2image", cfg, path)
     reloaded = load_config(path)
-    assert reloaded.agent.tools.text2image == {"enabled": False}
+    assert reloaded.agent.tools.prompt2image == {"enabled": False}
 
 
 def test_disable_flowcharts_virtual(tmp_path: Path) -> None:
@@ -282,7 +282,7 @@ def _minimal_tool_config(
         "descriptions": {"python": "Python interp", "curl": "HTTP client"},
         "flowcharts": {"enabled": True},
         "web_research": {"enabled": False},
-        "text2image": {"enabled": False},
+        "prompt2image": {"enabled": False},
     }
 
 
@@ -349,7 +349,7 @@ def test_list_all_virtual_tools_shown(tmp_path: Path, capsys) -> None:
     out = capsys.readouterr().out
     assert "web-research" in out
     assert "flowcharts" in out
-    assert "text2image" in out
+    assert "prompt2image" in out
 
 
 # ---------------------------------------------------------------------------
@@ -433,7 +433,7 @@ def test_run_list_all_dispatches(tmp_path: Path) -> None:
 
 def test_virtual_tools_mapping_covers_expected_keys() -> None:
     assert "web-research" in VIRTUAL_TOOLS
-    assert "text2image" in VIRTUAL_TOOLS
+    assert "prompt2image" in VIRTUAL_TOOLS
     assert "flowcharts" in VIRTUAL_TOOLS
     assert "flowchart" in VIRTUAL_TOOLS
     assert "web_research" in VIRTUAL_TOOLS

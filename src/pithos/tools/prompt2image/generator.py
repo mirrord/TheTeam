@@ -1,6 +1,6 @@
-"""Orchestration layer for the text2image tool.
+"""Orchestration layer for the prompt2image tool.
 
-:class:`Text2ImageGenerator` ties a :class:`~pithos.tools.text2image.config.Text2ImageConfig`
+:class:`Prompt2ImageGenerator` ties a :class:`~pithos.tools.prompt2image.config.Prompt2ImageConfig`
 to a backend, runs generation, writes the resulting PNG to disk and returns the
 file path plus metadata. The backend is created lazily so importing this module
 (and constructing the generator) is cheap and never pulls in heavy deps.
@@ -19,7 +19,7 @@ from .backends import (
     ImageBackend,
     build_backend,
 )
-from .config import Text2ImageConfig
+from .config import Prompt2ImageConfig
 
 _MAX_SLUG_LEN = 40
 
@@ -33,12 +33,12 @@ def _slugify(prompt: str) -> str:
     return slug[:_MAX_SLUG_LEN].strip("-") or "image"
 
 
-class Text2ImageGenerator:
+class Prompt2ImageGenerator:
     """Generate images from text prompts and persist them to disk."""
 
     def __init__(
         self,
-        config: Text2ImageConfig,
+        config: Prompt2ImageConfig,
         backend: Optional[ImageBackend] = None,
     ) -> None:
         self.config = config
@@ -63,7 +63,7 @@ class Text2ImageGenerator:
 
         Raises:
             ValueError: If *prompt* is empty.
-            Text2ImageError: If the backend fails to produce an image.
+            Prompt2ImageError: If the backend fails to produce an image.
         """
         if not prompt or not prompt.strip():
             raise ValueError("prompt must not be empty")

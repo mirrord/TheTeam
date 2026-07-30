@@ -1,8 +1,13 @@
-"""Adapts :class:`Text2ImageGenerator` into a virtual ``text2image`` tool.
+"""Adapts :class:`Prompt2ImageGenerator` into a virtual ``prompt2image`` tool.
 
-The agent invokes the tool as ``text2image <prompt text>``: everything after the
+The agent invokes the tool as ``prompt2image <prompt text>``: everything after the
 leading token is treated as the prompt. Generation parameters (size, steps,
-negative prompt, backend, ...) come from ``text2image`` config defaults.
+negative prompt, backend, ...) come from ``prompt2image`` config defaults.
+
+Note: the agent-facing tool name is ``prompt2image`` rather than ``prompt2image``
+to avoid colliding with the real ``prompt2image`` binary shipped by Tesseract's
+OCR training tools, which some systems have on PATH and which ``CLIToolProvider``
+would otherwise discover under the same name.
 
 On success the tool returns a markdown summary including the saved file path and
 generation metadata; on failure it returns a :class:`ToolResult` with an
@@ -17,39 +22,39 @@ from typing import Any, Optional
 from ...config_manager import ConfigManager
 from ..models import ToolMetadata, ToolResult
 from ..provider import ToolProvider
-from .backends import Text2ImageError
-from .config import Text2ImageConfig
-from .generator import Text2ImageGenerator
+from .backends import Prompt2ImageError
+from .config import Prompt2ImageConfig
+from .generator import Prompt2ImageGenerator
 
 
-class Text2ImageToolProvider(ToolProvider):
-    """Virtual ``text2image`` tool backed by a local image model."""
+class Prompt2ImageToolProvider(ToolProvider):
+    """Virtual ``prompt2image`` tool backed by a local image model."""
 
-    TOOL_NAME = "text2image"
+    TOOL_NAME = "prompt2image"
 
     def __init__(
         self,
         config_manager: ConfigManager,
-        config: Optional[Text2ImageConfig] = None,
-        generator: Optional[Text2ImageGenerator] = None,
+        config: Optional[Prompt2ImageConfig] = None,
+        generator: Optional[Prompt2ImageGenerator] = None,
     ) -> None:
         self.config_manager = config_manager
         self._config = config
         self._generator = generator
 
     @property
-    def config(self) -> Text2ImageConfig:
-        """Lazily load the tool config from ``text2image_config.yaml``."""
+    def config(self) -> Prompt2ImageConfig:
+        """Lazily load the tool config from ``prompt2image_config.yaml``."""
         if self._config is None:
-            raw = self.config_manager.get_config("text2image_config", "tools")
-            self._config = Text2ImageConfig.from_dict(raw)
+            raw = self.config_manager.get_config("prompt2image_config", "tools")
+            self._config = Prompt2ImageConfig.from_dict(raw)
         return self._config
 
     @property
-    def generator(self) -> Text2ImageGenerator:
+    def generator(self) -> Prompt2ImageGenerator:
         """Lazily construct the generator (and its backend)."""
         if self._generator is None:
-            self._generator = Text2ImageGenerator(self.config)
+            self._generator = Prompt2ImageGenerator(self.config)
         return self._generator
 
     def discover(self, platform: str = "cross-platform") -> dict[str, ToolMetadata]:
@@ -60,7 +65,7 @@ class Text2ImageToolProvider(ToolProvider):
                 path="",
                 description=(
                     "Generate an image from a text prompt using a local "
-                    "text-to-image model. Usage: text2image <prompt text>"
+                    "text-to-image model. Usage: prompt2image <prompt text>"
                 ),
                 platform=platform,
                 source="virtual",
@@ -69,7 +74,7 @@ class Text2ImageToolProvider(ToolProvider):
         }
 
     def can_execute(self, tool_name: str) -> bool:
-        """Return True for the ``text2image`` tool name."""
+        """Return True for the ``prompt2image`` tool name."""
         return tool_name == self.TOOL_NAME
 
     def execute(
@@ -77,9 +82,9 @@ class Text2ImageToolProvider(ToolProvider):
         command: str,
         context: Optional[dict[str, Any]] = None,
     ) -> ToolResult:
-        """Execute the text2image call extracted from *command*.
+        """Execute the prompt2image call extracted from *command*.
 
-        Strips the leading ``text2image`` token and treats the rest as the prompt.
+        Strips the leading ``prompt2image`` token and treats the rest as the prompt.
         """
         parts = command.strip().split(None, 1)
         prompt = parts[1].strip() if len(parts) > 1 else ""
@@ -88,7 +93,7 @@ class Text2ImageToolProvider(ToolProvider):
     def run(self, prompt: str) -> ToolResult:
         """Generate an image for *prompt* and wrap the result as a ToolResult."""
         start = time.time()
-        command = f"text2image {prompt}"
+        command = f"prompt2image {prompt}"
         if not prompt or not prompt.strip():
             return ToolResult(
                 success=False,
@@ -97,11 +102,11 @@ class Text2ImageToolProvider(ToolProvider):
                 exit_code=-1,
                 execution_time=0.0,
                 command=command,
-                error_hint="Usage: text2image <prompt text>",
+                error_hint="Usage: prompt2image <prompt text>",
             )
         try:
             metadata = self.generator.generate(prompt)
-        except Text2ImageError as exc:
+        except Prompt2ImageError as exc:
             return ToolResult(
                 success=False,
                 stdout="",
@@ -110,7 +115,7 @@ class Text2ImageToolProvider(ToolProvider):
                 execution_time=time.time() - start,
                 command=command,
                 error_hint=(
-                    "Check text2image_config.yaml: confirm the backend is reachable "
+                    "Check prompt2image_config.yaml: confirm the backend is reachable "
                     "and required extras are installed (.[image] for diffusers)."
                 ),
             )

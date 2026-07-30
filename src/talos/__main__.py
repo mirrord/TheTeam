@@ -41,7 +41,12 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="interface", required=False)
     sub.add_parser("shell", help="Interactive stdin/stdout chat.")
     sub.add_parser("voice", help="Wake-word voice interface (speech-to-speech).")
-    sub.add_parser("telegram", help="Telegram bot interface.")
+    telegram_p = sub.add_parser("telegram", help="Telegram bot interface.")
+    telegram_p.add_argument(
+        "--show",
+        action="store_true",
+        help="Mirror the conversation to stdout and stream the agent's response.",
+    )
     sub.add_parser("config", help="Run the setup wizard and exit.")
 
     # ---- tools subcommand --------------------------------------------------
@@ -170,7 +175,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         except ImportError as exc:
             print(f"Telegram interface unavailable: {exc}", file=sys.stderr)
             return 2
-        TelegramInterface(agent, config.telegram).run()
+        TelegramInterface(agent, config.telegram, show=args.show).run()
         return 0
 
     parser.print_help()

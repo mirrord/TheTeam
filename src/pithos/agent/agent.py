@@ -1051,18 +1051,18 @@ class Agent(ABC):
             except Exception:
                 pass  # optional feature — silently skip if deps are missing
 
-        # Optionally add a text2image provider.
-        t2i_config = tool_config.get("text2image", {})
+        # Optionally add a prompt2image provider.
+        t2i_config = tool_config.get("prompt2image", {})
         if t2i_config.get("enabled", False):
             try:
-                from ..tools.text2image import (
+                from ..tools.prompt2image import (
                     TEXT2IMAGE_AVAILABLE,
-                    Text2ImageToolProvider,
+                    Prompt2ImageToolProvider,
                 )
 
                 if TEXT2IMAGE_AVAILABLE:
                     providers.append(
-                        Text2ImageToolProvider(config_manager=config_manager)
+                        Prompt2ImageToolProvider(config_manager=config_manager)
                     )
             except Exception:
                 pass  # optional feature — silently skip if deps are missing
@@ -1111,7 +1111,7 @@ class Agent(ABC):
         tool_list = self.tool_registry.get_tool_list_text()
         format_examples = self._tool_extractor.get_usage_examples()
 
-        return f"""You have access to command-line tools via multiple formats for reliability.
+        return f"""You have access to command-line tools invoked with the bracket format.
 
 {format_examples}
 

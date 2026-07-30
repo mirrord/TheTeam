@@ -1,6 +1,6 @@
-"""Configuration model for the text2image tool.
+"""Configuration model for the prompt2image tool.
 
-The tool supports multiple local backends selected via :attr:`Text2ImageConfig.backend`:
+The tool supports multiple local backends selected via :attr:`Prompt2ImageConfig.backend`:
 
 - ``"diffusers"`` — in-process Hugging Face ``diffusers`` pipeline (needs ``torch``).
 - ``"http"``      — HTTP call to a running Automatic1111/Forge server
@@ -9,7 +9,7 @@ The tool supports multiple local backends selected via :attr:`Text2ImageConfig.b
                     ``/history`` + ``/view``); only needs ``requests``.
 
 All generation parameters have sensible defaults so the agent only needs to
-supply a prompt (``text2image <prompt text>``).
+supply a prompt (``prompt2image <prompt text>``).
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from typing import Any, Optional
 
 
 @dataclass
-class Text2ImageConfig:
+class Prompt2ImageConfig:
     """Runtime configuration for image generation.
 
     Attributes:
@@ -43,8 +43,10 @@ class Text2ImageConfig:
         comfyui_workflow_path: Path to a ComfyUI API-format workflow JSON whose
             input values may contain placeholder tokens (``%prompt%``,
             ``%negative_prompt%``, ``%seed%``, ``%steps%``, ``%cfg%``,
-            ``%width%``, ``%height%``, ``%sampler%``, ``%model%``). Empty uses a
-            built-in SD1.5 txt2img workflow.
+            ``%width%``, ``%height%``, ``%sampler%``, ``%model%``). Named
+            variables in ``{name}`` form (e.g. ``{prompt}`` inside a
+            ``StringFormat`` node's ``f_string``) are also substituted. Empty
+            uses a built-in SD1.5 txt2img workflow.
     """
 
     enabled: bool = False
@@ -65,7 +67,7 @@ class Text2ImageConfig:
     comfyui_workflow_path: str = ""
 
     @classmethod
-    def from_dict(cls, data: Optional[dict[str, Any]]) -> "Text2ImageConfig":
+    def from_dict(cls, data: Optional[dict[str, Any]]) -> "Prompt2ImageConfig":
         """Build a config from a (possibly partial) dict, applying defaults.
 
         Unknown keys are ignored so the YAML can carry extra annotations without

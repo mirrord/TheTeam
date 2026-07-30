@@ -137,7 +137,7 @@ pithos-agent chat glm-4.7-flash:latest --flowchart simple_reflect
 - **Tool Calling**: Enable agents to execute CLI commands dynamically
 - **Web Research Tool**: Subagent-driven web crawler (`web-research`) restricted to a configurable domain whitelist, with deduplicated excerpt storage and a cited summary report
 - **News Research Tool**: Recent-news collector (`research-news`) that derives search terms with a small model, scrapes recent (configurable age) articles from whitelisted domains/RSS feeds into the knowledge base, and summarises + relevance-judges each article via a subagent
-- **Text-to-Image Tool**: Generate images from text prompts with a local model (`text2image`). Pluggable backends: Automatic1111/Forge HTTP API, ComfyUI node-graph API, or in-process Hugging Face `diffusers`
+- **Text-to-Image Tool**: Generate images from text prompts with a local model (`prompt2image`). Pluggable backends: Automatic1111/Forge HTTP API, ComfyUI node-graph API, or in-process Hugging Face `diffusers`
 - **Conditions**: Define conditional logic for flowchart branching
 - **Configuration**: YAML-based configuration for agents, flowcharts, and conditions
 - **Serialization**: Save and load agent states, contexts, and flowcharts
@@ -511,7 +511,7 @@ agent.enable_tools(config_manager)
 
 # Agent can now use tools in responses
 response = agent.send("What version of Python is installed?")
-# Agent will respond with: runcommand("python --version")
+# Agent will respond with: [RUN]python --version[/RUN]
 # Tool executes automatically and result is added to conversation
 ```
 
@@ -740,21 +740,21 @@ articles are collected into a Markdown document under `data/research/news/`.
 See [docs/NEWS_RESEARCH.md](docs/NEWS_RESEARCH.md) for architecture,
 configuration, and the in-flowchart `researchnews` node.
 
-### pithos-text2image
+### pithos-prompt2image
 
 Generate an image from a text prompt with a local model. Requires at least one
 backend: `pip install -e ".[web]"` (http/comfyui) or `pip install -e ".[image]"`
 (diffusers).
 
 ```bash
-# Basic generation (uses backend/settings from text2image_config.yaml)
-pithos-text2image "a red fox in a snowy forest"
+# Basic generation (uses backend/settings from prompt2image_config.yaml)
+pithos-prompt2image "a red fox in a snowy forest"
 
 # Override backend and steps for this run
-pithos-text2image --backend comfyui --steps 20 "a glowing crystal cave"
+pithos-prompt2image --backend comfyui --steps 20 "a glowing crystal cave"
 
 # Custom output directory and fixed seed
-pithos-text2image --output-dir /tmp/imgs --seed 42 "a futuristic cityscape"
+pithos-prompt2image --output-dir /tmp/imgs --seed 42 "a futuristic cityscape"
 ```
 
 See [docs/TEXT2IMAGE.md](docs/TEXT2IMAGE.md) for backends, configuration, and usage.

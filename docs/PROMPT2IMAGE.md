@@ -1,15 +1,20 @@
 # Text-to-Image Tool
 
-The `text2image` virtual tool generates a PNG from a text prompt using a
+The `prompt2image` virtual tool generates a PNG from a text prompt using a
 local image model. It follows the same `ToolProvider` plugin pattern as
 `web-research` and `flowchart`: registered through `ToolRegistry`,
 dispatched in-process, and invoked with any of pithos's standard tool
 call syntaxes.
 
+The agent-facing tool name is `prompt2image` rather than `prompt2image` —
+some systems have a real `prompt2image` binary on PATH (from Tesseract's OCR
+training tools), and using the same name would let `CLIToolProvider` shadow
+this virtual tool with that unrelated program.
+
 It is exposed two ways:
 
-1. **CLI**: [`pithos-text2image`](#cli).
-2. **Agent tool call**: `RUN: text2image <prompt>` (virtual tool, no
+1. **CLI**: [`pithos-prompt2image`](#cli).
+2. **Agent tool call**: `[RUN]prompt2image <prompt>[/RUN]` (virtual tool, no
    external binary required).
 
 The tool saves the PNG to `./data/generated_images/` and returns a
@@ -18,7 +23,7 @@ markdown summary (path, backend, model, dimensions, steps, seed, time).
 ## Backends
 
 Three backends are supported, selected by the `backend` key in
-`configs/tools/text2image_config.yaml`:
+`configs/tools/prompt2image_config.yaml`:
 
 | Backend | Value | Dependencies | Server required |
 |---------|-------|-------------|-----------------|
@@ -81,9 +86,27 @@ The built-in workflow uses a `CheckpointLoaderSimple` node, so `model` must
 be set to a checkpoint filename known to your ComfyUI installation (e.g.
 `"v1-5-pruned-emaonly.safetensors"`).
 
+**Named `{variable}` substitution.** In addition to the exact `%token%`
+values above, the same values are available as `{name}` variables that are
+substituted anywhere they appear inside a string input. This matches the
+convention used by ComfyUI's `StringFormat` node, letting you wrap the prompt
+with a fixed style prefix/suffix:
+
+```json
+"12": {
+  "class_type": "StringFormat",
+  "inputs": { "f_string": "masterpiece, best quality, {prompt}" }
+}
+```
+
+Here `{prompt}` is replaced with the text passed to `pithos-prompt2image`.
+Available variables: `{prompt}`, `{negative_prompt}`, `{seed}`, `{steps}`,
+`{cfg}`, `{width}`, `{height}`, `{sampler}`, `{model}`. Any other braces
+(e.g. `{unknown}`) are left untouched.
+
 ### diffusers backend
 
-Loads a Hugging Face `AutoPipelineForText2Image` in-process (lazy, cached
+Loads a Hugging Face `AutoPipelineForPrompt2Image` in-process (lazy, cached
 after first call). Requires the `image` extra:
 
 ```bash
@@ -97,11 +120,11 @@ Set `model` to a HF repo id or a local path (e.g.
 ## Architecture
 
 ```
-Text2ImageToolProvider   (src/pithos/tools/text2image/provider.py)
+Prompt2ImageToolProvider   (src/pithos/tools/prompt2image/provider.py)
         |
         | lazy init
         v
-Text2ImageGenerator      (src/pithos/tools/text2image/generator.py)
+Prompt2ImageGenerator      (src/pithos/tools/prompt2image/generator.py)
         |
         | build_backend(config)
         v
@@ -136,11 +159,11 @@ pip install -e ".[image]"
 Enable the tool and choose a backend in `configs/tools/tool_config.yaml`:
 
 ```yaml
-text2image:
+prompt2image:
   enabled: true
 ```
 
-All generation parameters live in `configs/tools/text2image_config.yaml`:
+All generation parameters live in `configs/tools/prompt2image_config.yaml`:
 
 ```yaml
 # Backend: "http", "comfyui", or "diffusers"
@@ -176,7 +199,7 @@ comfyui_workflow_path: ""   # empty → built-in SD1.5 workflow
 
 1. Start ComfyUI (default port 8188).
 2. Set `backend: comfyui` and `model: <your-checkpoint>.safetensors`.
-3. Enable the tool in `tool_config.yaml` (`text2image.enabled: true`).
+3. Enable the tool in `tool_config.yaml` (`prompt2image.enabled: true`).
 4. Enable tools for your agent:
 
 ```python
@@ -186,7 +209,7 @@ agent.enable_tools(config_manager)
 5. Prompt the agent:
 
 ```
-RUN: text2image a wide ocean at dusk, photorealistic
+[RUN]prompt2image a wide ocean at dusk, photorealistic[/RUN]
 ```
 
 ### Quick-start: Automatic1111/Forge
@@ -202,7 +225,7 @@ pip install -e ".[image]"
 ```
 
 ```yaml
-# text2image_config.yaml
+# prompt2image_config.yaml
 backend: diffusers
 model: "stabilityai/sd-turbo"
 device: cuda
@@ -213,17 +236,17 @@ guidance_scale: 0.0   # sd-turbo doesn't use CFG
 ## CLI
 
 ```bash
-# Basic usage (backend + settings from text2image_config.yaml)
-pithos-text2image "a red fox in a snowy forest"
+# Basic usage (backend + settings from prompt2image_config.yaml)
+pithos-prompt2image "a red fox in a snowy forest"
 
 # Override backend and steps for this run
-pithos-text2image --backend comfyui --steps 20 "a glowing crystal cave"
+pithos-prompt2image --backend comfyui --steps 20 "a glowing crystal cave"
 
 # Custom output directory and fixed seed
-pithos-text2image --output-dir /tmp/imgs --seed 42 "a futuristic cityscape"
+pithos-prompt2image --output-dir /tmp/imgs --seed 42 "a futuristic cityscape"
 
 # Full option reference
-pithos-text2image --help
+pithos-prompt2image --help
 ```
 
 **Options**
@@ -259,15 +282,15 @@ Image generated successfully.
 ## Module Layout
 
 ```
-src/pithos/tools/text2image/
+src/pithos/tools/prompt2image/
 ├── __init__.py     # Optional-dep flags (TEXT2IMAGE_AVAILABLE,
 │                   # HTTP_BACKEND_AVAILABLE, DIFFUSERS_BACKEND_AVAILABLE)
 │                   # + lazy __getattr__ shim
-├── config.py       # Text2ImageConfig dataclass with from_dict()
+├── config.py       # Prompt2ImageConfig dataclass with from_dict()
 ├── backends.py     # ImageBackend ABC, DiffusersBackend, HttpBackend,
 │                   # ComfyUIBackend, build_backend() factory
-├── generator.py    # Text2ImageGenerator: orchestrates backend + file I/O
-└── provider.py     # Text2ImageToolProvider(ToolProvider)
+├── generator.py    # Prompt2ImageGenerator: orchestrates backend + file I/O
+└── provider.py     # Prompt2ImageToolProvider(ToolProvider)
 ```
 
 ## Security Notes

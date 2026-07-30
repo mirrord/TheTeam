@@ -1,9 +1,11 @@
 # Text-to-Image Tool Configuration
 #
-# Controls the `text2image <prompt>` virtual tool. The tool renders a prompt to a
+# Controls the `prompt2image <prompt>` virtual tool (agent-facing name; kept
+# distinct from `prompt2image` to avoid colliding with the real `prompt2image`
+# binary from Tesseract's OCR training tools). The tool renders a prompt to a
 # PNG using a local backend and saves it under `output_dir`.
 #
-# Enable the tool in tool_config.yaml (text2image.enabled: true) before use.
+# Enable the tool in tool_config.yaml (prompt2image.enabled: true) before use.
 
 # Whether the tool is active (the registration gate in tool_config.yaml takes
 # precedence; this mirrors it for standalone/CLI use).
@@ -58,4 +60,4 @@ comfyui_base_url: "http://localhost:7802/ComfyBackendDirect"
 #   %sampler% %model%
 # Leave empty to use the built-in SD1.5 txt2img workflow (set `model` to a
 # checkpoint filename known to the ComfyUI server).
-comfyui_workflow_path: ""
+comfyui_workflow_path: "./configs/tools/nsfw-talos-1.json"

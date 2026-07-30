@@ -1,4 +1,4 @@
-"""Pluggable image-generation backends for the text2image tool.
+"""Pluggable image-generation backends for the prompt2image tool.
 
 A backend takes a text prompt plus generation parameters and returns rendered
 PNG bytes together with metadata describing how the image was produced.
@@ -12,7 +12,7 @@ Two backends ship by default:
 - :class:`ComfyUIBackend` — submits a node-graph workflow to a running ComfyUI
   server (``/prompt`` + ``/history`` + ``/view``). Only needs ``requests``.
 
-Both raise :class:`Text2ImageError` on failure so the provider can surface a
+Both raise :class:`Prompt2ImageError` on failure so the provider can surface a
 clean error to the agent. Heavy third-party imports happen lazily inside the
 backends so that importing this module never fails when optional deps are
 missing.
@@ -30,10 +30,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from .config import Text2ImageConfig
+from .config import Prompt2ImageConfig
 
 
-class Text2ImageError(RuntimeError):
+class Prompt2ImageError(RuntimeError):
     """Raised when an image backend fails to produce an image."""
 
 
@@ -52,7 +52,7 @@ class GenerationParams:
     model: str = ""
 
     @classmethod
-    def from_config(cls, prompt: str, config: Text2ImageConfig) -> "GenerationParams":
+    def from_config(cls, prompt: str, config: Prompt2ImageConfig) -> "GenerationParams":
         """Build params from a prompt and the tool config defaults."""
         return cls(
             prompt=prompt,
@@ -83,7 +83,7 @@ def _resolve_seed(seed: Optional[int]) -> int:
 
 
 class ImageBackend(ABC):
-    """Interface every text2image backend must implement."""
+    """Interface every prompt2image backend must implement."""
 
     name: str = "base"
 
@@ -92,7 +92,7 @@ class ImageBackend(ABC):
         """Render an image for *params* and return PNG bytes + metadata.
 
         Raises:
-            Text2ImageError: If generation fails for any reason.
+            Prompt2ImageError: If generation fails for any reason.
         """
 
 
@@ -101,7 +101,7 @@ class DiffusersBackend(ImageBackend):
 
     name = "diffusers"
 
-    def __init__(self, config: Text2ImageConfig) -> None:
+    def __init__(self, config: Prompt2ImageConfig) -> None:
         self.config = config
         self._pipe: Any = None
 
@@ -109,21 +109,21 @@ class DiffusersBackend(ImageBackend):
         """Lazily load and cache the diffusion pipeline.
 
         Raises:
-            Text2ImageError: If ``diffusers``/``torch`` are unavailable or the
+            Prompt2ImageError: If ``diffusers``/``torch`` are unavailable or the
                 model cannot be loaded.
         """
         if self._pipe is not None:
             return self._pipe
         if not self.config.model:
-            raise Text2ImageError(
+            raise Prompt2ImageError(
                 "diffusers backend requires 'model' (a HF repo id or local path) "
-                "to be set in text2image config."
+                "to be set in prompt2image config."
             )
         try:
             import torch
-            from diffusers import AutoPipelineForText2Image
+            from diffusers import AutoPipelineForPrompt2Image
         except ImportError as exc:  # pragma: no cover - exercised via skip
-            raise Text2ImageError(
+            raise Prompt2ImageError(
                 "diffusers backend unavailable: install with 'pip install -e .[image]'"
             ) from exc
         try:
@@ -132,12 +132,12 @@ class DiffusersBackend(ImageBackend):
                 if self.config.device.startswith("cuda")
                 else torch.float32
             )
-            pipe = AutoPipelineForText2Image.from_pretrained(
+            pipe = AutoPipelineForPrompt2Image.from_pretrained(
                 self.config.model, torch_dtype=dtype
             )
             pipe = pipe.to(self.config.device)
         except Exception as exc:
-            raise Text2ImageError(
+            raise Prompt2ImageError(
                 f"failed to load model '{self.config.model}': {exc}"
             ) from exc
         self._pipe = pipe
@@ -162,10 +162,10 @@ class DiffusersBackend(ImageBackend):
                 generator=generator,
             )
             image = result.images[0]
-        except Text2ImageError:
+        except Prompt2ImageError:
             raise
         except Exception as exc:
-            raise Text2ImageError(f"diffusers generation failed: {exc}") from exc
+            raise Prompt2ImageError(f"diffusers generation failed: {exc}") from exc
 
         buffer = io.BytesIO()
         image.save(buffer, format="PNG")
@@ -188,14 +188,14 @@ class HttpBackend(ImageBackend):
 
     name = "http"
 
-    def __init__(self, config: Text2ImageConfig) -> None:
+    def __init__(self, config: Prompt2ImageConfig) -> None:
         self.config = config
 
     def generate(self, params: GenerationParams) -> GeneratedImage:
         try:
             import requests
         except ImportError as exc:  # pragma: no cover - exercised via skip
-            raise Text2ImageError(
+            raise Prompt2ImageError(
                 "http backend unavailable: install with 'pip install -e .[web]'"
             ) from exc
 
@@ -216,17 +216,17 @@ class HttpBackend(ImageBackend):
             response.raise_for_status()
             data = response.json()
         except Exception as exc:
-            raise Text2ImageError(
+            raise Prompt2ImageError(
                 f"http backend request to {url} failed: {exc}"
             ) from exc
 
         images = data.get("images") or []
         if not images:
-            raise Text2ImageError("http backend returned no images")
+            raise Prompt2ImageError("http backend returned no images")
         try:
             png_bytes = base64.b64decode(images[0])
         except Exception as exc:
-            raise Text2ImageError(f"failed to decode image data: {exc}") from exc
+            raise Prompt2ImageError(f"failed to decode image data: {exc}") from exc
 
         return GeneratedImage(
             png_bytes=png_bytes,
@@ -298,7 +298,7 @@ class ComfyUIBackend(ImageBackend):
 
     name = "comfyui"
 
-    def __init__(self, config: Text2ImageConfig) -> None:
+    def __init__(self, config: Prompt2ImageConfig) -> None:
         self.config = config
 
     def _load_workflow(self) -> dict[str, Any]:
@@ -309,41 +309,60 @@ class ComfyUIBackend(ImageBackend):
         try:
             return json.loads(Path(path).read_text(encoding="utf-8"))
         except Exception as exc:
-            raise Text2ImageError(
+            raise Prompt2ImageError(
                 f"failed to load ComfyUI workflow '{path}': {exc}"
             ) from exc
 
     @staticmethod
-    def _substitute(workflow: dict[str, Any], tokens: dict[str, Any]) -> dict[str, Any]:
-        """Replace placeholder tokens in node input values with typed values.
+    def _substitute(
+        workflow: dict[str, Any],
+        tokens: dict[str, Any],
+        variables: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Fill workflow input values with per-call generation values.
 
-        Any input whose value exactly matches a token key is replaced with the
-        token's typed value (preserving ints/floats). Other values are untouched.
+        Two placeholder styles are supported inside node input values:
+
+        - Exact ``%token%`` values (e.g. ``"%steps%"``) are replaced with the
+          token's typed value, preserving ints/floats.
+        - ``{name}`` variables embedded in a string (e.g. a ComfyUI
+          ``StringFormat`` node's ``"masterpiece, {prompt}"``) are substituted
+          textually with ``str(value)``. Only known variable names are replaced;
+          any other braces are left untouched.
         """
         for node in workflow.values():
             inputs = node.get("inputs")
             if not isinstance(inputs, dict):
                 continue
             for key, value in list(inputs.items()):
-                if isinstance(value, str) and value in tokens:
+                if not isinstance(value, str):
+                    continue
+                if value in tokens:
                     inputs[key] = tokens[value]
+                    continue
+                if "{" in value:
+                    for name, replacement in variables.items():
+                        placeholder = "{" + name + "}"
+                        if placeholder in value:
+                            value = value.replace(placeholder, str(replacement))
+                    inputs[key] = value
         return workflow
 
     def generate(self, params: GenerationParams) -> GeneratedImage:
         try:
             import requests
         except ImportError as exc:  # pragma: no cover - exercised via skip
-            raise Text2ImageError(
+            raise Prompt2ImageError(
                 "comfyui backend unavailable: install with 'pip install -e .[web]'"
             ) from exc
 
         # Guard: the built-in workflow requires a checkpoint name.
         using_builtin = not (self.config.comfyui_workflow_path or "").strip()
         if using_builtin and not (params.model or "").strip():
-            raise Text2ImageError(
+            raise Prompt2ImageError(
                 "comfyui backend: 'model' must be set to a checkpoint filename "
                 "when using the built-in workflow (e.g. 'v1-5-pruned-emaonly.safetensors'). "
-                "Set 'model' in text2image_config.yaml or use --model on the CLI."
+                "Set 'model' in prompt2image_config.yaml or use --model on the CLI."
             )
 
         seed = _resolve_seed(params.seed)
@@ -358,7 +377,20 @@ class ComfyUIBackend(ImageBackend):
             "%sampler%": params.sampler,
             "%model%": params.model,
         }
-        workflow = self._substitute(self._load_workflow(), tokens)
+        # Named variables for `{name}` substitution inside string inputs (e.g. a
+        # ComfyUI StringFormat node's f_string containing "... {prompt}").
+        variables: dict[str, Any] = {
+            "prompt": params.prompt,
+            "negative_prompt": params.negative_prompt,
+            "seed": seed,
+            "steps": params.steps,
+            "cfg": params.guidance_scale,
+            "width": params.width,
+            "height": params.height,
+            "sampler": params.sampler,
+            "model": params.model,
+        }
+        workflow = self._substitute(self._load_workflow(), tokens, variables)
 
         base = self.config.comfyui_base_url.rstrip("/")
         # Use standard dashed UUID format; some ComfyUI versions validate the format.
@@ -370,13 +402,13 @@ class ComfyUIBackend(ImageBackend):
                 timeout=self.config.timeout,
             )
         except requests.exceptions.ConnectionError as exc:
-            raise Text2ImageError(
+            raise Prompt2ImageError(
                 f"comfyui: could not reach server at {base} — "
                 f"check that ComfyUI is running and 'comfyui_base_url' is correct. "
                 f"Detail: {exc}"
             ) from exc
         except Exception as exc:
-            raise Text2ImageError(
+            raise Prompt2ImageError(
                 f"comfyui /prompt request to {base} failed: {exc}"
             ) from exc
 
@@ -386,7 +418,7 @@ class ComfyUIBackend(ImageBackend):
                 body = resp.json()
             except Exception:
                 body = resp.text
-            raise Text2ImageError(
+            raise Prompt2ImageError(
                 f"comfyui /prompt returned HTTP {resp.status_code}: {body}"
             )
 
@@ -394,21 +426,21 @@ class ComfyUIBackend(ImageBackend):
         # ComfyUI returns HTTP 200 with an 'error' key when workflow validation fails.
         if "error" in data:
             node_errors = data.get("node_errors", {})
-            raise Text2ImageError(
+            raise Prompt2ImageError(
                 f"comfyui workflow validation failed: {data['error']}. "
                 f"Node errors: {node_errors}"
             )
 
         prompt_id = data.get("prompt_id")
         if not prompt_id:
-            raise Text2ImageError(
+            raise Prompt2ImageError(
                 f"comfyui did not return a prompt_id. Response: {data}"
             )
 
         history = self._wait_for_history(requests, base, prompt_id)
         image_ref = self._first_image_ref(history)
         if image_ref is None:
-            raise Text2ImageError("comfyui run produced no images")
+            raise Prompt2ImageError("comfyui run produced no images")
 
         try:
             view = requests.get(
@@ -417,7 +449,7 @@ class ComfyUIBackend(ImageBackend):
             view.raise_for_status()
             png_bytes = view.content
         except Exception as exc:
-            raise Text2ImageError(f"comfyui /view request failed: {exc}") from exc
+            raise Prompt2ImageError(f"comfyui /view request failed: {exc}") from exc
 
         return GeneratedImage(
             png_bytes=png_bytes,
@@ -448,14 +480,14 @@ class ComfyUIBackend(ImageBackend):
                 resp.raise_for_status()
                 data = resp.json()
             except Exception as exc:
-                raise Text2ImageError(
+                raise Prompt2ImageError(
                     f"comfyui /history request failed: {exc}"
                 ) from exc
             entry = data.get(prompt_id)
             if entry:
                 return entry
             time.sleep(poll_interval)
-        raise Text2ImageError(
+        raise Prompt2ImageError(
             f"comfyui run timed out after {self.config.timeout}s waiting for results"
         )
 
@@ -478,11 +510,11 @@ class ComfyUIBackend(ImageBackend):
         return None
 
 
-def build_backend(config: Text2ImageConfig) -> ImageBackend:
+def build_backend(config: Prompt2ImageConfig) -> ImageBackend:
     """Construct the backend selected by ``config.backend``.
 
     Raises:
-        Text2ImageError: If the backend name is not recognised.
+        Prompt2ImageError: If the backend name is not recognised.
     """
     backend = (config.backend or "").strip().lower()
     if backend == "diffusers":
@@ -491,7 +523,7 @@ def build_backend(config: Text2ImageConfig) -> ImageBackend:
         return HttpBackend(config)
     if backend == "comfyui":
         return ComfyUIBackend(config)
-    raise Text2ImageError(
-        f"unknown text2image backend '{config.backend}'; "
+    raise Prompt2ImageError(
+        f"unknown prompt2image backend '{config.backend}'; "
         "expected 'diffusers', 'http' or 'comfyui'"
     )

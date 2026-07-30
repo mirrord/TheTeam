@@ -1,6 +1,6 @@
-"""text2image tool - generate images from text prompts with a local model.
+"""prompt2image tool - generate images from text prompts with a local model.
 
-The tool exposes a single virtual ``text2image`` tool that turns a prompt into a
+The tool exposes a single virtual ``prompt2image`` tool that turns a prompt into a
 PNG saved under ``data/generated_images``. The actual rendering is delegated to a
 pluggable backend selected via config:
 
@@ -15,7 +15,7 @@ should check ``TEXT2IMAGE_AVAILABLE`` (or the per-backend flags) before
 registering the provider.
 """
 
-from .config import Text2ImageConfig
+from .config import Prompt2ImageConfig
 
 try:
     import requests  # noqa: F401
@@ -38,21 +38,21 @@ TEXT2IMAGE_AVAILABLE = HTTP_BACKEND_AVAILABLE or DIFFUSERS_BACKEND_AVAILABLE
 
 # Lazy imports for components that may pull in heavy deps.
 def __getattr__(name):  # pragma: no cover - thin lazy-import shim
-    if name == "Text2ImageGenerator":
-        from .generator import Text2ImageGenerator
+    if name == "Prompt2ImageGenerator":
+        from .generator import Prompt2ImageGenerator
 
-        return Text2ImageGenerator
-    if name == "Text2ImageToolProvider":
-        from .provider import Text2ImageToolProvider
+        return Prompt2ImageGenerator
+    if name == "Prompt2ImageToolProvider":
+        from .provider import Prompt2ImageToolProvider
 
-        return Text2ImageToolProvider
+        return Prompt2ImageToolProvider
     if name in {
         "ImageBackend",
         "DiffusersBackend",
         "HttpBackend",
         "ComfyUIBackend",
         "build_backend",
-        "Text2ImageError",
+        "Prompt2ImageError",
     }:
         from . import backends
 
@@ -61,15 +61,15 @@ def __getattr__(name):  # pragma: no cover - thin lazy-import shim
 
 
 __all__ = [
-    "Text2ImageConfig",
-    "Text2ImageGenerator",
-    "Text2ImageToolProvider",
+    "Prompt2ImageConfig",
+    "Prompt2ImageGenerator",
+    "Prompt2ImageToolProvider",
     "ImageBackend",
     "DiffusersBackend",
     "HttpBackend",
     "ComfyUIBackend",
     "build_backend",
-    "Text2ImageError",
+    "Prompt2ImageError",
     "TEXT2IMAGE_AVAILABLE",
     "HTTP_BACKEND_AVAILABLE",
     "DIFFUSERS_BACKEND_AVAILABLE",

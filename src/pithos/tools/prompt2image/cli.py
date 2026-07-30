@@ -1,11 +1,11 @@
-"""Command-line entry point for the text2image tool.
+"""Command-line entry point for the prompt2image tool.
 
 Examples::
 
-    pithos-text2image "a red fox in a snowy forest"
-    pithos-text2image --backend comfyui --steps 20 "a glowing crystal cave"
-    pithos-text2image --output-dir /tmp/imgs --seed 42 "a futuristic cityscape"
-    pithos-text2image --config-dir ./my_configs "a cat on a windowsill"
+    pithos-prompt2image "a red fox in a snowy forest"
+    pithos-prompt2image --backend comfyui --steps 20 "a glowing crystal cave"
+    pithos-prompt2image --output-dir /tmp/imgs --seed 42 "a futuristic cityscape"
+    pithos-prompt2image --config-dir ./my_configs "a cat on a windowsill"
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from ...config_manager import ConfigManager
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="pithos-text2image",
+        prog="pithos-prompt2image",
         description=(
             "Generate an image from a text prompt using a local model and save "
             "it to disk. Backends: 'http' (Automatic1111/Forge), 'comfyui', "
@@ -101,7 +101,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     if not TEXT2IMAGE_AVAILABLE:
         print(
-            "text2image backends unavailable: install at least one of:\n"
+            "prompt2image backends unavailable: install at least one of:\n"
             "  pip install -e .[web]    # http / comfyui backends\n"
             "  pip install -e .[image]  # diffusers backend",
             file=sys.stderr,
@@ -110,10 +110,10 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     cm = ConfigManager(args.config_dir) if args.config_dir else ConfigManager()
 
-    from .config import Text2ImageConfig
+    from .config import Prompt2ImageConfig
 
-    raw = cm.get_config("text2image_config", "tools") or {}
-    config = Text2ImageConfig.from_dict(raw)
+    raw = cm.get_config("prompt2image_config", "tools") or {}
+    config = Prompt2ImageConfig.from_dict(raw)
 
     # Apply CLI overrides on top of config-file values.
     if args.backend is not None:
@@ -138,9 +138,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         print("prompt must not be empty", file=sys.stderr)
         return 2
 
-    from .generator import Text2ImageGenerator
+    from .generator import Prompt2ImageGenerator
 
-    generator = Text2ImageGenerator(config)
+    generator = Prompt2ImageGenerator(config)
     try:
         metadata = generator.generate(prompt)
     except KeyboardInterrupt:

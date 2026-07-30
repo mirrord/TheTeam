@@ -40,7 +40,7 @@ from .config import (
 VIRTUAL_TOOLS: dict[str, str] = {
     "web-research": "web_research",
     "web_research": "web_research",
-    "text2image": "text2image",
+    "prompt2image": "prompt2image",
     "flowcharts": "flowcharts",
     "flowchart": "flowcharts",
 }
@@ -64,8 +64,8 @@ def _make_config_manager(tc: ToolsConfig) -> ConfigManager:
         tool_overrides["flowcharts"] = tc.flowcharts
     if tc.web_research is not None:
         tool_overrides["web_research"] = tc.web_research
-    if tc.text2image is not None:
-        tool_overrides["text2image"] = tc.text2image
+    if tc.prompt2image is not None:
+        tool_overrides["prompt2image"] = tc.prompt2image
 
     needs_override = (
         tc.mode != DEFAULT_TOOLS_MODE
@@ -140,16 +140,16 @@ def _build_registry(tc: ToolsConfig, cm: ConfigManager):
         except Exception:
             pass
 
-    t2i_config = tool_config.get("text2image", {})
+    t2i_config = tool_config.get("prompt2image", {})
     if t2i_config.get("enabled", False):
         try:
-            from pithos.tools.text2image import (
+            from pithos.tools.prompt2image import (
                 TEXT2IMAGE_AVAILABLE,
-                Text2ImageToolProvider,
+                Prompt2ImageToolProvider,
             )
 
             if TEXT2IMAGE_AVAILABLE:
-                providers.append(Text2ImageToolProvider(config_manager=cm))
+                providers.append(Prompt2ImageToolProvider(config_manager=cm))
         except Exception:
             pass
 
@@ -176,7 +176,7 @@ def _try_rich():
 def cmd_enable(tool_name: str, config: TalosConfig, config_path: Path) -> None:
     """Enable *tool_name* for the Talos agent.
 
-    For virtual tools (web-research, text2image, flowcharts): sets the
+    For virtual tools (web-research, prompt2image, flowcharts): sets the
     ``enabled: true`` flag in the relevant ``ToolsConfig`` dict field.
     For all other tools: appends to the ``allow`` list and removes any
     entry from the ``deny`` list.
@@ -273,7 +273,7 @@ def cmd_list(config: TalosConfig, config_path: Path) -> None:
         ttype = meta.tool_type if meta else "cli"
         if ttype == "flowchart":
             flowchart_entries.append((name, meta))
-        elif ttype in ("web_research", "memory", "text2image"):
+        elif ttype in ("web_research", "memory", "prompt2image"):
             virtual_entries.append((name, meta))
         else:
             cli_entries.append((name, meta))
@@ -370,7 +370,7 @@ def cmd_list(config: TalosConfig, config_path: Path) -> None:
         else:
             console.print("[dim]No flowcharts configured.[/dim]")
 
-        # Other virtual tools (web-research, memory, text2image)
+        # Other virtual tools (web-research, memory, prompt2image)
         if virtual_entries:
             vt_table = Table(
                 show_header=True, header_style="bold", box=None, padding=(0, 1)
@@ -428,7 +428,7 @@ def cmd_list_all(config: TalosConfig, config_path: Path) -> None:
     - All tools in the active tool_config.yaml lists (include, exclude,
       confirm, descriptions) plus any Talos-local allow/deny entries.
     - Discoverability check via ``shutil.which()`` for CLI tools.
-    - Virtual tool (flowcharts, web-research, text2image) status.
+    - Virtual tool (flowcharts, web-research, prompt2image) status.
     """
     tc = config.agent.tools
     cm = _make_config_manager(tc)
@@ -520,7 +520,7 @@ def cmd_list_all(config: TalosConfig, config_path: Path) -> None:
         vtable.add_column("Status", no_wrap=True)
         _vmap = {
             "web-research": ("web_research", tool_config.get("web_research", {})),
-            "text2image": ("text2image", tool_config.get("text2image", {})),
+            "prompt2image": ("prompt2image", tool_config.get("prompt2image", {})),
             "flowcharts": ("flowcharts", tool_config.get("flowcharts", {})),
         }
         for vname, (_, vcfg) in _vmap.items():
@@ -544,7 +544,7 @@ def cmd_list_all(config: TalosConfig, config_path: Path) -> None:
         print("\nVirtual tools:")
         _vmap = {
             "web-research": tool_config.get("web_research", {}),
-            "text2image": tool_config.get("text2image", {}),
+            "prompt2image": tool_config.get("prompt2image", {}),
             "flowcharts": tool_config.get("flowcharts", {}),
         }
         for vname, vcfg in _vmap.items():

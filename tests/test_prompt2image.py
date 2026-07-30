@@ -1,4 +1,4 @@
-"""Tests for the text2image tool (config, backends, generator, provider).
+"""Tests for the prompt2image tool (config, backends, generator, provider).
 
 External image backends (diffusers/torch and the A1111 HTTP server) are mocked
 so the tests run fast and offline. A 1x1 PNG byte string stands in for real
@@ -14,18 +14,18 @@ from unittest.mock import Mock
 
 import pytest
 
-from pithos.tools.text2image.backends import (
+from pithos.tools.prompt2image.backends import (
     ComfyUIBackend,
     GeneratedImage,
     GenerationParams,
     HttpBackend,
     ImageBackend,
-    Text2ImageError,
+    Prompt2ImageError,
     build_backend,
 )
-from pithos.tools.text2image.config import Text2ImageConfig
-from pithos.tools.text2image.generator import Text2ImageGenerator
-from pithos.tools.text2image.provider import Text2ImageToolProvider
+from pithos.tools.prompt2image.config import Prompt2ImageConfig
+from pithos.tools.prompt2image.generator import Prompt2ImageGenerator
+from pithos.tools.prompt2image.provider import Prompt2ImageToolProvider
 
 # Minimal valid 1x1 transparent PNG.
 _PNG_BYTES = base64.b64decode(
@@ -62,27 +62,27 @@ class _FakeBackend(ImageBackend):
 # --------------------------------------------------------------------------- #
 
 
-class TestText2ImageConfig:
+class TestPrompt2ImageConfig:
     def test_defaults(self) -> None:
-        cfg = Text2ImageConfig()
+        cfg = Prompt2ImageConfig()
         assert cfg.enabled is False
         assert cfg.backend == "http"
         assert cfg.output_dir == "./data/generated_images"
         assert cfg.width == 512 and cfg.height == 512
 
     def test_from_dict_partial_applies_defaults(self) -> None:
-        cfg = Text2ImageConfig.from_dict({"backend": "diffusers", "steps": 10})
+        cfg = Prompt2ImageConfig.from_dict({"backend": "diffusers", "steps": 10})
         assert cfg.backend == "diffusers"
         assert cfg.steps == 10
         assert cfg.guidance_scale == 7.5  # default preserved
 
     def test_from_dict_ignores_unknown_keys(self) -> None:
-        cfg = Text2ImageConfig.from_dict({"backend": "http", "bogus": 1})
+        cfg = Prompt2ImageConfig.from_dict({"backend": "http", "bogus": 1})
         assert cfg.backend == "http"
         assert not hasattr(cfg, "bogus")
 
     def test_from_dict_none(self) -> None:
-        assert Text2ImageConfig.from_dict(None) == Text2ImageConfig()
+        assert Prompt2ImageConfig.from_dict(None) == Prompt2ImageConfig()
 
 
 # --------------------------------------------------------------------------- #
@@ -92,23 +92,23 @@ class TestText2ImageConfig:
 
 class TestBackendFactory:
     def test_build_http_backend(self) -> None:
-        backend = build_backend(Text2ImageConfig(backend="http"))
+        backend = build_backend(Prompt2ImageConfig(backend="http"))
         assert isinstance(backend, HttpBackend)
 
     def test_build_unknown_backend_raises(self) -> None:
-        with pytest.raises(Text2ImageError):
-            build_backend(Text2ImageConfig(backend="nope"))
+        with pytest.raises(Prompt2ImageError):
+            build_backend(Prompt2ImageConfig(backend="nope"))
 
     def test_params_from_config(self) -> None:
-        cfg = Text2ImageConfig(width=256, height=256, steps=12, seed=7)
+        cfg = Prompt2ImageConfig(width=256, height=256, steps=12, seed=7)
         params = GenerationParams.from_config("a cat", cfg)
         assert params.prompt == "a cat"
         assert params.width == 256 and params.steps == 12 and params.seed == 7
 
 
 class TestHttpBackend:
-    def _config(self) -> Text2ImageConfig:
-        return Text2ImageConfig(backend="http", base_url="http://localhost:7860")
+    def _config(self) -> Prompt2ImageConfig:
+        return Prompt2ImageConfig(backend="http", base_url="http://localhost:7860")
 
     def test_generate_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
         encoded = base64.b64encode(_PNG_BYTES).decode("ascii")
@@ -141,7 +141,7 @@ class TestHttpBackend:
 
         backend = HttpBackend(self._config())
         params = GenerationParams.from_config("x", self._config())
-        with pytest.raises(Text2ImageError):
+        with pytest.raises(Prompt2ImageError):
             backend.generate(params)
 
     def test_generate_request_error_raises(
@@ -153,13 +153,13 @@ class TestHttpBackend:
 
         backend = HttpBackend(self._config())
         params = GenerationParams.from_config("x", self._config())
-        with pytest.raises(Text2ImageError):
+        with pytest.raises(Prompt2ImageError):
             backend.generate(params)
 
 
 class TestComfyUIBackend:
-    def _config(self) -> Text2ImageConfig:
-        return Text2ImageConfig(
+    def _config(self) -> Prompt2ImageConfig:
+        return Prompt2ImageConfig(
             backend="comfyui",
             comfyui_base_url="http://localhost:8188",
             model="sd15.safetensors",
@@ -217,7 +217,7 @@ class TestComfyUIBackend:
         monkeypatch.setitem(__import__("sys").modules, "requests", requests_mod)
         # Avoid real sleeps during history polling.
         monkeypatch.setattr(
-            "pithos.tools.text2image.backends.time.sleep", lambda *_: None
+            "pithos.tools.prompt2image.backends.time.sleep", lambda *_: None
         )
         return requests_mod
 
@@ -271,10 +271,63 @@ class TestComfyUIBackend:
         ]
         assert leftover == []
 
+    def test_named_prompt_variable_substituted_in_string(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """`{prompt}` embedded in a StringFormat node is filled with the prompt."""
+        import json
+
+        wf = {
+            "1": {
+                "class_type": "StringFormat",
+                "inputs": {"f_string": "masterpiece, best quality, {prompt}"},
+            },
+            "2": {"class_type": "SaveImage", "inputs": {"images": ["1", 0]}},
+        }
+        wf_path = tmp_path / "wf.json"
+        wf_path.write_text(json.dumps(wf), encoding="utf-8")
+        cfg = self._config()
+        cfg.comfyui_workflow_path = str(wf_path)
+        requests_mod = self._install_requests(monkeypatch)
+        backend = ComfyUIBackend(cfg)
+
+        backend.generate(GenerationParams.from_config("a red fox", cfg))
+
+        submitted = requests_mod.post.call_args[1]["json"]["prompt"]
+        assert (
+            submitted["1"]["inputs"]["f_string"]
+            == "masterpiece, best quality, a red fox"
+        )
+
+    def test_unknown_braces_left_untouched(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Braces that are not known variable names are preserved verbatim."""
+        import json
+
+        wf = {
+            "1": {
+                "class_type": "StringFormat",
+                "inputs": {"f_string": "{prompt} with {unknown_var}"},
+            },
+            "2": {"class_type": "SaveImage", "inputs": {"images": ["1", 0]}},
+        }
+        wf_path = tmp_path / "wf.json"
+        wf_path.write_text(json.dumps(wf), encoding="utf-8")
+        cfg = self._config()
+        cfg.comfyui_workflow_path = str(wf_path)
+        requests_mod = self._install_requests(monkeypatch)
+        backend = ComfyUIBackend(cfg)
+
+        backend.generate(GenerationParams.from_config("cat", cfg))
+
+        submitted = requests_mod.post.call_args[1]["json"]["prompt"]
+        assert submitted["1"]["inputs"]["f_string"] == "cat with {unknown_var}"
+
     def test_generate_no_images_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self._install_requests(monkeypatch, history={"pid-1": {"outputs": {}}})
         backend = ComfyUIBackend(self._config())
-        with pytest.raises(Text2ImageError):
+        with pytest.raises(Prompt2ImageError):
             backend.generate(GenerationParams.from_config("x", self._config()))
 
     def test_generate_no_prompt_id_raises(
@@ -292,18 +345,18 @@ class TestComfyUIBackend:
         requests_mod.exceptions = _real_requests.exceptions
         monkeypatch.setitem(__import__("sys").modules, "requests", requests_mod)
         backend = ComfyUIBackend(self._config())
-        with pytest.raises(Text2ImageError):
+        with pytest.raises(Prompt2ImageError):
             backend.generate(GenerationParams.from_config("x", self._config()))
 
     def test_empty_model_with_builtin_workflow_raises(self) -> None:
         """Empty model must be caught before any network call."""
-        cfg = Text2ImageConfig(
+        cfg = Prompt2ImageConfig(
             backend="comfyui",
             model="",  # intentionally empty
             comfyui_base_url="http://localhost:8188",
         )
         backend = ComfyUIBackend(cfg)
-        with pytest.raises(Text2ImageError, match="'model' must be set"):
+        with pytest.raises(Prompt2ImageError, match="'model' must be set"):
             backend.generate(GenerationParams.from_config("a cat", cfg))
 
     def test_empty_model_with_custom_workflow_allowed(
@@ -318,14 +371,14 @@ class TestComfyUIBackend:
         }
         wf_path = tmp_path / "wf.json"
         wf_path.write_text(json.dumps(wf), encoding="utf-8")
-        cfg = Text2ImageConfig(
+        cfg = Prompt2ImageConfig(
             backend="comfyui",
             model="",
             comfyui_workflow_path=str(wf_path),
         )
         self._install_requests(monkeypatch)
         backend = ComfyUIBackend(cfg)
-        # Should not raise Text2ImageError for empty model.
+        # Should not raise Prompt2ImageError for empty model.
         backend.generate(GenerationParams.from_config("hi", cfg))
 
     def test_connection_error_surfaces_hint(
@@ -340,7 +393,7 @@ class TestComfyUIBackend:
         requests_mod.exceptions = _real_requests.exceptions
         monkeypatch.setitem(__import__("sys").modules, "requests", requests_mod)
         backend = ComfyUIBackend(self._config())
-        with pytest.raises(Text2ImageError, match="could not reach server"):
+        with pytest.raises(Prompt2ImageError, match="could not reach server"):
             backend.generate(GenerationParams.from_config("x", self._config()))
 
     def test_http_error_body_included_in_message(
@@ -357,7 +410,7 @@ class TestComfyUIBackend:
         requests_mod.exceptions = _real_requests.exceptions
         monkeypatch.setitem(__import__("sys").modules, "requests", requests_mod)
         backend = ComfyUIBackend(self._config())
-        with pytest.raises(Text2ImageError, match="HTTP 400"):
+        with pytest.raises(Prompt2ImageError, match="HTTP 400"):
             backend.generate(GenerationParams.from_config("x", self._config()))
 
     def test_comfyui_validation_error_raised(
@@ -379,7 +432,7 @@ class TestComfyUIBackend:
         requests_mod.exceptions = _real_requests.exceptions
         monkeypatch.setitem(__import__("sys").modules, "requests", requests_mod)
         backend = ComfyUIBackend(self._config())
-        with pytest.raises(Text2ImageError, match="validation failed"):
+        with pytest.raises(Prompt2ImageError, match="validation failed"):
             backend.generate(GenerationParams.from_config("x", self._config()))
 
     def test_timeout_when_history_never_ready(
@@ -389,7 +442,7 @@ class TestComfyUIBackend:
         cfg = self._config()
         cfg.timeout = 0  # force immediate deadline
         backend = ComfyUIBackend(cfg)
-        with pytest.raises(Text2ImageError):
+        with pytest.raises(Prompt2ImageError):
             backend.generate(GenerationParams.from_config("x", cfg))
 
     def test_custom_workflow_loaded_from_file(
@@ -417,7 +470,7 @@ class TestComfyUIBackend:
         cfg = self._config()
         cfg.comfyui_workflow_path = str(tmp_path / "missing.json")
         backend = ComfyUIBackend(cfg)
-        with pytest.raises(Text2ImageError):
+        with pytest.raises(Prompt2ImageError):
             backend.generate(GenerationParams.from_config("x", cfg))
 
 
@@ -426,11 +479,11 @@ class TestComfyUIBackend:
 # --------------------------------------------------------------------------- #
 
 
-class TestText2ImageGenerator:
+class TestPrompt2ImageGenerator:
     def test_generate_writes_file_and_returns_metadata(self, tmp_path: Path) -> None:
-        cfg = Text2ImageConfig(output_dir=str(tmp_path / "imgs"), model="m")
+        cfg = Prompt2ImageConfig(output_dir=str(tmp_path / "imgs"), model="m")
         backend = _FakeBackend()
-        gen = Text2ImageGenerator(cfg, backend=backend)
+        gen = Prompt2ImageGenerator(cfg, backend=backend)
 
         meta = gen.generate("A red cube on grass")
 
@@ -445,20 +498,20 @@ class TestText2ImageGenerator:
         assert "red-cube-on-grass" in saved.name
 
     def test_generate_empty_prompt_raises(self, tmp_path: Path) -> None:
-        cfg = Text2ImageConfig(output_dir=str(tmp_path))
-        gen = Text2ImageGenerator(cfg, backend=_FakeBackend())
+        cfg = Prompt2ImageConfig(output_dir=str(tmp_path))
+        gen = Prompt2ImageGenerator(cfg, backend=_FakeBackend())
         with pytest.raises(ValueError):
             gen.generate("   ")
 
     def test_generate_creates_output_dir(self, tmp_path: Path) -> None:
         nested = tmp_path / "a" / "b" / "c"
-        cfg = Text2ImageConfig(output_dir=str(nested))
-        gen = Text2ImageGenerator(cfg, backend=_FakeBackend())
+        cfg = Prompt2ImageConfig(output_dir=str(nested))
+        gen = Prompt2ImageGenerator(cfg, backend=_FakeBackend())
         meta = gen.generate("hello world")
         assert Path(meta["path"]).parent == nested
 
     def test_lazy_backend_built_from_config(self) -> None:
-        gen = Text2ImageGenerator(Text2ImageConfig(backend="http"))
+        gen = Prompt2ImageGenerator(Prompt2ImageConfig(backend="http"))
         assert isinstance(gen.backend, HttpBackend)
 
 
@@ -467,25 +520,25 @@ class TestText2ImageGenerator:
 # --------------------------------------------------------------------------- #
 
 
-class TestText2ImageToolProvider:
-    def _provider(self, gen: Optional[Any] = None) -> Text2ImageToolProvider:
+class TestPrompt2ImageToolProvider:
+    def _provider(self, gen: Optional[Any] = None) -> Prompt2ImageToolProvider:
         cm = Mock()
-        return Text2ImageToolProvider(
+        return Prompt2ImageToolProvider(
             config_manager=cm,
-            config=Text2ImageConfig(),
+            config=Prompt2ImageConfig(),
             generator=gen,
         )
 
     def test_discover_metadata(self) -> None:
         meta = self._provider().discover()
-        assert "text2image" in meta
-        entry = meta["text2image"]
+        assert "prompt2image" in meta
+        entry = meta["prompt2image"]
         assert entry.tool_type == "image"
         assert entry.source == "virtual"
 
     def test_can_execute(self) -> None:
         provider = self._provider()
-        assert provider.can_execute("text2image") is True
+        assert provider.can_execute("prompt2image") is True
         assert provider.can_execute("python") is False
 
     def test_execute_success(self) -> None:
@@ -503,7 +556,7 @@ class TestText2ImageToolProvider:
             }
         )
         provider = self._provider(gen=gen)
-        result = provider.execute("text2image a blue sphere")
+        result = provider.execute("prompt2image a blue sphere")
 
         assert result.success is True
         assert "Image generated successfully" in result.stdout
@@ -511,14 +564,14 @@ class TestText2ImageToolProvider:
         gen.generate.assert_called_once_with("a blue sphere")
 
     def test_execute_empty_prompt(self) -> None:
-        result = self._provider(gen=Mock()).execute("text2image")
+        result = self._provider(gen=Mock()).execute("prompt2image")
         assert result.success is False
         assert result.error_hint is not None
 
     def test_execute_backend_error(self) -> None:
         gen = Mock()
-        gen.generate = Mock(side_effect=Text2ImageError("server down"))
-        result = self._provider(gen=gen).execute("text2image a tree")
+        gen.generate = Mock(side_effect=Prompt2ImageError("server down"))
+        result = self._provider(gen=gen).execute("prompt2image a tree")
         assert result.success is False
         assert "server down" in result.stderr
         assert result.error_hint is not None
@@ -526,17 +579,17 @@ class TestText2ImageToolProvider:
     def test_execute_unexpected_error(self) -> None:
         gen = Mock()
         gen.generate = Mock(side_effect=RuntimeError("boom"))
-        result = self._provider(gen=gen).execute("text2image a tree")
+        result = self._provider(gen=gen).execute("prompt2image a tree")
         assert result.success is False
         assert "boom" in result.stderr
 
     def test_config_lazy_loaded_from_config_manager(self) -> None:
         cm = Mock()
         cm.get_config = Mock(return_value={"backend": "diffusers", "steps": 5})
-        provider = Text2ImageToolProvider(config_manager=cm)
+        provider = Prompt2ImageToolProvider(config_manager=cm)
         assert provider.config.backend == "diffusers"
         assert provider.config.steps == 5
-        cm.get_config.assert_called_once_with("text2image_config", "tools")
+        cm.get_config.assert_called_once_with("prompt2image_config", "tools")
 
     def test_execute_success_populates_image_paths(self) -> None:
         gen = Mock()
@@ -552,16 +605,16 @@ class TestText2ImageToolProvider:
                 "elapsed": 0.1,
             }
         )
-        result = self._provider(gen=gen).execute("text2image a red apple")
+        result = self._provider(gen=gen).execute("prompt2image a red apple")
         assert result.image_paths == ["/tmp/out.png"]
 
     def test_execute_failure_has_empty_image_paths(self) -> None:
         gen = Mock()
-        gen.generate = Mock(side_effect=Text2ImageError("offline"))
-        result = self._provider(gen=gen).execute("text2image a red apple")
+        gen.generate = Mock(side_effect=Prompt2ImageError("offline"))
+        result = self._provider(gen=gen).execute("prompt2image a red apple")
         assert result.success is False
         assert result.image_paths == []
 
     def test_execute_empty_prompt_has_empty_image_paths(self) -> None:
-        result = self._provider(gen=Mock()).execute("text2image")
+        result = self._provider(gen=Mock()).execute("prompt2image")
         assert result.image_paths == []
