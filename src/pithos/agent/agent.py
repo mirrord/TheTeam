@@ -1051,6 +1051,22 @@ class Agent(ABC):
             except Exception:
                 pass  # optional feature — silently skip if deps are missing
 
+        # Optionally add a craft-analysis provider.
+        craft_config = tool_config.get("craft_analysis", {})
+        if craft_config.get("enabled", False):
+            try:
+                from ..tools.craft_analyzer import (
+                    CRAFT_ANALYSIS_AVAILABLE,
+                    CraftAnalyzerToolExecutor,
+                )
+
+                if CRAFT_ANALYSIS_AVAILABLE:
+                    providers.append(
+                        CraftAnalyzerToolExecutor(config_manager=config_manager)
+                    )
+            except Exception:
+                pass  # optional feature — silently skip if deps are missing
+
         # Optionally add a prompt2image provider.
         t2i_config = tool_config.get("prompt2image", {})
         if t2i_config.get("enabled", False):

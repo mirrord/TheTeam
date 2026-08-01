@@ -137,6 +137,7 @@ pithos-agent chat glm-4.7-flash:latest --flowchart simple_reflect
 - **Tool Calling**: Enable agents to execute CLI commands dynamically
 - **Web Research Tool**: Subagent-driven web crawler (`web-research`) restricted to a configurable domain whitelist, with deduplicated excerpt storage and a cited summary report
 - **News Research Tool**: Recent-news collector (`research-news`) that derives search terms with a small model, scrapes recent (configurable age) articles from whitelisted domains/RSS feeds into the knowledge base, and summarises + relevance-judges each article via a subagent
+- **Craft Analysis Tool**: Creative-writing craft analyzer (`craft-notes`) that ingests a story (text, file, or directory of files) and produces prescriptive how-to notes across characterization, scene construction, themes, prose style, dialogue, and plot structure, persisted to the knowledge base
 - **Text-to-Image Tool**: Generate images from text prompts with a local model (`prompt2image`). Pluggable backends: Automatic1111/Forge HTTP API, ComfyUI node-graph API, or in-process Hugging Face `diffusers`
 - **Conditions**: Define conditional logic for flowchart branching
 - **Configuration**: YAML-based configuration for agents, flowcharts, and conditions
@@ -739,6 +740,31 @@ base, and a subagent summarises and relevance-judges each one. Relevant
 articles are collected into a Markdown document under `data/research/news/`.
 See [docs/NEWS_RESEARCH.md](docs/NEWS_RESEARCH.md) for architecture,
 configuration, and the in-flowchart `researchnews` node.
+
+### pithos-craft-notes
+
+Creative-writing craft analysis CLI. No optional dependencies required.
+
+```bash
+# Analyze a single story file
+pithos-craft-notes story.txt
+
+# Analyze a directory of story files, limited to specific dimensions
+pithos-craft-notes --roots ./data/research/stories --dimension dialogue
+
+# Analyze raw text directly
+pithos-craft-notes --text "Once upon a time, a knight faced a dragon."
+
+# Machine-readable JSON output (notes by dimension + stats)
+pithos-craft-notes story.txt --json
+```
+
+A subagent analyzes the story across six craft dimensions (characterization,
+scene construction, themes, prose style and voice, dialogue, plot structure
+and pacing) and produces prescriptive how-to notes grounded in short evidence
+quotes, persisted to the knowledge base and collected into a Markdown document
+under `data/research/craft/`. See [docs/CRAFT_ANALYSIS.md](docs/CRAFT_ANALYSIS.md)
+for architecture, configuration, and the in-flowchart `craftnotes` node.
 
 ### pithos-prompt2image
 

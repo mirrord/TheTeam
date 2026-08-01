@@ -1,0 +1,38 @@
+enabled: true
+
+# --- Dimensions ----------------------------------------------------------
+# Craft dimensions analyzed; each produces its own set of prescriptive notes.
+dimensions:
+  - characterization
+  - scene_construction
+  - themes
+  - prose_style_and_voice
+  - dialogue
+  - plot_structure_and_pacing
+
+# --- Ingestion (used when the source is a directory of files) ------------
+include:
+  - "**/*.txt"
+  - "**/*.md"
+exclude: []
+max_files: 200
+
+# --- Chunking --------------------------------------------------------------
+chunk_char_cap: 6000     # max characters per chunk sent to the model
+chunk_overlap: 300       # chars of overlap between consecutive chunks
+max_chunks: 20            # hard cap on chunks analyzed per run
+
+# --- Craft-analyst subagent ------------------------------------------------
+subagent_config_name: "craft_analyst"  # configs/agents/craft_analyst.yaml
+subagent_model: null                    # null = use agent config value
+max_notes_per_dimension: 8
+dedup_notes: true
+
+# --- Knowledge base (persistent memory store) ------------------------------
+note_category: "craft_notes"       # KB category for prescriptive notes
+source_category: "craft_sources"   # KB category for analyzed source text
+memory_persist_directory: null     # null = MemoryStore default (./data/memory)
+
+# --- Output ------------------------------------------------------------
+output_dir: "./data/research/craft"
+write_document: true

@@ -20,11 +20,47 @@ mode: strict
 
 # List of tools to include (used when mode is 'include')
 include:
-  # --- Python ---
+  # --- Flowcharts (virtual tool) ---
+  - flowchart
+  # --- Web research (virtual tool) ---
+  - web-research
+  # --- News research (virtual tool) ---
+  - research-news
+  # --- Craft analysis (virtual tool) ---
+  - craft-notes
+  # --- Text-to-image (virtual tool) ---
+  - prompt2image
+
+# List of tools that require interactive user confirmation before execution.
+# In 'strict' and 'standard' modes the user must approve each call before it runs.
+# In 'permissive' mode these tools are auto-approved (no prompt shown).
+# If denied, the agent receives "Denied by user." as the tool result.
+# Example: uncomment the line below to require confirmation for shell access.
+# confirm:
+#   - bash
+#   - powershell
+confirm:
+  # --- Shell interpreters ---
+  - powershell
+  - pwsh
+  - cmd
+  - bash
+  - sh
+  - wsl
+
+# List of tools to exclude (used when mode is 'exclude' or 'all')
+# These are dangerous commands that should never be allowed
+exclude:
+ # --- Python ---
   - python
   - python3
   - pip
   - pip3
+  # --- Name collision with the prompt2image virtual tool ---
+  # Tesseract-OCR's training tools ship a real `prompt2image` binary (renders
+  # OCR training images using Pango/Fontconfig). Exclude it explicitly so it
+  # is never discovered as a CLI tool, even in 'standard'/'permissive' mode.
+  - prompt2image
   # --- Network ---
   - curl
   - wget
@@ -77,35 +113,7 @@ include:
   - hostname
   - date
   - uname
-  # --- Flowcharts (virtual tool) ---
-  - flowchart
-  # --- Web research (virtual tool) ---
-  - web-research
-  # --- News research (virtual tool) ---
-  - research-news
-  # --- Text-to-image (virtual tool) ---
-  - text2image
-
-# List of tools that require interactive user confirmation before execution.
-# In 'strict' and 'standard' modes the user must approve each call before it runs.
-# In 'permissive' mode these tools are auto-approved (no prompt shown).
-# If denied, the agent receives "Denied by user." as the tool result.
-# Example: uncomment the line below to require confirmation for shell access.
-# confirm:
-#   - bash
-#   - powershell
-confirm:
-  # --- Shell interpreters ---
-  - powershell
-  - pwsh
-  - cmd
-  - bash
-  - sh
-  - wsl
-
-# List of tools to exclude (used when mode is 'exclude' or 'all')
-# These are dangerous commands that should never be allowed
-exclude:
+  # --- ^^ taken from the default allowlist in pithos, but removed for safety. ---
   - rm
   - rmdir
   - del
@@ -160,12 +168,22 @@ web_research:
 news_research:
   enabled: true
 
+# Craft analysis virtual tool configuration
+# When enabled, the agent can invoke `craft-notes <file path or raw text>` to
+# analyze a story's creative-writing craft and produce prescriptive how-to
+# notes. Full settings live in craft_analysis_config.yaml.
+craft_analysis:
+  enabled: true
+
 # Text-to-image virtual tool configuration
-# When enabled, the agent can invoke `text2image <prompt>` to render an image
-# with a local model. Full settings live in text2image_config.yaml.
+# When enabled, the agent can invoke `prompt2image <prompt>` to render an image
+# with a local model. Full settings live in prompt2image_config.yaml.
 # Disabled by default because the diffusers backend pulls in heavy deps
 # (torch); enable after configuring a backend.
-text2image:
+# Note: the agent-facing tool name is `prompt2image`, not `prompt2image` — the
+# latter collides with the real `prompt2image` binary from Tesseract's OCR
+# training tools, which some systems have on PATH (see `exclude` below).
+prompt2image:
   enabled: false
 
 # Manual tool descriptions (override auto-discovered descriptions)
@@ -235,7 +253,8 @@ descriptions:
   flowchart: "Run a registered pithos flowchart. Usage: flowchart <name> [input text]"
   web-research: "Subagent-driven web research over whitelisted domains. Usage: web-research <inquiry text>"
   research-news: "Collect and summarise recent news articles from whitelisted domains. Usage: research-news <inquiry text>"
-  text2image: "Generate an image from a text prompt with a local model. Usage: text2image <prompt text>"
+  craft-notes: "Analyze a story's creative-writing craft and produce prescriptive how-to notes. Usage: craft-notes <file path or raw text>"
+  prompt2image: "Generate an image from a text prompt with a local model. Usage: prompt2image <prompt text>"
 
 # Command safety analysis configuration
 # Evaluates each command's arguments and flags before execution, independently
