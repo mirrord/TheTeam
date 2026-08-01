@@ -79,6 +79,10 @@ class ToolsConfig:
         flowcharts: Optional override for the flowchart virtual tool.
         prompt2image: Optional override for the text-to-image virtual tool
             (``{"enabled": true/false}``).
+        craft_writing: Optional override for the craft-write virtual tool
+            (``{"enabled": true/false}``).
+        news_research: Optional override for the research-news virtual tool
+            (``{"enabled": true/false}``).
     """
 
     enabled: bool = DEFAULT_TOOLS
@@ -90,6 +94,8 @@ class ToolsConfig:
     web_research: Optional[dict[str, bool]] = None  # enable web search tool
     flowcharts: Optional[dict[str, Any]] = None
     prompt2image: Optional[dict[str, bool]] = None  # enable text-to-image tool
+    craft_writing: Optional[dict[str, bool]] = None  # enable craft-write tool
+    news_research: Optional[dict[str, bool]] = None  # enable research-news tool
 
 
 @dataclass
@@ -361,6 +367,10 @@ def build_agent(config: TalosConfig) -> OllamaAgent:
         tool_overrides["web_research"] = tc.web_research
     if tc.prompt2image is not None:
         tool_overrides["prompt2image"] = tc.prompt2image
+    if tc.craft_writing is not None:
+        tool_overrides["craft_writing"] = tc.craft_writing
+    if tc.news_research is not None:
+        tool_overrides["news_research"] = tc.news_research
 
     needs_override = tc.enabled and (
         tc.mode != DEFAULT_TOOLS_MODE or tool_overrides or tc.allow or tc.deny

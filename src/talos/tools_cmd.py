@@ -43,6 +43,11 @@ VIRTUAL_TOOLS: dict[str, str] = {
     "prompt2image": "prompt2image",
     "flowcharts": "flowcharts",
     "flowchart": "flowcharts",
+    "craft-write": "craft_writing",
+    "craft_writing": "craft_writing",
+    "research-news": "news_research",
+    "news-research": "news_research",
+    "news_research": "news_research",
 }
 
 
@@ -66,6 +71,10 @@ def _make_config_manager(tc: ToolsConfig) -> ConfigManager:
         tool_overrides["web_research"] = tc.web_research
     if tc.prompt2image is not None:
         tool_overrides["prompt2image"] = tc.prompt2image
+    if tc.craft_writing is not None:
+        tool_overrides["craft_writing"] = tc.craft_writing
+    if tc.news_research is not None:
+        tool_overrides["news_research"] = tc.news_research
 
     needs_override = (
         tc.mode != DEFAULT_TOOLS_MODE
@@ -150,6 +159,32 @@ def _build_registry(tc: ToolsConfig, cm: ConfigManager):
 
             if TEXT2IMAGE_AVAILABLE:
                 providers.append(Prompt2ImageToolProvider(config_manager=cm))
+        except Exception:
+            pass
+
+    craft_write_config = tool_config.get("craft_writing", {})
+    if craft_write_config.get("enabled", False):
+        try:
+            from pithos.tools.craft_writer import (
+                CRAFT_WRITING_AVAILABLE,
+                CraftWriterToolExecutor,
+            )
+
+            if CRAFT_WRITING_AVAILABLE:
+                providers.append(CraftWriterToolExecutor(config_manager=cm))
+        except Exception:
+            pass
+
+    news_config = tool_config.get("news_research", {})
+    if news_config.get("enabled", False):
+        try:
+            from pithos.tools.news_researcher import (
+                NEWS_RESEARCH_AVAILABLE,
+                NewsResearcherToolExecutor,
+            )
+
+            if NEWS_RESEARCH_AVAILABLE:
+                providers.append(NewsResearcherToolExecutor(config_manager=cm))
         except Exception:
             pass
 
@@ -273,7 +308,14 @@ def cmd_list(config: TalosConfig, config_path: Path) -> None:
         ttype = meta.tool_type if meta else "cli"
         if ttype == "flowchart":
             flowchart_entries.append((name, meta))
-        elif ttype in ("web_research", "memory", "prompt2image"):
+        elif ttype in (
+            "web_research",
+            "memory",
+            "prompt2image",
+            "image",
+            "craft_writing",
+            "news_research",
+        ):
             virtual_entries.append((name, meta))
         else:
             cli_entries.append((name, meta))
@@ -522,6 +564,8 @@ def cmd_list_all(config: TalosConfig, config_path: Path) -> None:
             "web-research": ("web_research", tool_config.get("web_research", {})),
             "prompt2image": ("prompt2image", tool_config.get("prompt2image", {})),
             "flowcharts": ("flowcharts", tool_config.get("flowcharts", {})),
+            "craft-write": ("craft_writing", tool_config.get("craft_writing", {})),
+            "research-news": ("news_research", tool_config.get("news_research", {})),
         }
         for vname, (_, vcfg) in _vmap.items():
             enabled = vcfg.get("enabled", False)
@@ -546,6 +590,8 @@ def cmd_list_all(config: TalosConfig, config_path: Path) -> None:
             "web-research": tool_config.get("web_research", {}),
             "prompt2image": tool_config.get("prompt2image", {}),
             "flowcharts": tool_config.get("flowcharts", {}),
+            "craft-write": tool_config.get("craft_writing", {}),
+            "research-news": tool_config.get("news_research", {}),
         }
         for vname, vcfg in _vmap.items():
             enabled = vcfg.get("enabled", False)

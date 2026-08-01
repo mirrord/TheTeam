@@ -113,6 +113,46 @@ def test_enable_flowchart_alias(tmp_path: Path) -> None:
     assert reloaded.agent.tools.flowcharts == {"enabled": True}
 
 
+def test_enable_craft_write_virtual(tmp_path: Path) -> None:
+    cfg = _make_config(enabled=True)
+    path = tmp_path / "config.yaml"
+    save_config(cfg, path)
+    cmd_enable("craft-write", cfg, path)
+    reloaded = load_config(path)
+    assert reloaded.agent.tools.craft_writing == {"enabled": True}
+    # Should not appear in allow list.
+    assert "craft-write" not in reloaded.agent.tools.allow
+
+
+def test_enable_craft_writing_alias(tmp_path: Path) -> None:
+    cfg = _make_config(enabled=True)
+    path = tmp_path / "config.yaml"
+    save_config(cfg, path)
+    cmd_enable("craft_writing", cfg, path)
+    reloaded = load_config(path)
+    assert reloaded.agent.tools.craft_writing == {"enabled": True}
+
+
+def test_enable_research_news_virtual(tmp_path: Path) -> None:
+    cfg = _make_config(enabled=True)
+    path = tmp_path / "config.yaml"
+    save_config(cfg, path)
+    cmd_enable("research-news", cfg, path)
+    reloaded = load_config(path)
+    assert reloaded.agent.tools.news_research == {"enabled": True}
+    # Should not appear in allow list.
+    assert "research-news" not in reloaded.agent.tools.allow
+
+
+def test_enable_news_research_alias(tmp_path: Path) -> None:
+    cfg = _make_config(enabled=True)
+    path = tmp_path / "config.yaml"
+    save_config(cfg, path)
+    cmd_enable("news_research", cfg, path)
+    reloaded = load_config(path)
+    assert reloaded.agent.tools.news_research == {"enabled": True}
+
+
 # ---------------------------------------------------------------------------
 # cmd_disable
 # ---------------------------------------------------------------------------
@@ -173,6 +213,37 @@ def test_disable_flowcharts_virtual(tmp_path: Path) -> None:
     reloaded = load_config(path)
     assert reloaded.agent.tools.flowcharts["enabled"] is False
     assert reloaded.agent.tools.flowcharts.get("max_steps") == 50
+
+
+def test_disable_craft_write_virtual(tmp_path: Path) -> None:
+    cfg = _make_config(enabled=True, craft_writing={"enabled": True})
+    path = tmp_path / "config.yaml"
+    save_config(cfg, path)
+    cmd_disable("craft-write", cfg, path)
+    reloaded = load_config(path)
+    assert reloaded.agent.tools.craft_writing == {"enabled": False}
+    assert "craft-write" not in reloaded.agent.tools.deny
+
+
+def test_craft_write_in_virtual_tools_map() -> None:
+    assert VIRTUAL_TOOLS["craft-write"] == "craft_writing"
+    assert VIRTUAL_TOOLS["craft_writing"] == "craft_writing"
+
+
+def test_disable_research_news_virtual(tmp_path: Path) -> None:
+    cfg = _make_config(enabled=True, news_research={"enabled": True})
+    path = tmp_path / "config.yaml"
+    save_config(cfg, path)
+    cmd_disable("research-news", cfg, path)
+    reloaded = load_config(path)
+    assert reloaded.agent.tools.news_research == {"enabled": False}
+    assert "research-news" not in reloaded.agent.tools.deny
+
+
+def test_research_news_in_virtual_tools_map() -> None:
+    assert VIRTUAL_TOOLS["research-news"] == "news_research"
+    assert VIRTUAL_TOOLS["news-research"] == "news_research"
+    assert VIRTUAL_TOOLS["news_research"] == "news_research"
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +354,8 @@ def _minimal_tool_config(
         "flowcharts": {"enabled": True},
         "web_research": {"enabled": False},
         "prompt2image": {"enabled": False},
+        "craft_writing": {"enabled": True},
+        "news_research": {"enabled": True},
     }
 
 
@@ -350,6 +423,10 @@ def test_list_all_virtual_tools_shown(tmp_path: Path, capsys) -> None:
     assert "web-research" in out
     assert "flowcharts" in out
     assert "prompt2image" in out
+    assert "craft-write" in out
+    assert "research-news" in out
+    assert "enabled" in out
+    assert "enabled" in out
 
 
 # ---------------------------------------------------------------------------
