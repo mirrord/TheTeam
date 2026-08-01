@@ -28,6 +28,8 @@ include:
   - research-news
   # --- Craft analysis (virtual tool) ---
   - craft-notes
+  # --- Craft writing (virtual tool) ---
+  - craft-write
   # --- Text-to-image (virtual tool) ---
   - prompt2image
 
@@ -175,6 +177,13 @@ news_research:
 craft_analysis:
   enabled: true
 
+# Craft writing virtual tool configuration
+# When enabled, the agent can invoke `craft-write <direction text>` to write a
+# short story guided by craft notes previously produced by craft-notes. Full
+# settings live in craft_writing_config.yaml.
+craft_writing:
+  enabled: true
+
 # Text-to-image virtual tool configuration
 # When enabled, the agent can invoke `prompt2image <prompt>` to render an image
 # with a local model. Full settings live in prompt2image_config.yaml.
@@ -254,6 +263,7 @@ descriptions:
   web-research: "Subagent-driven web research over whitelisted domains. Usage: web-research <inquiry text>"
   research-news: "Collect and summarise recent news articles from whitelisted domains. Usage: research-news <inquiry text>"
   craft-notes: "Analyze a story's creative-writing craft and produce prescriptive how-to notes. Usage: craft-notes <file path or raw text>"
+  craft-write: "Write a short story guided by previously analyzed craft notes. Usage: craft-write <direction text>"
   prompt2image: "Generate an image from a text prompt with a local model. Usage: prompt2image <prompt text>"
 
 # Command safety analysis configuration

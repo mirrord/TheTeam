@@ -1027,6 +1027,112 @@ class CraftNotesNode(FlowNode):
         return {self.save_to: payload, "current_input": markdown}
 
 
+class CraftWriteNode(FlowNode):
+    """Node that runs the CraftWriter tool to write a story from direction.
+
+    The ``direction`` template is formatted from the current execution
+    context (so ``{current_input}`` and other state variables are
+    supported). The resulting :class:`CraftStory` is stored under
+    ``save_to`` as a dict and the rendered Markdown story becomes the
+    ``current_input`` for downstream nodes.
+    """
+
+    def __init__(
+        self,
+        direction: str = "{current_input}",
+        save_to: str = "craft_story",
+        title: Optional[str] = None,
+        genre: Optional[str] = None,
+        tone: Optional[str] = None,
+        source_title: Optional[str] = None,
+        dimensions: Optional[list[str]] = None,
+        error_handling: str = "continue",
+        extraction: Optional[dict[str, str]] = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(extraction, **kwargs)
+        self.direction = direction
+        self.save_to = save_to
+        self.title = title
+        self.genre = genre
+        self.tone = tone
+        self.source_title = source_title
+        self.dimensions = list(dimensions) if dimensions else None
+        self.error_handling = error_handling
+
+    def _execute(self, context: dict[str, Any]) -> Any:
+        """Run the craft-writing pipeline and return the story payload."""
+        direction_text = self._stateful_format(self.direction, context)
+
+        writer = context.get("craft_writer")
+        config_manager = context.get("config_manager")
+
+        if writer is None and config_manager is not None:
+            try:
+                from .tools.craft_writer import CRAFT_WRITING_AVAILABLE, CraftWriter
+
+                if CRAFT_WRITING_AVAILABLE:
+                    writer = CraftWriter(config_manager)
+            except Exception as exc:
+                if self.error_handling == "stop":
+                    raise RuntimeError(f"craft writer unavailable: {exc}") from exc
+                writer = None
+
+        if writer is None:
+            err = {
+                "title": self.title or "untitled",
+                "sections": [],
+                "errors": ["craft_writer not configured"],
+                "stats": {},
+            }
+            if self.error_handling == "stop":
+                raise RuntimeError("Craft writing is not available")
+            return {
+                self.save_to: err,
+                "current_input": "Craft writing is not available in this flowchart context.",
+            }
+
+        from .tools.craft_writer.models import CraftWriteRequest
+
+        request = CraftWriteRequest(
+            direction=direction_text,
+            title=self.title,
+            genre=self.genre,
+            tone=self.tone,
+            source_title=self.source_title,
+            dimensions_override=self.dimensions,
+        )
+
+        try:
+            story = writer.write(request)
+        except Exception as exc:
+            if self.error_handling == "stop":
+                raise
+            err = {
+                "title": self.title or "untitled",
+                "sections": [],
+                "errors": [str(exc)],
+                "stats": {},
+            }
+            return {self.save_to: err, "current_input": f"Craft writing failed: {exc}"}
+
+        markdown = story.to_markdown()
+        payload = {
+            "title": story.title,
+            "premise": story.premise,
+            "markdown": markdown,
+            "full_text": story.full_text,
+            "sections": [
+                {"heading": s.heading, "summary": s.summary, "text": s.text}
+                for s in story.sections
+            ],
+            "document_path": story.document_path,
+            "stats": dict(story.stats),
+            "errors": list(story.errors),
+        }
+        return {self.save_to: payload, "current_input": story.full_text or markdown}
+
+
 class TextParseNode(FlowNode):
     """Node that parses and extracts information from text input.
 
@@ -1510,6 +1616,9 @@ def create_node(node_type: str, data: dict[str, Any]) -> Optional[FlowNode]:
         "craftnotes": CraftNotesNode,
         "craftanalysis": CraftNotesNode,
         "craftnotesnode": CraftNotesNode,
+        "craftwrite": CraftWriteNode,
+        "craftwriter": CraftWriteNode,
+        "writestory": CraftWriteNode,
         "textparse": TextParseNode,
         "textparsenode": TextParseNode,
         "agentprompt": AgentPromptNode,

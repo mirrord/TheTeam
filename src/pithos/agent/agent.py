@@ -1067,6 +1067,22 @@ class Agent(ABC):
             except Exception:
                 pass  # optional feature — silently skip if deps are missing
 
+        # Optionally add a craft-writing provider.
+        craft_write_config = tool_config.get("craft_writing", {})
+        if craft_write_config.get("enabled", False):
+            try:
+                from ..tools.craft_writer import (
+                    CRAFT_WRITING_AVAILABLE,
+                    CraftWriterToolExecutor,
+                )
+
+                if CRAFT_WRITING_AVAILABLE:
+                    providers.append(
+                        CraftWriterToolExecutor(config_manager=config_manager)
+                    )
+            except Exception:
+                pass  # optional feature — silently skip if deps are missing
+
         # Optionally add a prompt2image provider.
         t2i_config = tool_config.get("prompt2image", {})
         if t2i_config.get("enabled", False):

@@ -138,6 +138,7 @@ pithos-agent chat glm-4.7-flash:latest --flowchart simple_reflect
 - **Web Research Tool**: Subagent-driven web crawler (`web-research`) restricted to a configurable domain whitelist, with deduplicated excerpt storage and a cited summary report
 - **News Research Tool**: Recent-news collector (`research-news`) that derives search terms with a small model, scrapes recent (configurable age) articles from whitelisted domains/RSS feeds into the knowledge base, and summarises + relevance-judges each article via a subagent
 - **Craft Analysis Tool**: Creative-writing craft analyzer (`craft-notes`) that ingests a story (text, file, or directory of files) and produces prescriptive how-to notes across characterization, scene construction, themes, prose style, dialogue, and plot structure, persisted to the knowledge base
+- **Craft Writing Tool**: Subagent-driven story writer (`craft-write`) that retrieves craft notes from the knowledge base and drives a 3-stage outline → per-section draft → revision pipeline to write a short story from freeform direction
 - **Text-to-Image Tool**: Generate images from text prompts with a local model (`prompt2image`). Pluggable backends: Automatic1111/Forge HTTP API, ComfyUI node-graph API, or in-process Hugging Face `diffusers`
 - **Conditions**: Define conditional logic for flowchart branching
 - **Configuration**: YAML-based configuration for agents, flowcharts, and conditions
@@ -765,6 +766,32 @@ and pacing) and produces prescriptive how-to notes grounded in short evidence
 quotes, persisted to the knowledge base and collected into a Markdown document
 under `data/research/craft/`. See [docs/CRAFT_ANALYSIS.md](docs/CRAFT_ANALYSIS.md)
 for architecture, configuration, and the in-flowchart `craftnotes` node.
+
+### pithos-craft-write
+
+Subagent-driven story-writing CLI. No optional dependencies required.
+
+```bash
+# Write a story from a direction
+pithos-craft-write "a heist gone wrong, melancholy tone"
+
+# Guide genre/tone and give an explicit title
+pithos-craft-write --title "The Last Job" --genre thriller --tone tense "a heist gone wrong"
+
+# Restrict retrieved notes to one previously analyzed story
+pithos-craft-write --source-title "Some Analyzed Story" --json "a quiet reunion"
+
+# Skip the revision pass and target a shorter story
+pithos-craft-write --no-revise --words 800 "a quiet reunion"
+```
+
+A subagent retrieves craft notes previously produced by `pithos-craft-notes`
+from the knowledge base and drives a 3-stage pipeline (outline → per-section
+draft → optional revision) to write a short story guided by them. The
+finished story is persisted to the knowledge base and collected into a
+Markdown document under `data/research/stories/`. See
+[docs/CRAFT_WRITING.md](docs/CRAFT_WRITING.md) for architecture,
+configuration, and the in-flowchart `craftwrite` node.
 
 ### pithos-prompt2image
 

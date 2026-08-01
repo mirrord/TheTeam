@@ -1,0 +1,22 @@
+enabled: true
+dimensions:
+  - characterization
+  - scene_construction
+  - themes
+  - prose_style_and_voice
+  - dialogue
+  - plot_structure_and_pacing
+notes_per_dimension: 5
+min_relevance: null
+note_category: "craft_notes"
+story_category: "craft_stories"
+memory_persist_directory: null  # null = MemoryStore default
+subagent_config_name: "craft_writer"
+subagent_model: null
+target_word_count: 2000
+num_sections: null  # null = derive from target_word_count
+revision_passes: 1
+story_context_char_cap: 8000
+output_dir: "./data/research/stories"
+write_document: true
+store_story: true
