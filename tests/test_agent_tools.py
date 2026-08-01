@@ -55,38 +55,35 @@ exclude: []
 
         enhanced_prompt = agent.contexts["default"].get_system_prompt()
         assert len(enhanced_prompt) > len(initial_prompt)
-        # Check for new multi-format support
-        assert any(
-            keyword in enhanced_prompt
-            for keyword in ["RUN:", "run(", "Tool Call Formats"]
-        )
+        # Check for bracket-format tool call instructions.
+        assert any(keyword in enhanced_prompt for keyword in ["[RUN]", "bracket"])
         assert "Available tools" in enhanced_prompt
 
     def test_extract_tool_calls(self, agent):
-        """Test extracting tool calls from agent response with multiple formats."""
-        # Legacy format - double quotes
-        content1 = 'Let me check: runcommand("python --version")'
+        """Test extracting bracket-style tool calls from agent response."""
+        # Bracket format - [RUN]...[/RUN]
+        content1 = "Let me check: [RUN]python --version[/RUN]"
         calls1 = agent._extract_tool_calls(content1)
         assert len(calls1) == 1
         assert calls1[0].command == "python --version"
-        assert calls1[0].format == "legacy"
+        assert calls1[0].format == "bracket"
 
-        # CLI-style format
-        content2 = "Let me check:\nRUN: python --version"
+        # Bracket format - <RUN>...</RUN>
+        content2 = "Let me check:\n<RUN>python --version</RUN>"
         calls2 = agent._extract_tool_calls(content2)
         assert len(calls2) == 1
         assert calls2[0].command == "python --version"
-        assert calls2[0].format == "cli"
+        assert calls2[0].format == "bracket"
 
-        # Function-style format
-        content3 = "Let me check: run(python --version)"
+        # Bracket format - [EXEC]...[/EXEC]
+        content3 = "Let me check: [EXEC]python --version[/EXEC]"
         calls3 = agent._extract_tool_calls(content3)
         assert len(calls3) == 1
         assert calls3[0].command == "python --version"
-        assert calls3[0].format == "function"
+        assert calls3[0].format == "bracket"
 
-        # Multiple calls with mixed formats
-        content4 = 'First runcommand("python --version") then\nRUN: echo done'
+        # Multiple bracket calls
+        content4 = "First [RUN]python --version[/RUN] then\n[RUN]echo done[/RUN]"
         calls4 = agent._extract_tool_calls(content4)
         assert len(calls4) == 2
         commands = [call.command for call in calls4]
@@ -153,7 +150,7 @@ exclude: []
 
         # Create tool request
         request = ToolCallRequest(
-            command="echo test", format="cli", raw_text="RUN: echo test"
+            command="echo test", format="bracket", raw_text="[RUN]echo test[/RUN]"
         )
 
         # Execute tools
@@ -170,9 +167,7 @@ exclude: []
 
         # First stream: LLM emits a tool call mid-response.
         mock_tool_chunk = Mock()
-        mock_tool_chunk.message.content = (
-            'Let me check: runcommand("python --version")\n'
-        )
+        mock_tool_chunk.message.content = "Let me check: [RUN]python --version[/RUN]\n"
         # Continuation stream after tool result injected.
         mock_cont_chunk = Mock()
         mock_cont_chunk.message.content = "The Python version is 3.10.0."
@@ -209,7 +204,7 @@ exclude: []
         assert agent.tool_executor is None
 
         # Extract should return empty list
-        calls = agent._extract_tool_calls('runcommand("test")')
+        calls = agent._extract_tool_calls("[RUN]test[/RUN]")
         assert isinstance(calls, list)
 
     @patch("pithos.agent.ollama_agent.chat")

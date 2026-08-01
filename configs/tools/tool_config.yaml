@@ -9,14 +9,14 @@ timeout: 30
 # Maximum size of captured output (bytes)
 max_output_size: 10000
 
-# Filtering mode: 'include', 'exclude', 'all', or 'confirm'
-# - 'include': Only tools in the include list are allowed
-# - 'exclude': All tools except those in exclude list are allowed
-# - 'all': All discovered tools are allowed (apply exclude list only)
-# - 'confirm': Only tools in the confirm list are allowed, but each call
-#              requires explicit user approval before execution. If the user
-#              denies, the agent receives "Denied by user." as the result.
-mode: include
+# Filtering mode: 'strict', 'standard', or 'permissive'
+# - 'strict':     Only tools in the include list are allowed.
+#                 Tools in the confirm group require user approval before running.
+# - 'standard':   All discovered tools are allowed except those in the exclude list.
+#                 Tools in the confirm group require user approval before running.
+# - 'permissive': All discovered tools are allowed except those in the exclude list.
+#                 Tools in the confirm group are auto-approved (no user prompt).
+mode: strict
 
 # List of tools to include (used when mode is 'include')
 include:
@@ -81,9 +81,14 @@ include:
   - flowchart
   # --- Web research (virtual tool) ---
   - web-research
+  # --- News research (virtual tool) ---
+  - research-news
+  # --- Text-to-image (virtual tool) ---
+  - text2image
 
-# List of tools that require user confirmation before execution (used when mode is 'confirm').
-# Tools in this list are allowed, but the user must approve each call before it runs.
+# List of tools that require interactive user confirmation before execution.
+# In 'strict' and 'standard' modes the user must approve each call before it runs.
+# In 'permissive' mode these tools are auto-approved (no prompt shown).
 # If denied, the agent receives "Denied by user." as the tool result.
 # Example: uncomment the line below to require confirmation for shell access.
 # confirm:
@@ -147,6 +152,21 @@ flowcharts:
 # subagent-driven crawler. Full settings live in web_research_config.yaml.
 web_research:
   enabled: true
+
+# News research virtual tool configuration
+# When enabled, the agent can invoke `research-news <inquiry>` to collect and
+# summarise recent articles from whitelisted domains/feeds. Full settings live
+# in news_research_config.yaml.
+news_research:
+  enabled: true
+
+# Text-to-image virtual tool configuration
+# When enabled, the agent can invoke `text2image <prompt>` to render an image
+# with a local model. Full settings live in text2image_config.yaml.
+# Disabled by default because the diffusers backend pulls in heavy deps
+# (torch); enable after configuring a backend.
+text2image:
+  enabled: false
 
 # Manual tool descriptions (override auto-discovered descriptions)
 descriptions:
@@ -214,6 +234,8 @@ descriptions:
   uname: "Display system information (Unix)"
   flowchart: "Run a registered pithos flowchart. Usage: flowchart <name> [input text]"
   web-research: "Subagent-driven web research over whitelisted domains. Usage: web-research <inquiry text>"
+  research-news: "Collect and summarise recent news articles from whitelisted domains. Usage: research-news <inquiry text>"
+  text2image: "Generate an image from a text prompt with a local model. Usage: text2image <prompt text>"
 
 # Command safety analysis configuration
 # Evaluates each command's arguments and flags before execution, independently

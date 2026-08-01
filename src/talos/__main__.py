@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from .config import ensure_config, build_agent
+from .config import ensure_config, build_agent, load_config
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -41,8 +41,42 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="interface", required=False)
     sub.add_parser("shell", help="Interactive stdin/stdout chat.")
     sub.add_parser("voice", help="Wake-word voice interface (speech-to-speech).")
-    sub.add_parser("telegram", help="Telegram bot interface.")
+    telegram_p = sub.add_parser("telegram", help="Telegram bot interface.")
+    telegram_p.add_argument(
+        "--show",
+        action="store_true",
+        help="Mirror the conversation to stdout and stream the agent's response.",
+    )
     sub.add_parser("config", help="Run the setup wizard and exit.")
+
+    # ---- tools subcommand --------------------------------------------------
+    tools_parser = sub.add_parser(
+        "tools",
+        help="Manage tools available to the Talos agent.",
+    )
+    tools_sub = tools_parser.add_subparsers(
+        dest="tools_action", metavar="ACTION", required=True
+    )
+
+    enable_p = tools_sub.add_parser(
+        "enable", help="Allow a tool (adds to local allow list)."
+    )
+    enable_p.add_argument("tool_name", metavar="TOOL", help="Tool name to enable.")
+
+    disable_p = tools_sub.add_parser(
+        "disable", help="Block a tool (adds to local deny list)."
+    )
+    disable_p.add_argument("tool_name", metavar="TOOL", help="Tool name to disable.")
+
+    tools_sub.add_parser(
+        "list", help="List tools currently available to the Talos agent."
+    )
+    tools_sub.add_parser("ls", help="Alias for list.")
+    tools_sub.add_parser(
+        "list-all",
+        help="List all configured tools with their availability status.",
+    )
+    # ------------------------------------------------------------------------
 
     mic = sub.add_parser(
         "mic-test",
@@ -90,6 +124,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         parser.print_help()
         return 1
 
+    # tools subcommand does not require a full agent build — handle early.
+    if args.interface == "tools":
+        from .tools_cmd import run as run_tools
+        from .config import DEFAULT_CONFIG_PATH
+
+        config_path = Path(args.config) if args.config else DEFAULT_CONFIG_PATH
+        return run_tools(args, config_path)
+
     config, path = ensure_config(args.config, force_wizard=args.reconfigure)
 
     if args.interface == "config":
@@ -133,7 +175,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         except ImportError as exc:
             print(f"Telegram interface unavailable: {exc}", file=sys.stderr)
             return 2
-        TelegramInterface(agent, config.telegram).run()
+        TelegramInterface(agent, config.telegram, show=args.show).run()
         return 0
 
     parser.print_help()

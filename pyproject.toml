@@ -57,6 +57,13 @@ web = [
   "beautifulsoup4>=4.12.0",
   "trafilatura>=1.6.0",
 ]
+image = [
+  "diffusers>=0.27.0",
+  "torch>=2.0.0",
+  "Pillow>=10.0.0",
+  "accelerate>=0.27.0",
+  "transformers>=4.40.0",
+]
 talos = [
   "rich>=13.0.0",
   "numpy>=1.24.0",
@@ -80,6 +87,8 @@ pithos-flowcharts = "pithos.flowchart_store:main"
 pithos-diagnostic = "pithos.diagnostic:main"
 pithos-eval = "pithos.eval.cli:main"
 pithos-research = "pithos.tools.web_researcher.cli:main"
+pithos-research-news = "pithos.tools.news_researcher.cli:main"
+pithos-prompt2image = "pithos.tools.prompt2image.cli:main"
 theteam = "theteam.server:main"
 talos = "talos.__main__:main"
 

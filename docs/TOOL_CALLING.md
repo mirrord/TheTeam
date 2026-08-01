@@ -58,51 +58,48 @@ If a tool fails, the agent still receives clear error feedback and can adapt.
 
 ## Tool Call Syntax
 
-pithos supports multiple syntax formats to improve reliability. Agents can use any format:
+pithos uses a single bracket-style syntax for tool calls. Wrap the command
+between an opening tag and its matching closing tag:
 
-### 1. CLI-Style (Simplest)
-```
-RUN: python --version
-EXEC: git status
-TOOL: npm list
-```
-
-### 2. Function-Style
-```
-run(python --version)
-tool(git status)
-execute(npm list)
-```
-
-### 3. Bracket-Style
 ```
 [RUN]python --version[/RUN]
 <RUN>git status</RUN>
 [EXEC]npm list[/EXEC]
 ```
 
-### 4. Legacy (Still Supported)
-```
-runcommand("python --version")
-runcommand('git status')
-```
-
-**All formats work identically** - use whichever is most natural for your agent or workflow.
+The closing tag is **required**: a command is only executed once its closing
+tag has been produced. This keeps extraction unambiguous and prevents partial,
+mid-stream output from being misinterpreted as a complete tool call.
 
 ## Virtual Tools
 
-In addition to CLI binaries, pithos ships two **virtual tools** that are
+In addition to CLI binaries, pithos ships three **virtual tools** that are
 dispatched in-process rather than as subprocesses:
 
 - **`flowchart`** — invokes a saved flowchart as if it were a tool.
 - **`web-research`** — subagent-driven web crawler over a configurable
   domain whitelist. See [WEB_RESEARCH.md](WEB_RESEARCH.md). Requires the
   optional `web` extra (`pip install -e ".[web]"`).
+- **`research-news`** — collects and summarises recent news articles from a
+  whitelist of domains/RSS feeds, judging each for relevance. See
+  [NEWS_RESEARCH.md](NEWS_RESEARCH.md). Requires the optional `web` extra.
+- **`prompt2image`** — generates a PNG from a text prompt using a local
+  image model. See [TEXT2IMAGE.md](TEXT2IMAGE.md). Three backends are
+  supported:
+  - `http` — Automatic1111/Forge (`/sdapi/v1/txt2img`). Only needs
+    `requests` (included in the `web` extra).
+  - `comfyui` — ComfyUI node-graph API (`/prompt` → `/history` → `/view`).
+    Also only needs `requests`.
+  - `diffusers` — Hugging Face `diffusers` pipeline loaded in-process.
+    Requires the `image` extra (`pip install -e ".[image]"`).
+
+  Usage: `[RUN]prompt2image <prompt text>[/RUN]`. All generation parameters
+  (size, steps, backend, output directory, …) are set in
+  `configs/tools/prompt2image_config.yaml`.
 
 Virtual tools appear in `pithos-tools list` alongside CLI tools and use
-the same call syntax (`RUN: web-research <inquiry>`). They are gated in
-`configs/tools/tool_config.yaml` and skipped if their optional
-dependencies are not installed.
+the same call syntax. They are gated in `configs/tools/tool_config.yaml`
+and skipped if their optional dependencies are not installed.
 
 ## Tool Discovery
 
@@ -425,10 +422,10 @@ Check the following:
 3. Current directory contents
 """)
 
-# Agent may respond with multiple runcommand() calls:
-# runcommand("python --version")
-# runcommand("git status")
-# runcommand("ls")
+# Agent may respond with multiple tool calls:
+# [RUN]python --version[/RUN]
+# [RUN]git status[/RUN]
+# [RUN]ls[/RUN]
 ```
 
 Each tool executes in sequence and results are added to conversation.

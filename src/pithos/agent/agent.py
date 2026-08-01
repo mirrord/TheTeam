@@ -73,6 +73,8 @@ class Agent(ABC):
         self.inference_flowchart: Optional[Any] = None
         self._inference_config: Optional[Any] = None
         self._running_inference: bool = False
+        # Artifact paths collected from the most recent send() call.
+        self._pending_image_paths: list[str] = []
         # Create default context
         self.create_context("default", system_prompt)
 
@@ -643,19 +645,28 @@ class Agent(ABC):
                                 try:
                                     status_callback(
                                         "tool_call",
-                                        (
-                                            (c.command or "").split()[0]
-                                            if getattr(c, "command", None)
-                                            else None
-                                        ),
+                                        c.command or "",
                                     )
                                 except Exception:
                                     pass
-                        result_msg = self._execute_tools(new_calls)
+                        raw_results = self._run_tool_requests(new_calls)
+                        for _r in raw_results:
+                            if _r.image_paths:
+                                self._pending_image_paths.extend(_r.image_paths)
+                        result_msg = (
+                            "\n\n".join(
+                                self._format_tool_result(r) for r in raw_results
+                            )
+                            if raw_results
+                            else "Tool execution is not available."
+                        )
                         context.add_message(Msg("system", result_msg))
                         if status_callback is not None:
                             try:
-                                status_callback("tool_result", None)
+                                status_callback(
+                                    "tool_result",
+                                    self._build_tool_display(raw_results),
+                                )
                             except Exception:
                                 pass
                         if content:
@@ -807,6 +818,11 @@ class Agent(ABC):
 
         return response
 
+    @property
+    def last_image_paths(self) -> list[str]:
+        """Return image paths collected from the most recent :meth:`send` call."""
+        return list(self._pending_image_paths)
+
     def send(
         self,
         content: str,
@@ -832,6 +848,7 @@ class Agent(ABC):
         Returns:
             The agent's complete response.
         """
+        self._pending_image_paths = []
         return "".join(self.stream(content, context_name, workspace, verbose, model))
 
     def _extract_tool_calls(self, content: str) -> list:
@@ -850,17 +867,17 @@ class Agent(ABC):
 
         return self._tool_extractor.extract(content)
 
-    def _execute_tools(self, requests: list) -> str:
-        """Execute tool commands and format results with clear error feedback.
+    def _run_tool_requests(self, requests: list) -> list:
+        """Execute tool requests, record metrics, and return raw ToolResult list.
 
         Args:
             requests: List of ToolCallRequest objects to execute.
 
         Returns:
-            Formatted string with tool execution results and error guidance.
+            List of ToolResult objects (empty list if tools are not available).
         """
         if not self.tool_executor or not self.tool_registry:
-            return "Tool execution is not available."
+            return []
 
         results = []
         for req in requests:
@@ -883,9 +900,51 @@ class Agent(ABC):
                     )
                 except Exception:
                     pass
-            results.append(self._format_tool_result(result))
+            results.append(result)
 
-        return "\n\n".join(results)
+        return results
+
+    def _execute_tools(self, requests: list) -> str:
+        """Execute tool commands and format results with clear error feedback.
+
+        Args:
+            requests: List of ToolCallRequest objects to execute.
+
+        Returns:
+            Formatted string with tool execution results and error guidance.
+        """
+        if not self.tool_executor or not self.tool_registry:
+            return "Tool execution is not available."
+
+        raw_results = self._run_tool_requests(requests)
+        return "\n\n".join(self._format_tool_result(r) for r in raw_results)
+
+    def _build_tool_display(self, results: list) -> str:
+        """Build a user-facing display string from tool results.
+
+        Returns only stdout/stderr — no agent-facing metadata.  Used by the
+        shell interface to show the command output in a formatted block.
+
+        Args:
+            results: List of ToolResult objects.
+
+        Returns:
+            Plain-text representation of the combined output.
+        """
+        parts = []
+        for result in results:
+            lines = []
+            if result.stdout:
+                lines.append(result.stdout.rstrip())
+            if result.stderr:
+                lines.append(result.stderr.rstrip())
+            if not lines:
+                if result.success:
+                    lines.append("(no output)")
+                else:
+                    lines.append(f"(failed, exit code {result.exit_code})")
+            parts.append("\n".join(lines))
+        return "\n\n".join(parts)
 
     def _format_tool_result(self, result) -> str:
         """Format a tool result with clear error feedback for the agent.
@@ -976,6 +1035,38 @@ class Agent(ABC):
             except Exception:
                 pass  # optional feature — silently skip if deps are missing
 
+        # Optionally add a news-research provider.
+        news_config = tool_config.get("news_research", {})
+        if news_config.get("enabled", False):
+            try:
+                from ..tools.news_researcher import (
+                    NEWS_RESEARCH_AVAILABLE,
+                    NewsResearcherToolExecutor,
+                )
+
+                if NEWS_RESEARCH_AVAILABLE:
+                    providers.append(
+                        NewsResearcherToolExecutor(config_manager=config_manager)
+                    )
+            except Exception:
+                pass  # optional feature — silently skip if deps are missing
+
+        # Optionally add a prompt2image provider.
+        t2i_config = tool_config.get("prompt2image", {})
+        if t2i_config.get("enabled", False):
+            try:
+                from ..tools.prompt2image import (
+                    TEXT2IMAGE_AVAILABLE,
+                    Prompt2ImageToolProvider,
+                )
+
+                if TEXT2IMAGE_AVAILABLE:
+                    providers.append(
+                        Prompt2ImageToolProvider(config_manager=config_manager)
+                    )
+            except Exception:
+                pass  # optional feature — silently skip if deps are missing
+
         self.tool_registry = ToolRegistry(config_manager, providers=providers)
         self.tool_executor = ToolExecutor()
         self.tools_enabled = True
@@ -991,7 +1082,7 @@ class Agent(ABC):
             return
 
         tool_prompt = self._get_tool_usage_prompt()
-        print("Tool usage prompt:\n", tool_prompt)  # Debug output
+        # print("Tool usage prompt:\n", tool_prompt)  # Debug output
 
         for ctx_name, context in self.contexts.items():
             current_prompt = context.get_system_prompt()
@@ -1020,7 +1111,7 @@ class Agent(ABC):
         tool_list = self.tool_registry.get_tool_list_text()
         format_examples = self._tool_extractor.get_usage_examples()
 
-        return f"""You have access to command-line tools via multiple formats for reliability.
+        return f"""You have access to command-line tools invoked with the bracket format.
 
 {format_examples}
 

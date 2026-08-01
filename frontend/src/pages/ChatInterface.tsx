@@ -29,6 +29,7 @@ export default function ChatInterface() {
     setProcessing,
     startStreaming,
     appendStreamChunk,
+    appendToolBlock,
     finalizeStreaming,
   } = useChatStore()
   
@@ -186,6 +187,12 @@ export default function ChatInterface() {
       }
     }
 
+    const handleToolBlock = (data: any) => {
+      if (currentConversation && data.conversation_id === currentConversation.id) {
+        appendToolBlock(data.conversation_id, data.message_id, data.command || '', data.output || '')
+      }
+    }
+
     const handleStreamEnd = (data: any) => {
       console.log('🏁 stream_end received:', data)
       if (currentConversation && data.conversation_id === currentConversation.id) {
@@ -224,6 +231,7 @@ export default function ChatInterface() {
     on('message_processing', handleMessageProcessing)
     on('stream_start', handleStreamStart)
     on('stream_chunk', handleStreamChunk)
+    on('tool_block', handleToolBlock)
     on('stream_end', handleStreamEnd)
     on('agent_status', handleAgentStatus)
     on('tool_confirmation_request', handleToolConfirmationRequest)
@@ -237,11 +245,12 @@ export default function ChatInterface() {
       off('message_processing', handleMessageProcessing)
       off('stream_start', handleStreamStart)
       off('stream_chunk', handleStreamChunk)
+      off('tool_block', handleToolBlock)
       off('stream_end', handleStreamEnd)
       off('agent_status', handleAgentStatus)
       off('tool_confirmation_request', handleToolConfirmationRequest)
     }
-  }, [currentConversation, on, off, addMessage, setProcessing, startStreaming, appendStreamChunk, finalizeStreaming])
+  }, [currentConversation, on, off, addMessage, setProcessing, startStreaming, appendStreamChunk, appendToolBlock, finalizeStreaming])
 
   // Close options menu when clicking outside of it
   useEffect(() => {
@@ -625,6 +634,9 @@ export default function ChatInterface() {
                       {activeStreaming.content}
                       <span className="inline-block w-2 h-4 ml-0.5 bg-gray-400 animate-pulse align-middle" />
                     </div>
+                    {activeStreaming.toolBlocks.map((tb, i) => (
+                      <ToolBlockView key={i} command={tb.command} output={tb.output} />
+                    ))}
                     {agentStatus &&
                       (agentStatus.status === 'tool_call' ||
                         agentStatus.status === 'tool_result') && (
@@ -791,6 +803,25 @@ export default function ChatInterface() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+/** Styled display block for a single tool call + output. */
+function ToolBlockView({ command, output }: { command: string; output: string }) {
+  const lines = output ? output.trimEnd().split('\n') : []
+  return (
+    <div className="my-2 rounded border border-gray-600 bg-gray-900 text-sm font-mono overflow-x-auto">
+      <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-700/60 border-b border-gray-600">
+        <span className="text-green-400 select-none">$</span>
+        <span className="text-gray-100">{command}</span>
+      </div>
+      <div className="px-3 py-2 text-gray-300">
+        {lines.length > 0
+          ? lines.map((line, i) => <div key={i}>{line || '\u00a0'}</div>)
+          : <span className="text-gray-500 italic">no output</span>
+        }
+      </div>
     </div>
   )
 }

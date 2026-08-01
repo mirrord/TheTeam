@@ -1,0 +1,63 @@
+# Text-to-Image Tool Configuration
+#
+# Controls the `prompt2image <prompt>` virtual tool (agent-facing name; kept
+# distinct from `prompt2image` to avoid colliding with the real `prompt2image`
+# binary from Tesseract's OCR training tools). The tool renders a prompt to a
+# PNG using a local backend and saves it under `output_dir`.
+#
+# Enable the tool in tool_config.yaml (prompt2image.enabled: true) before use.
+
+# Whether the tool is active (the registration gate in tool_config.yaml takes
+# precedence; this mirrors it for standalone/CLI use).
+enabled: true
+
+# Backend selection: "http", "comfyui", or "diffusers"
+#   http      - POSTs to a running Automatic1111/Forge server (/sdapi/v1/txt2img).
+#               Lightweight: only needs the `web` extra (requests).
+#   comfyui   - Submits a node-graph workflow to a running ComfyUI server
+#               (/prompt + /history + /view). Only needs the `web` extra.
+#   diffusers - Loads a Hugging Face diffusers pipeline in-process.
+#               Heavy: needs the `image` extra (torch + diffusers + Pillow).
+backend: comfyui
+
+# Directory where generated PNGs are written (created if missing).
+output_dir: ./data/generated_images
+
+# Model identifier.
+#   diffusers: a HF repo id or local path, e.g. "stabilityai/sd-turbo".
+#   http:      optional checkpoint name; leave empty to use the server's
+#              currently loaded model.
+model: "REED_XXX_illustrious_SDXL_-_v11-0.safetensors"
+
+# Default generation parameters (the agent only supplies the prompt).
+width: 512
+height: 512
+steps: 30
+guidance_scale: 7.5
+negative_prompt: ""
+
+# Fixed RNG seed for reproducibility, or null for a random seed each call.
+seed: null
+
+# --- diffusers backend only ---
+# Torch device: "cuda", "cpu", "mps", ...
+device: cuda
+
+# --- http backend only ---
+# Sampler/scheduler name passed to the server.
+sampler: "Euler a"
+# Base URL of the Automatic1111/Forge server.
+base_url: "http://127.0.0.1:7860"
+# Per-request timeout in seconds.
+timeout: 120
+
+# --- comfyui backend only ---
+# Base URL of the ComfyUI server.
+comfyui_base_url: "http://localhost:7802/ComfyBackendDirect"
+# Optional path to a ComfyUI API-format workflow JSON. Input values may contain
+# placeholder tokens that are substituted per call:
+#   %prompt% %negative_prompt% %seed% %steps% %cfg% %width% %height%
+#   %sampler% %model%
+# Leave empty to use the built-in SD1.5 txt2img workflow (set `model` to a
+# checkpoint filename known to the ComfyUI server).
+comfyui_workflow_path: "./configs/tools/nsfw-talos-1.json"

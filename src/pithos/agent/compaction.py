@@ -187,13 +187,13 @@ class MemoryCompactor:
         raw = ""
         for attempt in range(3):  # Try twice: if parsing fails, retry once more
             try:
-                print("Compaction LLM prompt:\n", prompt)
+                # print("Compaction LLM prompt:\n", prompt)
                 response = ollama_chat(
                     model=model,
                     messages=[{"role": "user", "content": prompt}],
                     options=options,
                 )
-                print("Compaction LLM raw response:\n", response.message.content)
+                # print("Compaction LLM raw response:\n", response.message.content)
                 raw = (response.message.content or "").strip()
             except Exception as exc:
                 logger.warning("Compaction LLM call failed: %s", exc)

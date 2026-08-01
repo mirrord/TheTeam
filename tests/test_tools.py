@@ -61,7 +61,7 @@ class TestToolRegistry:
         cm = Mock(spec=ConfigManager)
         cm.get_config.return_value = {
             "enabled": True,
-            "mode": "include",
+            "mode": "strict",
             "include": ["echo", "python", "git"],
             "exclude": ["rm", "del"],
             "descriptions": {
@@ -95,38 +95,49 @@ class TestToolRegistry:
         with pytest.raises(ValueError):
             registry.is_allowed("")
 
-    def test_requires_confirmation_confirm_mode_in_list(self, mock_config_manager):
-        """requires_confirmation returns True for a tool in confirm list."""
+    def test_requires_confirmation_non_permissive_in_list(self, mock_config_manager):
+        """requires_confirmation returns True for a tool in the confirm list in non-permissive modes."""
         registry = ToolRegistry(mock_config_manager)
-        registry.config = {
-            "mode": "confirm",
-            "confirm": ["bash", "powershell"],
-        }
-        assert registry.requires_confirmation("bash") is True
-        assert registry.requires_confirmation("powershell") is True
-
-    def test_requires_confirmation_confirm_mode_not_in_list(self, mock_config_manager):
-        """requires_confirmation returns False for a tool NOT in confirm list."""
-        registry = ToolRegistry(mock_config_manager)
-        registry.config = {
-            "mode": "confirm",
-            "confirm": ["bash"],
-        }
-        assert registry.requires_confirmation("python") is False
-
-    def test_requires_confirmation_other_modes(self, mock_config_manager):
-        """requires_confirmation returns False for all non-confirm modes."""
-        registry = ToolRegistry(mock_config_manager)
-        for mode in ("include", "exclude", "all"):
+        for mode in ("strict", "standard"):
             registry.config = {
                 "mode": mode,
-                "include": ["python"],
-                "exclude": [],
-                "confirm": ["python"],  # should be ignored in non-confirm modes
+                "confirm": ["bash", "powershell"],
+            }
+            assert (
+                registry.requires_confirmation("bash") is True
+            ), f"expected True for mode={mode!r}"
+            assert (
+                registry.requires_confirmation("powershell") is True
+            ), f"expected True for mode={mode!r}"
+
+    def test_requires_confirmation_non_permissive_not_in_list(
+        self, mock_config_manager
+    ):
+        """requires_confirmation returns False for a tool NOT in the confirm list."""
+        registry = ToolRegistry(mock_config_manager)
+        for mode in ("strict", "standard"):
+            registry.config = {
+                "mode": mode,
+                "confirm": ["bash"],
             }
             assert (
                 registry.requires_confirmation("python") is False
             ), f"expected False for mode={mode!r}"
+
+    def test_requires_confirmation_permissive_auto_approves(self, mock_config_manager):
+        """requires_confirmation returns False in permissive mode (tools are auto-approved)."""
+        registry = ToolRegistry(mock_config_manager)
+        registry.config = {
+            "mode": "permissive",
+            "confirm": [
+                "bash",
+                "powershell",
+                "python",
+            ],  # all listed but mode is permissive
+        }
+        assert registry.requires_confirmation("bash") is False
+        assert registry.requires_confirmation("powershell") is False
+        assert registry.requires_confirmation("python") is False
 
     def test_get_tool(self, mock_config_manager):
         """Test getting a specific tool."""
@@ -299,7 +310,7 @@ class TestToolIntegration:
         config_file = config_dir / "tool_config.yaml"
         config_content = """
 enabled: true
-mode: include
+mode: strict
 include:
   - echo
   - python

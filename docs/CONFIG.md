@@ -461,7 +461,7 @@ agent.enable_tools(config_manager)
 
 # Agent will now auto-execute tool calls
 response = agent.send("What version of Python is installed?")
-# Agent responds: runcommand("python --version")
+# Agent responds: [RUN]python --version[/RUN]
 # Tool executes automatically
 # Agent sees result: Python 3.11.0
 # Agent responds: "You have Python 3.11.0 installed."

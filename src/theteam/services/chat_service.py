@@ -433,8 +433,27 @@ class ChatService:
 
             # Consume the stream, forwarding every chunk to the client.
             # A status_callback is wired into the agent so the frontend can
-            # show a live "Thinking... / Using tool ..." indicator.
+            # show a live "Thinking... / Using tool ..." indicator and to
+            # format command output in a separate styled block.
+            from pithos.tools import ToolCallExtractor
+            from pithos.agent.cli import _safe_prefix_len
+
+            _extractor = ToolCallExtractor()
+            # Per-turn mutable state for stream buffering.
+            _ss = {"buf": "", "pending_cmds": [], "display": ""}
+
+            def _format_tool_text(command: str, output: str) -> str:
+                """Plain-text tool block appended to the saved message content."""
+                lines = [f"\n◆ $ {command}"]
+                for line in (output or "").rstrip().splitlines():
+                    lines.append(f"  {line}")
+                if not (output or "").strip():
+                    lines.append("  (no output)")
+                lines.append("")
+                return "\n".join(lines)
+
             def _status_cb(status: str, detail: Optional[str] = None) -> None:
+                # Always emit agent_status so the UI indicator still works.
                 if socketio and client_id:
                     emit_to_client(
                         socketio,
@@ -444,10 +463,47 @@ class ChatService:
                             "conversation_id": conversation_id,
                             "message_id": assistant_message_id,
                             "status": status,
-                            "detail": detail,
+                            "detail": detail if isinstance(detail, str) else None,
                             "timestamp": datetime.now().isoformat(),
                         },
                     )
+                if status == "tool_call" and detail:
+                    _ss["pending_cmds"].append(detail)
+                elif status == "tool_result":
+                    # Strip raw tool-call markup from the buffer.
+                    for call in _extractor.extract(_ss["buf"]):
+                        _ss["buf"] = _ss["buf"].replace(call.raw_text, "", 1)
+                    # Flush buffered prose before the tool block.
+                    if _ss["buf"] and socketio and client_id:
+                        emit_to_client(
+                            socketio,
+                            client_id,
+                            "stream_chunk",
+                            {
+                                "conversation_id": conversation_id,
+                                "message_id": assistant_message_id,
+                                "chunk": _ss["buf"],
+                            },
+                        )
+                    _ss["display"] += _ss["buf"]
+                    _ss["buf"] = ""
+                    # Emit the tool block as its own event for rich rendering.
+                    cmd = "; ".join(_ss["pending_cmds"]) if _ss["pending_cmds"] else ""
+                    _ss["pending_cmds"].clear()
+                    if socketio and client_id:
+                        emit_to_client(
+                            socketio,
+                            client_id,
+                            "tool_block",
+                            {
+                                "conversation_id": conversation_id,
+                                "message_id": assistant_message_id,
+                                "command": cmd,
+                                "output": detail or "",
+                            },
+                        )
+                    # Append a plain-text representation to the saved content.
+                    _ss["display"] += _format_tool_text(cmd, detail or "")
 
             full_response = ""
             stream_kwargs = {}
@@ -463,7 +519,11 @@ class ChatService:
 
             for chunk in agent.stream(message, **stream_kwargs):
                 full_response += chunk
-                if socketio and client_id:
+                _ss["buf"] += chunk
+                # Emit the safe prefix (text before any potential tool-call opener).
+                safe_len = _safe_prefix_len(_ss["buf"])
+                if safe_len > 0 and socketio and client_id:
+                    safe = _ss["buf"][:safe_len]
                     emit_to_client(
                         socketio,
                         client_id,
@@ -471,17 +531,38 @@ class ChatService:
                         {
                             "conversation_id": conversation_id,
                             "message_id": assistant_message_id,
-                            "chunk": chunk,
+                            "chunk": safe,
                         },
                     )
+                    _ss["display"] += safe
+                    _ss["buf"] = _ss["buf"][safe_len:]
 
-            # Persist the completed message
+            # Flush any remaining buffered text (strip residual markup).
+            if _ss["buf"]:
+                for call in _extractor.extract(_ss["buf"]):
+                    _ss["buf"] = _ss["buf"].replace(call.raw_text, "", 1)
+                if _ss["buf"]:
+                    if socketio and client_id:
+                        emit_to_client(
+                            socketio,
+                            client_id,
+                            "stream_chunk",
+                            {
+                                "conversation_id": conversation_id,
+                                "message_id": assistant_message_id,
+                                "chunk": _ss["buf"],
+                            },
+                        )
+                    _ss["display"] += _ss["buf"]
+
+            # Persist the completed message using the display-friendly content
+            # (markup stripped, tool blocks rendered as text).
             with self.lock:
                 conversation = self.conversations[conversation_id]
                 assistant_message = Message(
                     id=assistant_message_id,
                     role="assistant",
-                    content=full_response,
+                    content=_ss["display"],
                     timestamp=datetime.now().isoformat(),
                 )
                 conversation.messages.append(assistant_message)

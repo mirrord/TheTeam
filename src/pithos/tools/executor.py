@@ -107,7 +107,7 @@ class ToolExecutor:
                 error_hint="The tool is registered but has no execution provider.",
             )
 
-        # Registry-level confirmation check (mode == confirm).
+        # Confirm-list check: tools in the confirm group require user approval in non-permissive modes.
         needs_confirm = tool_registry.requires_confirmation(tool_name)
         if needs_confirm and not self._prompt_confirm(command):
             return ToolResult(

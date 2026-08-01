@@ -87,6 +87,79 @@ def test_telegram_handle_message_routes_to_user_context() -> None:
     update.message.reply_text.assert_awaited_once_with("reply text")
 
 
+def test_telegram_show_streams_to_stdout(capsys) -> None:
+    """With show=True, the reply is streamed to stdout and sent to Telegram."""
+    agent = _make_agent()
+    iface = TelegramInterface(agent, TelegramConfig(bot_token="t"), show=True)
+
+    def fake_stream(text, context_name=None, **kwargs):
+        assert context_name == "telegram_5"
+        yield "Hello"
+        yield ", "
+        yield "world"
+
+    agent.stream = fake_stream  # type: ignore[assignment]
+    agent._pending_image_paths = []
+
+    update = _make_update(5, "hi")
+    asyncio.run(iface._handle_message(update, MagicMock()))
+
+    out = capsys.readouterr().out
+    assert "[User5 (5)] hi" in out
+    assert "Hello, world" in out
+    update.message.reply_text.assert_awaited_once_with("Hello, world")
+
+
+def test_telegram_show_displays_tool_call_and_output(capsys) -> None:
+    """With show=True, tool results are printed with call/output separation."""
+    agent = _make_agent()
+    iface = TelegramInterface(agent, TelegramConfig(bot_token="t"), show=True)
+
+    def fake_stream(text, context_name=None, status_callback=None, **kwargs):
+        yield "Let me check. "
+        if status_callback is not None:
+            status_callback("tool_call", "ls -la")
+            status_callback("tool_result", "file_a.txt\nfile_b.txt")
+        yield "Here are the files."
+
+    agent.stream = fake_stream  # type: ignore[assignment]
+    agent._pending_image_paths = []
+
+    update = _make_update(9, "list files")
+    asyncio.run(iface._handle_message(update, MagicMock()))
+
+    out = capsys.readouterr().out
+    # Tool call header and command are shown.
+    assert "tool call: ls -la" in out
+    # Tool output block is clearly separated from the call.
+    assert "tool output:" in out
+    assert "file_a.txt" in out
+    assert "file_b.txt" in out
+    assert "end tool output" in out
+    # Both the pre- and post-tool agent text made it to Telegram.
+    update.message.reply_text.assert_awaited_once_with(
+        "Let me check. Here are the files."
+    )
+
+
+def test_telegram_show_false_uses_send(capsys) -> None:
+    """With show=False (default), send() is used and nothing is printed."""
+    agent = _make_agent()
+    iface = TelegramInterface(agent, TelegramConfig(bot_token="t"))
+
+    def fake_send(text, context_name=None, **kwargs):
+        return "quiet reply"
+
+    agent.send = fake_send  # type: ignore[assignment]
+    agent._pending_image_paths = []
+
+    update = _make_update(6, "hi")
+    asyncio.run(iface._handle_message(update, MagicMock()))
+
+    assert capsys.readouterr().out == ""
+    update.message.reply_text.assert_awaited_once_with("quiet reply")
+
+
 def test_telegram_start_creates_context_and_greets() -> None:
     agent = _make_agent()
     iface = TelegramInterface(agent, TelegramConfig(bot_token="t"))
@@ -94,6 +167,68 @@ def test_telegram_start_creates_context_and_greets() -> None:
     asyncio.run(iface._start(update, MagicMock()))
     assert _context_name_for_user(7) in agent.contexts
     update.message.reply_text.assert_awaited_once()
+
+
+def _make_update_with_photo(user_id: int, text: str) -> MagicMock:
+    update = _make_update(user_id, text)
+    update.message.reply_photo = AsyncMock()
+    return update
+
+
+def test_telegram_sends_image_when_agent_generates_one(tmp_path) -> None:
+    """reply_photo is called for each image path returned by the agent."""
+    img = tmp_path / "photo.png"
+    img.write_bytes(b"\x89PNG fake")
+
+    agent = _make_agent()
+    iface = TelegramInterface(agent, TelegramConfig(bot_token="t"))
+
+    def fake_send(text, context_name=None, **kwargs):
+        return "here is your image"
+
+    agent.send = fake_send  # type: ignore[assignment]
+    agent._pending_image_paths = [str(img)]
+
+    update = _make_update_with_photo(1, "generate a cat")
+    asyncio.run(iface._handle_message(update, MagicMock()))
+
+    update.message.reply_text.assert_awaited()
+    assert update.message.reply_photo.await_count == 1
+
+
+def test_telegram_no_image_sent_when_none_generated() -> None:
+    """reply_photo is never called when the agent produces no images."""
+    agent = _make_agent()
+    iface = TelegramInterface(agent, TelegramConfig(bot_token="t"))
+
+    def fake_send(text, context_name=None, **kwargs):
+        return "just text"
+
+    agent.send = fake_send  # type: ignore[assignment]
+    agent._pending_image_paths = []
+
+    update = _make_update_with_photo(2, "hello")
+    asyncio.run(iface._handle_message(update, MagicMock()))
+
+    update.message.reply_photo.assert_not_awaited()
+
+
+def test_telegram_skips_missing_image_without_crash(tmp_path) -> None:
+    """A non-existent image path is skipped gracefully; text reply still sent."""
+    agent = _make_agent()
+    iface = TelegramInterface(agent, TelegramConfig(bot_token="t"))
+
+    def fake_send(text, context_name=None, **kwargs):
+        return "response"
+
+    agent.send = fake_send  # type: ignore[assignment]
+    agent._pending_image_paths = [str(tmp_path / "ghost.png")]  # does not exist
+
+    update = _make_update_with_photo(3, "make something")
+    asyncio.run(iface._handle_message(update, MagicMock()))
+
+    update.message.reply_text.assert_awaited()
+    update.message.reply_photo.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -196,7 +331,7 @@ def test_telegram_strips_tool_calls_before_replying() -> None:
     iface = TelegramInterface(agent, TelegramConfig(bot_token="t"))
 
     def fake_send(text, context_name=None, **kwargs):
-        return "Sure thing.\nRUN: ls -la\nDone."
+        return "Sure thing.\n[RUN]ls -la[/RUN]\nDone."
 
     agent.send = fake_send  # type: ignore[assignment]
 
@@ -204,7 +339,7 @@ def test_telegram_strips_tool_calls_before_replying() -> None:
     asyncio.run(iface._handle_message(update, MagicMock()))
 
     sent = update.message.reply_text.await_args.args[0]
-    assert "RUN:" not in sent
+    assert "[RUN]" not in sent
     assert "ls -la" not in sent
     assert "Sure thing." in sent
     assert "Done." in sent
@@ -217,7 +352,7 @@ def test_voice_strips_tool_calls_before_speaking() -> None:
     iface = VoiceInterface(agent, VoiceConfig())
 
     # Stub agent / TTS / audio so we can drive a single iteration of run().
-    agent.send = MagicMock(return_value="Yes.\nRUN: echo hi\nOkay.")  # type: ignore[assignment]
+    agent.send = MagicMock(return_value="Yes.\n[RUN]echo hi[/RUN]\nOkay.")  # type: ignore[assignment]
     iface._load_audio_libs = MagicMock()  # type: ignore[assignment]
     iface._load_whisper = MagicMock()  # type: ignore[assignment]
     iface._load_tts = MagicMock()  # type: ignore[assignment]
@@ -239,7 +374,7 @@ def test_voice_strips_tool_calls_before_speaking() -> None:
     iface.run()
 
     spoken = iface._speak.call_args.args[0]
-    assert "RUN:" not in spoken
+    assert "[RUN]" not in spoken
     assert "echo hi" not in spoken
     assert "Yes." in spoken
     assert "Okay." in spoken

@@ -127,12 +127,13 @@ class ToolRegistry:
         return tool_name in self.tools
 
     def requires_confirmation(self, tool_name: str) -> bool:
-        """Return True when the tool config marks tool_name for confirmation.
+        """Return True when the tool requires interactive user confirmation.
 
-        Only active when ``mode`` is ``"confirm"`` and the tool appears in the
-        ``confirm`` list.
+        Active in ``strict`` and ``standard`` modes when the tool appears in
+        the ``confirm`` list.  In ``permissive`` mode, confirm-listed tools are
+        auto-approved and this method returns ``False``.
         """
-        if self.config.get("mode") != "confirm":
+        if self.config.get("mode") == "permissive":
             return False
         return tool_name in self.config.get("confirm", [])
 
@@ -144,6 +145,7 @@ class ToolRegistry:
         cli_lines: list[str] = []
         flowchart_lines: list[str] = []
         web_research_lines: list[str] = []
+        news_research_lines: list[str] = []
         memory_lines: list[str] = []
 
         for tool_name in sorted(self.tools.keys()):
@@ -156,6 +158,8 @@ class ToolRegistry:
                     flowchart_lines.append(f"      {short}")
             elif tool.tool_type == "web_research":
                 web_research_lines.append(f"  - {tool_name}: {tool.description}")
+            elif tool.tool_type == "news_research":
+                news_research_lines.append(f"  - {tool_name}: {tool.description}")
             elif tool.tool_type == "memory":
                 memory_lines.append(f"  - {tool_name}: {tool.description}")
             else:
@@ -171,6 +175,8 @@ class ToolRegistry:
             )
         if web_research_lines:
             sections.append("Web research:\n" + "\n".join(web_research_lines))
+        if news_research_lines:
+            sections.append("News research:\n" + "\n".join(news_research_lines))
         if memory_lines:
             sections.append("Memory operations:\n" + "\n".join(memory_lines))
 
@@ -187,7 +193,7 @@ class ToolRegistry:
                 "enabled": True,
                 "timeout": 30,
                 "max_output_size": 10000,
-                "mode": "include",
+                "mode": "strict",
                 "include": [
                     "python",
                     "pip",

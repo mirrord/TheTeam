@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import Optional
 import re
 
+_VALID_FORMATS = {"cli", "function", "legacy"}
+
 
 @dataclass
 class MemoryOpRequest:
@@ -18,21 +20,33 @@ class MemoryOpRequest:
 
 
 class MemoryOpExtractor:
-    """Extracts memory operations from agent output using multiple formats.
+    """Extracts memory operations from agent output using a single configured format.
 
-    Supports multiple formats to make memory operations more reliable:
-    - CLI-style: STORE[category]: content, RETRIEVE[category]: query
-    - Function-style: store(category, content), retrieve(category, query)
-    - Bracket-style: [STORE:category]content[/STORE]
-    - Legacy: storemem(category, "content"), retrievemem(category, "query")
+    Supported formats (select one at construction time):
+    - ``"cli"`` (default): ``STORE[category]: content`` / ``RETRIEVE[category]: query``
+    - ``"function"``: ``store(category, content)`` / ``retrieve(category, query)``
+    - ``"legacy"``: ``storemem(category, "content")`` / ``retrievemem(category, "query")``
     """
 
-    def __init__(self):
-        """Initialize extractor with patterns for each format."""
-        pass
+    def __init__(self, format: str = "cli") -> None:
+        """Initialize the extractor for a single format.
+
+        Args:
+            format: The format to use.  Must be one of ``"cli"``, ``"function"``,
+                or ``"legacy"``.  Defaults to ``"cli"``.
+
+        Raises:
+            ValueError: If *format* is not a recognised value.
+        """
+        if format not in _VALID_FORMATS:
+            raise ValueError(
+                f"Unknown memory operation format {format!r}. "
+                f"Valid options are: {sorted(_VALID_FORMATS)}"
+            )
+        self.format = format
 
     def extract(self, content: str) -> list[MemoryOpRequest]:
-        """Extract all memory operations from content using all supported formats.
+        """Extract memory operations from *content* using the configured format.
 
         Args:
             content: Text to extract memory operations from.
@@ -40,98 +54,97 @@ class MemoryOpExtractor:
         Returns:
             List of MemoryOpRequest objects.
         """
-        operations = []
+        if self.format == "cli":
+            return self._extract_cli(content)
+        if self.format == "function":
+            return self._extract_function(content)
+        # self.format == "legacy"
+        return self._extract_legacy(content)
 
-        # CLI-style: STORE[category]: content
-        # More flexible - can appear anywhere in text
-        cli_store_pattern = r"\bSTORE\[([^\]]+)\]:\s*(.+?)(?:\n|$)"
-        for match in re.finditer(cli_store_pattern, content, re.MULTILINE):
-            category = match.group(1).strip()
-            content_text = match.group(2).strip()
+    # ------------------------------------------------------------------
+    # Private per-format extractors
+    # ------------------------------------------------------------------
+
+    def _extract_cli(self, content: str) -> list[MemoryOpRequest]:
+        operations: list[MemoryOpRequest] = []
+
+        store_pattern = r"\bSTORE\[([^\]]+)\]:\s*(.+?)(?:\n|$)"
+        for match in re.finditer(store_pattern, content, re.MULTILINE):
             operations.append(
                 MemoryOpRequest(
                     operation="store",
-                    category=category,
-                    content=content_text,
+                    category=match.group(1).strip(),
+                    content=match.group(2).strip(),
                     format="cli",
                     raw_text=match.group(0),
                 )
             )
 
-        # CLI-style: RETRIEVE[category]: query
-        cli_retrieve_pattern = r"\bRETRIEVE\[([^\]]+)\]:\s*(.+?)(?:\n|$)"
-        for match in re.finditer(cli_retrieve_pattern, content, re.MULTILINE):
-            category = match.group(1).strip()
-            query = match.group(2).strip()
+        retrieve_pattern = r"\bRETRIEVE\[([^\]]+)\]:\s*(.+?)(?:\n|$)"
+        for match in re.finditer(retrieve_pattern, content, re.MULTILINE):
             operations.append(
                 MemoryOpRequest(
                     operation="retrieve",
-                    category=category,
-                    query=query,
+                    category=match.group(1).strip(),
+                    query=match.group(2).strip(),
                     format="cli",
                     raw_text=match.group(0),
                 )
             )
 
-        # Function-style: store(category, content)
-        func_store_pattern = r"store\s*\(\s*([^,]+?)\s*,\s*([^)]+)\)"
-        for match in re.finditer(func_store_pattern, content, re.IGNORECASE):
-            category = match.group(1).strip().strip("\"'")
-            content_text = match.group(2).strip().strip("\"'")
+        return operations
+
+    def _extract_function(self, content: str) -> list[MemoryOpRequest]:
+        operations: list[MemoryOpRequest] = []
+
+        store_pattern = r"store\s*\(\s*([^,]+?)\s*,\s*([^)]+)\)"
+        for match in re.finditer(store_pattern, content, re.IGNORECASE):
             operations.append(
                 MemoryOpRequest(
                     operation="store",
-                    category=category,
-                    content=content_text,
+                    category=match.group(1).strip().strip("\"'"),
+                    content=match.group(2).strip().strip("\"'"),
                     format="function",
                     raw_text=match.group(0),
                 )
             )
 
-        # Function-style: retrieve(category, query)
-        func_retrieve_pattern = r"retrieve\s*\(\s*([^,]+?)\s*,\s*([^)]+)\)"
-        for match in re.finditer(func_retrieve_pattern, content, re.IGNORECASE):
-            category = match.group(1).strip().strip("\"'")
-            query = match.group(2).strip().strip("\"'")
+        retrieve_pattern = r"retrieve\s*\(\s*([^,]+?)\s*,\s*([^)]+)\)"
+        for match in re.finditer(retrieve_pattern, content, re.IGNORECASE):
             operations.append(
                 MemoryOpRequest(
                     operation="retrieve",
-                    category=category,
-                    query=query,
+                    category=match.group(1).strip().strip("\"'"),
+                    query=match.group(2).strip().strip("\"'"),
                     format="function",
                     raw_text=match.group(0),
                 )
             )
 
-        # Legacy patterns: storemem(category, "content")
-        legacy_store_pattern = (
-            r'storemem\s*\(\s*([^,]+?)\s*,\s*["\']([^"\']+)["\']\s*\)'
-        )
-        for match in re.finditer(legacy_store_pattern, content):
-            category = match.group(1).strip("\"'")
-            content_text = match.group(2)
+        return operations
+
+    def _extract_legacy(self, content: str) -> list[MemoryOpRequest]:
+        operations: list[MemoryOpRequest] = []
+
+        store_pattern = r'storemem\s*\(\s*([^,]+?)\s*,\s*["\']([^"\']+)["\']\s*\)'
+        for match in re.finditer(store_pattern, content):
             operations.append(
                 MemoryOpRequest(
                     operation="store",
-                    category=category,
-                    content=content_text,
+                    category=match.group(1).strip("\"'"),
+                    content=match.group(2),
                     format="legacy",
                     raw_text=match.group(0),
                 )
             )
 
-        # Legacy patterns: retrievemem(category, "query")
-        legacy_retrieve_pattern = (
-            r'retrievemem\s*\(\s*([^,]+?)\s*,\s*["\']([^"\']+)["\']\s*\)'
-        )
-        for match in re.finditer(legacy_retrieve_pattern, content):
-            category = match.group(1).strip("\"'")
-            query = match.group(2)
+        retrieve_pattern = r'retrievemem\s*\(\s*([^,]+?)\s*,\s*["\']([^"\']+)["\']\s*\)'
+        for match in re.finditer(retrieve_pattern, content):
             operations.append(
                 MemoryOpRequest(
                     operation="retrieve",
-                    category=category,
-                    query=query,
+                    category=match.group(1).strip("\"'"),
+                    query=match.group(2),
                     format="legacy",
                     raw_text=match.group(0),
                 )
@@ -139,25 +152,31 @@ class MemoryOpExtractor:
 
         return operations
 
+    # ------------------------------------------------------------------
+    # Usage examples
+    # ------------------------------------------------------------------
+
     def get_usage_examples(self) -> str:
-        """Get formatted examples of all supported formats.
+        """Get formatted examples for the configured format.
 
         Returns:
             Formatted string with examples.
         """
-        examples = """
-Memory Operation Formats (all are supported):
-
-1. CLI-style (simplest):
-   STORE[facts]: Important information here
-   RETRIEVE[facts]: search query here
-
-2. Function-style:
-   store(facts, important information)
-   retrieve(facts, search query)
-
-3. Legacy (still supported):
-   storemem(facts, "important information")
-   retrievemem(facts, "search query")
-""".strip()
-        return examples
+        if self.format == "cli":
+            return (
+                "Memory Operation Format (CLI-style):\n\n"
+                "  STORE[facts]: Important information here\n"
+                "  RETRIEVE[facts]: search query here"
+            )
+        if self.format == "function":
+            return (
+                "Memory Operation Format (function-style):\n\n"
+                "  store(facts, important information)\n"
+                "  retrieve(facts, search query)"
+            )
+        # legacy
+        return (
+            "Memory Operation Format (legacy):\n\n"
+            '  storemem(facts, "important information")\n'
+            '  retrievemem(facts, "search query")'
+        )

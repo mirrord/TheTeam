@@ -1,6 +1,6 @@
 """Data models for the pithos tool calling system."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
@@ -54,3 +54,4 @@ class ToolResult:
     command: str
     error_hint: Optional[str] = None  # Specific error guidance for agents
     safety_verdict: Optional["SafetyVerdict"] = None  # Set when safety checker ran
+    image_paths: list = field(default_factory=list)  # Paths to generated image files

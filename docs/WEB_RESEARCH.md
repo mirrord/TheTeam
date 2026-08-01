@@ -5,7 +5,7 @@ collects, deduplicates, and summarises information from a configurable
 whitelist of web domains. It is exposed three ways:
 
 1. **CLI**: [`pithos-research`](#cli).
-2. **Agent tool call**: `RUN: web-research <inquiry>` (virtual tool, no
+2. **Agent tool call**: `[RUN]web-research <inquiry>[/RUN]` (virtual tool, no
    external binary required).
 3. **Flowchart node**: the [`webresearch` node](#flowchart-node).
 
@@ -267,8 +267,8 @@ response = agent.send(
 print(response)
 ```
 
-The agent will emit a tool call such as `RUN: web-research HTTP/3 vs
-HTTP/2 latency benchmarks`. Dispatch is handled in-process and the
+The agent will emit a tool call such as `[RUN]web-research HTTP/3 vs
+HTTP/2 latency benchmarks[/RUN]`. Dispatch is handled in-process and the
 returned markdown report is injected as a system message before
 generation resumes.
 
