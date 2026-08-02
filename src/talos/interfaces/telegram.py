@@ -71,9 +71,7 @@ class TelegramInterface:
         # Strip tool-call syntax so users see a clean reply.
         response = clean_agent_response(response)
         # Telegram caps messages at 4096 characters.
-        for i in range(0, len(response) or 1, 4000):
-            chunk = response[i : i + 4000] or "(no response)"
-            await update.message.reply_text(chunk)
+        await self._send_chunked(update, response)
         # Send any images generated during the agent's response.
         for image_path in self.agent.last_image_paths:
             p = Path(image_path)
@@ -85,6 +83,28 @@ class TelegramInterface:
                     await update.message.reply_photo(photo=fh)
             except Exception as exc:
                 logger.warning("Failed to send image %s: %s", image_path, exc)
+        # Send the full contents of any reports generated during the
+        # response (e.g. news-research, web-research, craft-write), since
+        # the model's prose reply is only a summary of these documents.
+        for report_path in self.agent.last_report_paths:
+            p = Path(report_path)
+            if not p.exists():
+                logger.warning("Report file not found, skipping: %s", report_path)
+                continue
+            try:
+                content = p.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                logger.warning("Failed to read report %s: %s", report_path, exc)
+                continue
+            await update.message.reply_text(f"\U0001f4c4 Report: {p.name}")
+            await self._send_chunked(update, content)
+
+    @staticmethod
+    async def _send_chunked(update: Any, text: str, chunk_size: int = 4000) -> None:
+        """Send ``text`` as one or more Telegram messages under the 4096-char cap."""
+        for i in range(0, len(text) or 1, chunk_size):
+            chunk = text[i : i + chunk_size] or "(no response)"
+            await update.message.reply_text(chunk)
 
     def _generate_response(self, text: str, ctx_name: str) -> str:
         """Produce the agent's reply, streaming to stdout when ``show`` is set."""
@@ -93,6 +113,7 @@ class TelegramInterface:
         # Mirror the streamed response to stdout token-by-token while
         # accumulating the full reply for Telegram delivery.
         self.agent._pending_image_paths = []
+        self.agent._pending_report_paths = []
         print("[Talos] ", end="", flush=True)
         parts: list[str] = []
         for chunk in self.agent.stream(

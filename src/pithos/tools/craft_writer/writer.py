@@ -507,4 +507,5 @@ class CraftWriterToolExecutor(ToolProvider):
             exit_code=0,
             execution_time=round(time.time() - started, 2),
             command=self.TOOL_NAME,
+            report_paths=[story.document_path] if story.document_path else [],
         )

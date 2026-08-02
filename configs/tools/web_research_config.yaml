@@ -35,6 +35,8 @@ chunk_overlap: 80            # overlap between adjacent chunks
 dedup_similarity: 0.92       # cosine-similarity threshold for semantic dedup
 persist_directory: "./data/research"
 keep_collection: false       # drop the per-run collection after summarizing
+output_dir: "./data/research/web"    # where the collected Markdown doc is saved
+write_document: true                 # set false to skip writing the doc to disk
 
 # --- Subagent -------------------------------------------------------------
 subagent_config_name: "web_researcher"  # configs/agents/web_researcher.yaml

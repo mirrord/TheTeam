@@ -231,6 +231,75 @@ def test_telegram_skips_missing_image_without_crash(tmp_path) -> None:
     update.message.reply_photo.assert_not_awaited()
 
 
+def test_telegram_sends_report_contents_when_agent_produces_one(tmp_path) -> None:
+    """The full report file content is sent, in addition to the agent's reply."""
+    report = tmp_path / "news_report.md"
+    report.write_text("# Report\n\nSome findings.", encoding="utf-8")
+
+    agent = _make_agent()
+    iface = TelegramInterface(agent, TelegramConfig(bot_token="t"))
+
+    def fake_send(text, context_name=None, **kwargs):
+        return "here is a summary"
+
+    agent.send = fake_send  # type: ignore[assignment]
+    agent._pending_image_paths = []
+    agent._pending_report_paths = [str(report)]
+
+    update = _make_update(10, "research something")
+    asyncio.run(iface._handle_message(update, MagicMock()))
+
+    calls = [c.args[0] for c in update.message.reply_text.await_args_list]
+    assert "here is a summary" in calls
+    assert any("news_report.md" in c for c in calls)
+    assert any("Some findings." in c for c in calls)
+
+
+def test_telegram_report_split_across_multiple_messages(tmp_path) -> None:
+    """Reports longer than the chunk size are split into multiple messages."""
+    long_content = "x" * 9000
+    report = tmp_path / "long_report.md"
+    report.write_text(long_content, encoding="utf-8")
+
+    agent = _make_agent()
+    iface = TelegramInterface(agent, TelegramConfig(bot_token="t"))
+
+    def fake_send(text, context_name=None, **kwargs):
+        return "summary"
+
+    agent.send = fake_send  # type: ignore[assignment]
+    agent._pending_image_paths = []
+    agent._pending_report_paths = [str(report)]
+
+    update = _make_update(11, "research something long")
+    asyncio.run(iface._handle_message(update, MagicMock()))
+
+    calls = [c.args[0] for c in update.message.reply_text.await_args_list]
+    # summary + header + 3 content chunks (9000 / 4000 -> 3 chunks)
+    content_chunks = [c for c in calls if set(c) == {"x"}]
+    assert len(content_chunks) == 3
+    assert sum(len(c) for c in content_chunks) == len(long_content)
+
+
+def test_telegram_skips_missing_report_without_crash() -> None:
+    """A non-existent report path is skipped gracefully; text reply still sent."""
+    agent = _make_agent()
+    iface = TelegramInterface(agent, TelegramConfig(bot_token="t"))
+
+    def fake_send(text, context_name=None, **kwargs):
+        return "response"
+
+    agent.send = fake_send  # type: ignore[assignment]
+    agent._pending_image_paths = []
+    agent._pending_report_paths = ["/nonexistent/ghost_report.md"]
+
+    update = _make_update(12, "research something")
+    asyncio.run(iface._handle_message(update, MagicMock()))
+
+    calls = [c.args[0] for c in update.message.reply_text.await_args_list]
+    assert calls == ["response"]
+
+
 # ---------------------------------------------------------------------------
 # Voice — only test the constructor wiring; full pipeline requires audio deps.
 # ---------------------------------------------------------------------------

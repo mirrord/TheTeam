@@ -14,7 +14,10 @@ from pithos.tools.news_researcher.models import (
     NewsResearchConfig,
     NewsResearchRequest,
 )
-from pithos.tools.news_researcher.researcher import NewsResearcher
+from pithos.tools.news_researcher.researcher import (
+    NewsResearcher,
+    NewsResearcherToolExecutor,
+)
 from pithos.tools.news_researcher.scraper import NewsScraper, _normalize_url
 from pithos.tools.web_researcher.fetcher import FetchResult, normalize_domain
 
@@ -377,6 +380,40 @@ class TestNewsResearcherFacade:
             content = fh.read()
         assert "KEEP this" in content
         assert report.stats["articles_relevant"] == 1
+
+    def test_executor_populates_report_paths_when_document_written(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        _FakeScraper.articles = [
+            NewsArticle(
+                url="https://example.com/keep",
+                title="KEEP this",
+                text="body",
+                published=datetime.now(timezone.utc),
+                source_host="example.com",
+            )
+        ]
+        monkeypatch.setattr(researcher_mod, "NewsScraper", _FakeScraper)
+
+        cfg = NewsResearchConfig(
+            domains=["example.com"],
+            feeds=[],
+            output_dir=str(tmp_path),
+            search_fallback=True,
+        )
+        r = NewsResearcher(
+            MagicMock(),
+            config=cfg,
+            agent_factory=lambda: FakeAgent(),
+            term_agent_factory=lambda: FakeAgent(),
+            memory_store=FakeMemoryStore(),
+        )
+        executor = NewsResearcherToolExecutor(config_manager=None, researcher=r)
+        result = executor.run("cache quantization")
+
+        assert result.success is True
+        assert len(result.report_paths) == 1
+        assert result.report_paths[0].startswith(str(tmp_path))
 
     def test_prefilter_limits_assessed_articles(self, monkeypatch) -> None:
         # Six downloaded articles; only the top-2 by term overlap get assessed.

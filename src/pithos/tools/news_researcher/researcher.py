@@ -432,4 +432,5 @@ class NewsResearcherToolExecutor(ToolProvider):
             exit_code=0,
             execution_time=time.time() - start,
             command=command,
+            report_paths=[report.document_path] if report.document_path else [],
         )

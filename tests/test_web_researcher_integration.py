@@ -304,6 +304,52 @@ class TestWebResearcherFacade:
         assert report.sources == []
 
 
+class TestWebResearcherDocumentWriting:
+    def test_write_document_creates_markdown_file(self, tmp_path) -> None:
+        from pithos.tools.web_researcher.models import ResearchReport
+        from pithos.tools.web_researcher.researcher import _write_document
+
+        report = ResearchReport(
+            inquiry="quantum computing basics",
+            summary="Some summary text.",
+            excerpts=[],
+            sources=["https://example.com/a"],
+        )
+        path = _write_document(report, str(tmp_path))
+        assert path.startswith(str(tmp_path))
+        assert path.endswith(".md")
+        with open(path, encoding="utf-8") as fh:
+            content = fh.read()
+        assert "Some summary text." in content
+
+    def test_executor_populates_report_paths_when_document_written(
+        self, tmp_path
+    ) -> None:
+        from pithos.tools.web_researcher.models import ResearchReport
+        from pithos.tools.web_researcher.researcher import WebResearcherToolExecutor
+
+        doc_path = str(tmp_path / "web_report.md")
+        with open(doc_path, "w", encoding="utf-8") as fh:
+            fh.write("# Research report\n\nSummary.")
+
+        class _FakeResearcher:
+            def research(self, inquiry):
+                return ResearchReport(
+                    inquiry=inquiry,
+                    summary="Summary.",
+                    excerpts=[],
+                    sources=[],
+                    document_path=doc_path,
+                )
+
+        executor = WebResearcherToolExecutor(
+            config_manager=None, researcher=_FakeResearcher()
+        )
+        result = executor.run("an inquiry")
+        assert result.success is True
+        assert result.report_paths == [doc_path]
+
+
 # ---------------------------------------------------------------------------
 # CLI smoke test (monkey-patch researcher)
 # ---------------------------------------------------------------------------

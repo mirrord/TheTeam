@@ -55,3 +55,4 @@ class ToolResult:
     error_hint: Optional[str] = None  # Specific error guidance for agents
     safety_verdict: Optional["SafetyVerdict"] = None  # Set when safety checker ran
     image_paths: list = field(default_factory=list)  # Paths to generated image files
+    report_paths: list = field(default_factory=list)  # Paths to generated report files

@@ -251,3 +251,18 @@ class TestCraftWriterToolExecutor:
         result = executor.execute("craft-write ")
         assert result.success is False
         assert "direction" in result.stderr.lower() or "boom" in result.stderr.lower()
+
+    def test_execute_populates_report_paths_when_document_written(
+        self, tmp_path
+    ) -> None:
+        fake_writer = CraftWriter(
+            config_manager=None,
+            config=_config(write_document=True, output_dir=str(tmp_path)),
+            agent_factory=lambda: ScriptedAgent(),
+            memory_store=FakeMemoryStore(),
+        )
+        executor = CraftWriterToolExecutor(config_manager=None, writer=fake_writer)
+        result = executor.execute("craft-write a heist gone wrong")
+        assert result.success is True
+        assert len(result.report_paths) == 1
+        assert result.report_paths[0].startswith(str(tmp_path))

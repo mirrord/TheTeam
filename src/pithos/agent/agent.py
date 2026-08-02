@@ -75,6 +75,7 @@ class Agent(ABC):
         self._running_inference: bool = False
         # Artifact paths collected from the most recent send() call.
         self._pending_image_paths: list[str] = []
+        self._pending_report_paths: list[str] = []
         # Create default context
         self.create_context("default", system_prompt)
 
@@ -653,6 +654,8 @@ class Agent(ABC):
                         for _r in raw_results:
                             if _r.image_paths:
                                 self._pending_image_paths.extend(_r.image_paths)
+                            if _r.report_paths:
+                                self._pending_report_paths.extend(_r.report_paths)
                         result_msg = (
                             "\n\n".join(
                                 self._format_tool_result(r) for r in raw_results
@@ -823,6 +826,11 @@ class Agent(ABC):
         """Return image paths collected from the most recent :meth:`send` call."""
         return list(self._pending_image_paths)
 
+    @property
+    def last_report_paths(self) -> list[str]:
+        """Return report file paths collected from the most recent :meth:`send` call."""
+        return list(self._pending_report_paths)
+
     def send(
         self,
         content: str,
@@ -849,6 +857,7 @@ class Agent(ABC):
             The agent's complete response.
         """
         self._pending_image_paths = []
+        self._pending_report_paths = []
         return "".join(self.stream(content, context_name, workspace, verbose, model))
 
     def _extract_tool_calls(self, content: str) -> list:

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import re
 import time
 from datetime import datetime
 from typing import Any, Optional
@@ -19,6 +21,22 @@ from .store import ExcerptStore
 from .summarizer import synthesize
 
 logger = logging.getLogger(__name__)
+
+
+def _slugify(text: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "_", (text or "").lower()).strip("_")[:40]
+    return slug or "inquiry"
+
+
+def _write_document(report: ResearchReport, output_dir: str) -> str:
+    """Write the report markdown to ``output_dir`` and return the file path."""
+    os.makedirs(output_dir, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"web_{_slugify(report.inquiry)}_{ts}.md"
+    path = os.path.join(output_dir, filename)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(report.to_markdown())
+    return path
 
 
 class WebResearcher:
@@ -200,7 +218,7 @@ class WebResearcher:
             "notes": loop.notes,
         }
         stats.update(editor_stats)
-        return ResearchReport(
+        report = ResearchReport(
             inquiry=request.inquiry,
             summary=summary,
             excerpts=excerpts,
@@ -211,6 +229,14 @@ class WebResearcher:
             source_statuses=source_statuses,
             original_summary=original_summary,
         )
+        if cfg.write_document:
+            try:
+                report.document_path = _write_document(report, cfg.output_dir)
+                report.stats["document_path"] = report.document_path
+            except Exception as exc:
+                logger.warning("failed to write web research document: %s", exc)
+                report.errors.append(f"failed to write document: {exc}")
+        return report
 
     # ------------------------------------------------------------------
     # Internals
@@ -393,4 +419,5 @@ class WebResearcherToolExecutor(ToolProvider):
             exit_code=0,
             execution_time=time.time() - start,
             command=command,
+            report_paths=[report.document_path] if report.document_path else [],
         )

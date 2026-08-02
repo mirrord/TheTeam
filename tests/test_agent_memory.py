@@ -196,7 +196,7 @@ default_metadata:
 
         # Both should be in the prompt
         prompt = agent.contexts["default"].get_system_prompt()
-        assert "runcommand" in prompt
+        assert "[RUN]" in prompt
         assert "STORE[" in prompt
 
     def test_memory_prompt_includes_categories(self, agent, config_manager, temp_dir):

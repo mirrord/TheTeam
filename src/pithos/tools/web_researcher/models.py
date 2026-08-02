@@ -70,6 +70,8 @@ class WebResearchConfig:
     summarizer_model: Optional[str] = None
     search_results_per_domain: int = 5
     enabled: bool = True
+    write_document: bool = True
+    output_dir: str = "./data/research/web"
 
     # Citation verification ("editor" subagent stage)
     verify_citations: bool = True
@@ -129,6 +131,7 @@ class ResearchReport:
     citation_checks: list[CitationCheck] = field(default_factory=list)
     source_statuses: list[SourceStatus] = field(default_factory=list)
     original_summary: Optional[str] = None
+    document_path: Optional[str] = None
 
     def to_markdown(self) -> str:
         """Render the report as a Markdown document with a Sources section."""
