@@ -646,6 +646,67 @@ class TestOllamaAgentStreaming:
         assert result == "chunk1 chunk2"
 
 
+class TestAgentGenerationTimeout:
+    """Wall-clock cap that prevents a runaway/looping model from hanging.
+
+    A time budget is used deliberately instead of a token cap: token limits
+    are unreliable (often counted against input+output, silently suppressing
+    output), whereas a wall-clock bound always terminates the stream.
+    """
+
+    def test_generation_timeout_defaults_to_none(self):
+        agent = OllamaAgent("glm-4.7-flash")
+        assert agent.generation_timeout is None
+
+    def test_finite_stream_completes_when_no_timeout(self):
+        class _FiniteAgent(Agent):
+            def _raw_stream(self, messages, model, options):
+                yield "a", None
+                yield "b", None
+
+        agent = _FiniteAgent("stub-model")
+        # No timeout set -> whole stream is consumed.
+        assert list(agent.stream("hi")) == ["a", "b"]
+        assert agent.contexts["default"].message_history[-1]["content"] == "ab"
+
+    def test_timeout_stops_runaway_stream(self):
+        import itertools
+
+        class _InfiniteAgent(Agent):
+            def _raw_stream(self, messages, model, options):
+                while True:  # would hang forever without the timeout
+                    yield "x", None
+
+        agent = _InfiniteAgent("stub-model")
+        agent.generation_timeout = 5.0
+
+        # Fake monotonic clock: t0=0, first check=1 (<5, continue),
+        # second check=100 (>5, break), then steady for post-loop timing.
+        clock = itertools.chain([0.0, 1.0, 100.0], itertools.repeat(100.0))
+        with patch("time.monotonic", side_effect=lambda: next(clock)):
+            chunks = list(agent.stream("hi"))
+
+        # Broke out after two tokens instead of looping forever.
+        assert chunks == ["x", "x"]
+        # Whatever was produced is committed as the response.
+        assert agent.contexts["default"].message_history[-1]["content"] == "xx"
+
+    def test_timeout_not_triggered_within_budget(self):
+        import itertools
+
+        class _FiniteAgent(Agent):
+            def _raw_stream(self, messages, model, options):
+                yield "a", None
+                yield "b", None
+
+        agent = _FiniteAgent("stub-model")
+        agent.generation_timeout = 60.0
+        # Clock never exceeds the budget -> full stream consumed.
+        clock = itertools.chain([0.0, 1.0, 2.0], itertools.repeat(2.0))
+        with patch("time.monotonic", side_effect=lambda: next(clock)):
+            assert list(agent.stream("hi")) == ["a", "b"]
+
+
 class TestAgentInferenceFlowchart:
     """Tests for optional chain-of-thought inference flowchart."""
 
@@ -1066,28 +1127,28 @@ class TestAgentInferenceFlowchart:
 
 
 class TestOllamaAgentStreamStatusCallback:
-    @patch('pithos.agent.ollama_agent.chat')
+    @patch("pithos.agent.ollama_agent.chat")
     def test_status_callback_fires_thinking_and_generating(self, mock_chat):
         """status_callback receives 'thinking' before stream and 'generating' on first token."""
         chunk1, chunk2 = Mock(), Mock()
-        chunk1.message.content = 'Hi'
-        chunk2.message.content = ' there'
+        chunk1.message.content = "Hi"
+        chunk2.message.content = " there"
         mock_chat.return_value = iter([chunk1, chunk2])
 
-        agent = OllamaAgent('glm-4.7-flash')
+        agent = OllamaAgent("glm-4.7-flash")
         events = []
-        list(agent.stream('q', status_callback=lambda s, d=None: events.append((s, d))))
+        list(agent.stream("q", status_callback=lambda s, d=None: events.append((s, d))))
 
         statuses = [e[0] for e in events]
-        assert statuses[0] == 'thinking'
-        assert 'generating' in statuses
+        assert statuses[0] == "thinking"
+        assert "generating" in statuses
 
-    @patch('pithos.agent.ollama_agent.chat')
+    @patch("pithos.agent.ollama_agent.chat")
     def test_status_callback_optional(self, mock_chat):
         """Existing callers (no status_callback) must still work."""
         chunk = Mock()
-        chunk.message.content = 'ok'
+        chunk.message.content = "ok"
         mock_chat.return_value = iter([chunk])
-        agent = OllamaAgent('glm-4.7-flash')
+        agent = OllamaAgent("glm-4.7-flash")
         # Should not raise
-        assert list(agent.stream('q')) == ['ok']
+        assert list(agent.stream("q")) == ["ok"]

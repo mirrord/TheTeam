@@ -47,6 +47,12 @@ class Agent(ABC):
         self.default_system_prompt = system_prompt
         self.temperature = temperature if temperature is not None else 0.7
         self.max_tokens = -1
+        # Optional wall-clock cap (seconds) on a single generation. When set,
+        # ``stream()`` stops consuming the model stream once this many seconds
+        # have elapsed, committing whatever was produced so far. This bounds
+        # worst-case runtime so a runaway/looping model cannot hang forever
+        # (Ollama streaming has no timeout of its own). ``None`` = unbounded.
+        self.generation_timeout: Optional[float] = None
         self.contexts: dict[str, AgentContext] = {}
         self.current_context: Optional[str] = None
         # Tool calling support
@@ -632,6 +638,22 @@ class Agent(ABC):
                         except Exception:
                             pass
                 yield token
+
+                # Wall-clock generation cap: stop consuming a runaway/looping
+                # stream so a single call cannot hang indefinitely. Whatever was
+                # produced so far falls through and is committed as the response.
+                if (
+                    self.generation_timeout is not None
+                    and (_time.monotonic() - _t0) > self.generation_timeout
+                ):
+                    logger.warning(
+                        "generation_timeout (%.1fs) exceeded for model '%s'; "
+                        "stopping stream after %d chars.",
+                        self.generation_timeout,
+                        model_to_use,
+                        len(accumulated),
+                    )
+                    break
 
                 # Mid-stream tool detection: only execute newly-seen complete calls.
                 if self.tools_enabled and self.tool_registry and self.tool_executor:

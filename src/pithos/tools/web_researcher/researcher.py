@@ -277,6 +277,10 @@ class WebResearcher:
 
         if cfg.subagent_model:
             agent.default_model = cfg.subagent_model
+        # Bound each generation by wall-clock time so a runaway/looping model
+        # cannot hang the tool indefinitely (Ollama streaming has no timeout).
+        if cfg.subagent_timeout and cfg.subagent_timeout > 0:
+            agent.generation_timeout = cfg.subagent_timeout
         return agent
 
     def _build_editor_agent(self) -> Any:
@@ -312,6 +316,10 @@ class WebResearcher:
 
         if cfg.editor_model:
             agent.default_model = cfg.editor_model
+        # Bound each generation by wall-clock time so a runaway/looping model
+        # cannot hang the tool indefinitely (Ollama streaming has no timeout).
+        if cfg.subagent_timeout and cfg.subagent_timeout > 0:
+            agent.generation_timeout = cfg.subagent_timeout
         return agent
 
 

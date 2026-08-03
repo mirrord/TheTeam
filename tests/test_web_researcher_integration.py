@@ -304,6 +304,49 @@ class TestWebResearcherFacade:
         assert report.sources == []
 
 
+class TestWebResearcherSubagentTimeout:
+    """Subagents must be built with a wall-clock generation cap so a
+    runaway/looping model cannot hang the tool indefinitely. A time budget
+    is used deliberately instead of a token cap (token limits are unreliable:
+    often counted against input+output, silently suppressing output).
+    """
+
+    def test_build_agent_applies_generation_timeout(self) -> None:
+        from pithos.tools.web_researcher.researcher import WebResearcher
+
+        cm = MagicMock()
+        cm.get_config.return_value = None  # force fallback OllamaAgent
+        cfg = WebResearchConfig(subagent_timeout=45.0)
+        wr = WebResearcher(cm, config=cfg)
+        agent = wr._build_agent()
+        assert agent.generation_timeout == 45.0
+
+    def test_build_editor_agent_applies_generation_timeout(self) -> None:
+        from pithos.tools.web_researcher.researcher import WebResearcher
+
+        cm = MagicMock()
+        cm.get_config.return_value = None
+        cfg = WebResearchConfig(subagent_timeout=33.0)
+        wr = WebResearcher(cm, config=cfg)
+        agent = wr._build_editor_agent()
+        assert agent.generation_timeout == 33.0
+
+    def test_zero_timeout_leaves_generation_unbounded(self) -> None:
+        from pithos.tools.web_researcher.researcher import WebResearcher
+
+        cm = MagicMock()
+        cm.get_config.return_value = None
+        cfg = WebResearchConfig(subagent_timeout=0)
+        wr = WebResearcher(cm, config=cfg)
+        agent = wr._build_agent()
+        assert agent.generation_timeout is None  # default unbounded sentinel
+
+    def test_default_config_bounds_generation(self) -> None:
+        """The shipped default must be a finite, positive time budget."""
+        cfg = WebResearchConfig()
+        assert cfg.subagent_timeout > 0
+
+
 class TestWebResearcherDocumentWriting:
     def test_write_document_creates_markdown_file(self, tmp_path) -> None:
         from pithos.tools.web_researcher.models import ResearchReport

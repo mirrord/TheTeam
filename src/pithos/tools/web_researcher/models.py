@@ -67,6 +67,13 @@ class WebResearchConfig:
     keep_collection: bool = False
     subagent_config_name: str = "web_researcher"
     subagent_model: Optional[str] = None  # overrides config if set
+    # Wall-clock cap (seconds) on any single subagent generation. Bounds
+    # worst-case runtime so a runaway/looping model cannot hang the tool
+    # indefinitely (Ollama streaming has no timeout of its own). A time
+    # budget is used deliberately instead of a token cap: token limits are
+    # unreliable (often counted against input+output, silently suppressing
+    # output). 0 or negative disables the cap (not recommended).
+    subagent_timeout: float = 120.0
     summarizer_model: Optional[str] = None
     search_results_per_domain: int = 5
     enabled: bool = True
