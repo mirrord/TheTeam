@@ -19,6 +19,7 @@ from .models import EdgeInfo, ExecutionTrace, ProgressEvent, TraceEntry
 from .graph import FlowchartGraph
 from .executor import FlowchartExecutor
 from .tracer import ExecutionTracer
+from .trace_stream import get_global_trace_sink
 from .watcher import FlowchartWatcher
 from .serialization import FlowchartSerializer
 
@@ -50,6 +51,13 @@ class Flowchart:
             tracer=self._tracer,
             metrics_name=registered_name or "unnamed",
         )
+
+        # If global flowchart tracing is enabled (e.g. talos --trace-flowcharts),
+        # automatically stream this flowchart's node activity to the trace file.
+        global_sink = get_global_trace_sink()
+        if global_sink is not None:
+            self._tracer.enable()
+            self._tracer.attach_stream_sink(global_sink)
 
     # ==================================================================
     # Properties that proxy to composed objects

@@ -987,6 +987,9 @@ talos config
 
 # Test microphone input
 talos mic-test
+
+# Stream every flowchart's node activity to a trace file
+talos --trace-flowcharts shell
 ```
 
 Requires `pip install -e ".[talos]"` for the voice and Telegram interfaces.

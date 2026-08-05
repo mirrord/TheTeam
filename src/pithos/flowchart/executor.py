@@ -243,6 +243,9 @@ class FlowchartExecutor:
 
         node_inputs = input_state.get_all_input_data()
 
+        if self._tracer.enabled:
+            self._tracer.stream_input(node_id, node_inputs)
+
         if self._on_progress is not None:
             event = ProgressEvent(
                 step=self._step_counter,

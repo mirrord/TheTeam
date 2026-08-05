@@ -9,6 +9,12 @@ from .models import EdgeInfo, ExecutionTrace, ProgressEvent, TraceEntry
 from .graph import FlowchartGraph
 from .executor import FlowchartExecutor
 from .tracer import ExecutionTracer
+from .trace_stream import (
+    FlowchartTraceSink,
+    enable_global_trace,
+    disable_global_trace,
+    get_global_trace_sink,
+)
 from .watcher import FlowchartWatcher
 from .serialization import FlowchartSerializer
 
@@ -30,6 +36,10 @@ __all__ = [
     "FlowchartGraph",
     "FlowchartExecutor",
     "ExecutionTracer",
+    "FlowchartTraceSink",
+    "enable_global_trace",
+    "disable_global_trace",
+    "get_global_trace_sink",
     "FlowchartWatcher",
     "FlowchartSerializer",
     "ValidationError",

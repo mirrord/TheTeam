@@ -16,7 +16,7 @@ from .models import (
 )
 
 if TYPE_CHECKING:
-    pass
+    from .trace_stream import FlowchartTraceSink
 
 
 class ExecutionTracer:
@@ -27,6 +27,7 @@ class ExecutionTracer:
         self._entries: list[TraceEntry] = []
         self._start_time: Optional[datetime] = None
         self._end_time: Optional[datetime] = None
+        self._stream_sink: Optional["FlowchartTraceSink"] = None
 
     @property
     def enabled(self) -> bool:
@@ -35,6 +36,15 @@ class ExecutionTracer:
     def enable(self) -> None:
         """Enable execution tracing for subsequent runs."""
         self._enabled = True
+
+    def attach_stream_sink(self, sink: "FlowchartTraceSink") -> None:
+        """Attach a :class:`FlowchartTraceSink` to stream node activity to."""
+        self._stream_sink = sink
+
+    def stream_input(self, node_id: str, inputs: dict[str, Any]) -> None:
+        """Write an INPUT line for *node_id* to the attached stream sink, if any."""
+        if self._stream_sink is not None:
+            self._stream_sink.write_input(node_id, inputs)
 
     def begin_run(self) -> None:
         """Reset trace state at the start of a new run."""
@@ -81,6 +91,9 @@ class ExecutionTracer:
             _checkpoint=checkpoint,
         )
         self._entries.append(entry)
+
+        if self._stream_sink is not None:
+            self._stream_sink.write_output(node_id, outputs, ts=ts_end)
 
     def get_execution_trace(
         self, finished: bool, total_steps: int

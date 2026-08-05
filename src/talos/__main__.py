@@ -10,10 +10,11 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from .config import ensure_config, build_agent, load_config
+from .config import DEFAULT_CONFIG_PATH, ensure_config, build_agent, load_config
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -36,6 +37,23 @@ def _build_parser() -> argparse.ArgumentParser:
         "--debug",
         action="store_true",
         help="Enable DEBUG-level logging.",
+    )
+    parser.add_argument(
+        "--trace-flowcharts",
+        action="store_true",
+        help=(
+            "Stream every flowchart's per-node activity "
+            "(timestamp, node, input/output) to a trace file. "
+            "Defaults to <config_dir>/traces/flowchart-trace-<timestamp>.log; "
+            "override with --trace-flowcharts-path."
+        ),
+    )
+    parser.add_argument(
+        "--trace-flowcharts-path",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="Override the trace file path used by --trace-flowcharts.",
     )
 
     sub = parser.add_subparsers(dest="interface", required=False)
@@ -111,6 +129,19 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _resolve_trace_path(explicit_path: Optional[Path], config_path: Path) -> Path:
+    """Resolve the trace file path for ``--trace-flowcharts``.
+
+    Returns *explicit_path* if given, otherwise a timestamped default file
+    under ``<config_dir>/traces/``.
+    """
+    if explicit_path:
+        return Path(explicit_path)
+    config_dir = config_path.parent
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    return config_dir / "traces" / f"flowchart-trace-{ts}.log"
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -119,6 +150,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         level=logging.DEBUG if args.debug else logging.WARNING,
         format="%(levelname)s %(name)s: %(message)s",
     )
+
+    if args.trace_flowcharts:
+        from pithos.flowchart import enable_global_trace
+
+        config_path = Path(args.config) if args.config else DEFAULT_CONFIG_PATH
+        trace_path = _resolve_trace_path(args.trace_flowcharts_path, config_path)
+        enable_global_trace(trace_path)
+        print(f"Streaming flowchart trace to {trace_path}")
 
     if args.interface is None:
         parser.print_help()

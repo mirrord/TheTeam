@@ -229,7 +229,7 @@ pip install -e ".[talos]"
 ## CLI Reference
 
 ```
-talos [--config PATH] [--reconfigure] [--debug] <interface>
+talos [--config PATH] [--reconfigure] [--debug] [--trace-flowcharts] [--trace-flowcharts-path PATH] <interface>
 ```
 
 | Subcommand | Description |
@@ -247,6 +247,8 @@ talos [--config PATH] [--reconfigure] [--debug] <interface>
 | `--config PATH` | Override the default config path (`~/.talos/config.yaml`) |
 | `--reconfigure` | Force re-run of the setup wizard even if a config exists |
 | `--debug` | Enable DEBUG-level logging |
+| `--trace-flowcharts` | Stream every flowchart's per-node activity (timestamp, node, input/output) to a trace file. Applies to all flowcharts executed during the run — chain-of-thought inference flowcharts, the `flowchart` tool, and nested `ToolCallNode` executions. Defaults to `<config_dir>/traces/flowchart-trace-<timestamp>.log` |
+| `--trace-flowcharts-path PATH` | Override the trace file path used by `--trace-flowcharts` |
 
 **`mic-test` flags:**
 
