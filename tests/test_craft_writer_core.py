@@ -192,6 +192,37 @@ class TestRetrieveCraftNotes:
         )
         assert result == {"themes": []}
 
+    def test_retrieves_dimensions_concurrently_preserving_order_and_isolation(
+        self,
+    ) -> None:
+        # Dimension queries are independent, so they may run concurrently;
+        # the result dict must still be keyed in the requested dimension
+        # order and one dimension's failure must not affect the others.
+        dims = [
+            "characterization",
+            "themes",
+            "scene_construction",
+            "dialogue",
+        ]
+
+        class SlowMixedStore:
+            def retrieve(
+                self, category, query, n_results=None, where=None, min_relevance=None
+            ):
+                dim = (where or {}).get("dimension")
+                if dim == "themes":
+                    raise RuntimeError("chromadb offline")
+                return [FakeSearchResult(f"note for {dim}", {"dimension": dim})]
+
+        result = retrieve_craft_notes(
+            SlowMixedStore(), dimensions=dims, query="a heist"
+        )
+        assert list(result.keys()) == dims
+        assert result["themes"] == []
+        assert result["characterization"][0].content == "note for characterization"
+        assert result["scene_construction"][0].content == "note for scene_construction"
+        assert result["dialogue"][0].content == "note for dialogue"
+
 
 class TestFormatNotesForPrompt:
     def test_empty_returns_placeholder(self) -> None:

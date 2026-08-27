@@ -38,10 +38,14 @@ class ScriptedAgent:
     def __init__(self) -> None:
         self.system = ""
         self.calls = 0
+        self.clear_calls = 0
         self.section_call_count = 0
 
     def set_system_prompt(self, p: str) -> None:
         self.system = p
+
+    def clear_context(self) -> None:
+        self.clear_calls += 1
 
     def send(self, prompt: str, model=None) -> str:
         self.calls += 1
@@ -212,6 +216,35 @@ class TestCraftWriterWrite:
         story = writer.write("a heist gone wrong")
         assert story.title == "The Last Job"
         assert story.errors == []
+
+    def test_send_clears_agent_context_before_each_call(self) -> None:
+        # Each stage's prompt already carries everything it needs (title,
+        # story-so-far, notes, etc.) explicitly, so the shared subagent's own
+        # conversation history must be cleared before every call - otherwise
+        # later calls silently resend the whole growing transcript on top of
+        # what's already injected in the prompt.
+        agent = ScriptedAgent()
+        writer = CraftWriter(
+            config_manager=None,
+            config=_config(),
+            agent_factory=lambda: agent,
+            memory_store=FakeMemoryStore(),
+        )
+        writer.write("a heist gone wrong")
+        # outline (1) + sections (2) + revision (1) = 4 sends.
+        assert agent.calls == 4
+        assert agent.clear_calls == agent.calls
+
+    def test_send_tolerates_agent_without_clear_context(self) -> None:
+        # Backends/fakes that don't implement clear_context() must still work.
+        writer = CraftWriter(
+            config_manager=None,
+            config=_config(),
+            agent_factory=lambda: FailingOutlineAgent(),
+            memory_store=FakeMemoryStore(),
+        )
+        story = writer.write("a heist gone wrong")
+        assert any("outline generation failed" in e for e in story.errors)
 
 
 class TestCraftWriterToolExecutor:

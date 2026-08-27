@@ -9,6 +9,7 @@ story-writing subagent can be guided by them.
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -40,15 +41,22 @@ def retrieve_craft_notes(
     Returns:
         Dict mapping each dimension to a list of results (whatever
         ``memory_store.retrieve()`` returns, typically
-        :class:`~pithos.tools.memory_tool.SearchResult` instances). A
-        per-dimension retrieval failure is logged and yields an empty list
-        for that dimension rather than aborting the whole run.
+        :class:`~pithos.tools.memory_tool.SearchResult` instances), keyed in
+        ``dimensions`` order. A per-dimension retrieval failure is logged
+        and yields an empty list for that dimension rather than aborting
+        the whole run.
+
+    Note:
+        Per-dimension queries are independent, so - when there's more than
+        one - they're issued concurrently via a small thread pool. This is
+        a pure I/O-bound fan-out (network/DB calls to the knowledge base);
+        result ordering and per-dimension error isolation are unaffected.
     """
     results: dict[str, list[Any]] = {d: [] for d in dimensions}
     if memory_store is None or not query or not query.strip():
         return results
 
-    for dimension in dimensions:
+    def _fetch_one(dimension: str) -> list[Any]:
         where: dict[str, Any]
         if source_title:
             where = {
@@ -72,7 +80,20 @@ def retrieve_craft_notes(
                 "failed to retrieve craft notes [dimension=%s]: %s", dimension, exc
             )
             hits = []
-        results[dimension] = list(hits or [])
+        return list(hits or [])
+
+    if len(dimensions) <= 1:
+        for dimension in dimensions:
+            results[dimension] = _fetch_one(dimension)
+        return results
+
+    with ThreadPoolExecutor(max_workers=min(len(dimensions), 6)) as executor:
+        future_by_dim = {
+            executor.submit(_fetch_one, dimension): dimension
+            for dimension in dimensions
+        }
+        for future, dimension in future_by_dim.items():
+            results[dimension] = future.result()
     return results
 
 

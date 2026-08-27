@@ -5,6 +5,7 @@ import tempfile
 import shutil
 import os
 import time
+from typing import Any
 
 # Skip all tests if ChromaDB is not available
 try:
@@ -371,6 +372,41 @@ class TestCollectionCache:
         col1 = store._get_collection("test")
         col2 = store._get_collection("test")
         assert col1 is col2
+
+    def test_concurrent_get_collection_is_race_free(self, temp_dir):
+        """Concurrent access to the same (or evicting) categories must not
+        raise (e.g. KeyError from an unsynchronized OrderedDict mutation) and
+        must always return a usable collection. Guards against callers -
+        such as craft_writer's parallel per-dimension note retrieval - that
+        share one MemoryStore across threads."""
+        import threading
+
+        store = MemoryStore(persist_directory=temp_dir)
+        store._cache_max_size = 3  # force eviction churn under concurrency
+        store._cache_ttl = 0.01  # force TTL churn under concurrency
+
+        categories = [f"cat_{i % 5}" for i in range(40)]
+        errors: list[BaseException] = []
+        results: list[Any] = []
+        lock = threading.Lock()
+
+        def worker(category: str) -> None:
+            try:
+                col = store._get_collection(category)
+                with lock:
+                    results.append(col)
+            except BaseException as exc:  # noqa: BLE001 - capture for assertion
+                with lock:
+                    errors.append(exc)
+
+        threads = [threading.Thread(target=worker, args=(c,)) for c in categories]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors == []
+        assert len(results) == len(categories)
 
     def test_ttl_eviction_on_access(self, temp_dir):
         """A stale cache entry is evicted and re-fetched on the next access."""

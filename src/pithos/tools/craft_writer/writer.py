@@ -402,7 +402,24 @@ class CraftWriter:
 
 
 def _send(agent: Any, prompt: str, model: Optional[str]) -> str:
-    """Send a prompt to the agent, tolerating backends without ``model``."""
+    """Send a one-shot prompt to the agent, clearing its history first.
+
+    Every stage prompt is self-contained (title, story-so-far, craft notes,
+    etc. are all passed explicitly - see :mod:`.prompts`), so the agent's
+    own conversation history from earlier stage calls is redundant. Without
+    clearing it, each subsequent call to the shared subagent would silently
+    resend the entire growing transcript *in addition to* what's already
+    injected in the prompt, inflating latency roughly quadratically over
+    the run. ``clear_context`` only drops message history and leaves the
+    current system prompt intact (see :meth:`AgentContext.clear`).
+
+    Tolerates backends/fakes that don't implement ``clear_context`` or
+    don't accept a ``model`` kwarg.
+    """
+    try:
+        agent.clear_context()
+    except Exception:
+        pass
     try:
         if model is not None:
             return agent.send(prompt, model=model) or ""

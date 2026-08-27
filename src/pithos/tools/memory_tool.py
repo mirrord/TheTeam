@@ -2,6 +2,7 @@
 
 import os
 import json
+import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, asdict
@@ -103,6 +104,15 @@ class MemoryStore:
         # Collection cache with TTL and LRU eviction.
         # OrderedDict insertion/access order tracks LRU (front = oldest).
         self._collections: OrderedDict[str, _CacheEntry] = OrderedDict()
+        # Guards the check-then-mutate cache bookkeeping in _get_collection().
+        # Callers may legitimately issue concurrent retrieve()/store() calls
+        # against the same MemoryStore from multiple threads (e.g. craft_writer
+        # fans out per-dimension note retrieval), and OrderedDict's del/
+        # move_to_end/popitem sequence isn't safe under unsynchronized
+        # concurrent access. The lock only covers cache bookkeeping - the
+        # actual (slower) ChromaDB query/store calls happen outside it, so
+        # concurrent callers still run their I/O in parallel.
+        self._collections_lock = threading.Lock()
         cache_config = self.config.get("collection_cache", {})
         self._cache_ttl: float = float(cache_config.get("ttl_seconds", 300))
         self._cache_max_size: int = int(cache_config.get("max_size", 50))
@@ -159,33 +169,40 @@ class MemoryStore:
         """
         now = time.monotonic()
 
-        if category in self._collections:
-            entry = self._collections[category]
-            if self._cache_ttl > 0 and (now - entry.last_accessed) > self._cache_ttl:
-                # Entry has expired — remove it and fall through to re-fetch.
-                del self._collections[category]
-            else:
-                # Cache hit — refresh access time and promote to MRU position.
-                entry.last_accessed = now
-                self._collections.move_to_end(category)
-                return entry.collection
+        with self._collections_lock:
+            if category in self._collections:
+                entry = self._collections[category]
+                if (
+                    self._cache_ttl > 0
+                    and (now - entry.last_accessed) > self._cache_ttl
+                ):
+                    # Entry has expired — remove it and fall through to re-fetch.
+                    del self._collections[category]
+                else:
+                    # Cache hit — refresh access time and promote to MRU position.
+                    entry.last_accessed = now
+                    self._collections.move_to_end(category)
+                    return entry.collection
 
-        # Cache miss (or just expired) — fetch from ChromaDB.
+        # Cache miss (or just expired) — fetch from ChromaDB. Deliberately
+        # outside the lock so concurrent misses for different categories
+        # aren't serialized on this (slower) network/disk call.
         collection = self.client.get_or_create_collection(
             name=category,
             metadata={"category": category, "created": datetime.now().isoformat()},
         )
 
-        # Evict LRU entries to stay within max_size (0 = unlimited).
-        if self._cache_max_size > 0:
-            while len(self._collections) >= self._cache_max_size:
-                self._collections.popitem(last=False)  # Remove LRU (front)
+        with self._collections_lock:
+            # Evict LRU entries to stay within max_size (0 = unlimited).
+            if self._cache_max_size > 0:
+                while len(self._collections) >= self._cache_max_size:
+                    self._collections.popitem(last=False)  # Remove LRU (front)
 
-        self._collections[category] = _CacheEntry(
-            collection=collection,
-            last_accessed=now,
-            created_at=now,
-        )
+            self._collections[category] = _CacheEntry(
+                collection=collection,
+                last_accessed=now,
+                created_at=now,
+            )
         return collection
 
     def store(

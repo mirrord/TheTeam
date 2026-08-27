@@ -703,6 +703,7 @@ class ToolCallNode(FlowNode):
                 "exit_code": result.exit_code,
                 "command": result.command,
                 "execution_time": result.execution_time,
+                "error_hint": result.error_hint,
             }
 
             # Handle errors based on policy

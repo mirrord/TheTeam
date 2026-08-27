@@ -62,7 +62,7 @@ class Prompt2ImageConfig:
     device: str = "cuda"
     sampler: str = "Euler a"
     base_url: str = "http://127.0.0.1:7860"
-    timeout: float = 120.0
+    timeout: float = 300.0
     comfyui_base_url: str = "http://127.0.0.1:8188"
     comfyui_workflow_path: str = ""
 

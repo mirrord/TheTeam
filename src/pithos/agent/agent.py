@@ -1027,7 +1027,7 @@ class Agent(ABC):
         _tmp = ToolRegistry(config_manager, providers=[])
         tool_config = _tmp.config
 
-        timeout = tool_config.get("timeout", 30)
+        timeout = tool_config.get("timeout", 120)
         max_output_size = tool_config.get("max_output_size", 10000)
 
         # Always register a CLI provider.
@@ -1047,6 +1047,7 @@ class Agent(ABC):
                 FlowchartToolExecutor(
                     config_manager=config_manager,
                     max_steps=fc_config.get("max_steps", 100),
+                    timeout=fc_config.get("timeout", 300),
                 )
             )
 

@@ -4,7 +4,7 @@
 enabled: true
 
 # Maximum execution time for any tool (seconds)
-timeout: 30
+timeout: 150
 
 # Maximum size of captured output (bytes)
 max_output_size: 10000
@@ -143,7 +143,7 @@ exclude:
 flowcharts:
   enabled: true
   # Maximum execution time for flowchart tools (seconds)
-  timeout: 120
+  timeout: 600
   # Maximum steps per flowchart execution
   max_steps: 100
   # Per-flowchart enable/disable overrides.

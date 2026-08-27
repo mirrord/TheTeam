@@ -111,6 +111,66 @@ class TestFlowchartToolExecutor:
 
         assert result.success is False
         assert "agent not responding" in result.stderr
+        assert result.error_hint == (
+            "The flowchart execution failed. "
+            "Check agent availability and flowchart configuration."
+        )
+
+    @patch("pithos.flowchart.Flowchart")
+    def test_run_flowchart_node_timeout_gets_timeout_specific_hint(
+        self, MockFlowchart, mock_config_manager
+    ):
+        """A TimeoutError raised by a node inside the flowchart (e.g. CustomNode
+        or GitNode) must produce a distinct, timeout-specific error_hint rather
+        than the generic 'execution failed' hint used for other failures."""
+        fc_instance = MagicMock()
+        fc_instance.run.side_effect = TimeoutError(
+            "Custom code execution timed out after 30s"
+        )
+        MockFlowchart.from_registered.return_value = fc_instance
+
+        executor = FlowchartToolExecutor(mock_config_manager)
+        result = executor.run("simple_reflect", "hello", agents={})
+
+        assert result.success is False
+        assert "timed out after 30s" in result.stderr
+        assert result.error_hint is not None
+        assert "timed out" in result.error_hint.lower()
+        # Must be distinguishable from the generic failure hint.
+        assert "check agent availability" not in result.error_hint.lower()
+
+    @patch("pithos.flowchart.Flowchart")
+    def test_run_flowchart_overall_timeout(self, MockFlowchart, mock_config_manager):
+        """When the whole flowchart run exceeds the configured timeout, the
+        executor must abandon it and return a clear timeout ToolResult rather
+        than blocking the agent indefinitely."""
+        import threading
+        import time
+
+        release_event = threading.Event()
+
+        def _slow_run(**kwargs):
+            # Block well past the configured timeout; released at test end
+            # so the background thread doesn't leak into other tests.
+            release_event.wait(timeout=5)
+            return "too late"
+
+        fc_instance = MagicMock()
+        fc_instance.run.side_effect = _slow_run
+        MockFlowchart.from_registered.return_value = fc_instance
+
+        executor = FlowchartToolExecutor(mock_config_manager, timeout=0.05)
+        start = time.time()
+        result = executor.run("simple_reflect", "hello", agents={})
+        elapsed = time.time() - start
+
+        release_event.set()  # let the background thread finish
+
+        assert result.success is False
+        assert elapsed < 2.0  # returned promptly, did not block for the full 5s
+        assert "timed out" in result.stderr.lower()
+        assert result.error_hint is not None
+        assert "timed out" in result.error_hint.lower()
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 """Flowchart tool — lets agents invoke registered flowcharts as tools."""
 
 import logging
+import threading
 import time
 from typing import Any, Optional
 
@@ -18,9 +19,16 @@ class FlowchartToolExecutor(ToolProvider):
         self,
         config_manager: ConfigManager,
         max_steps: int = 100,
+        timeout: Optional[float] = 120.0,
     ):
         self.config_manager = config_manager
         self.max_steps = max_steps
+        # Overall wall-clock cap on a single flowchart run (seconds). ``None``
+        # disables the cap entirely (blocks until the flowchart finishes).
+        # Enforced via a daemon thread since a hung flowchart step (e.g. a
+        # CustomNode or GitNode with its own internal timeout) cannot be
+        # forcibly interrupted from another thread in Python.
+        self.timeout = timeout
 
     # ------------------------------------------------------------------
     # ToolProvider interface
@@ -157,21 +165,61 @@ class FlowchartToolExecutor(ToolProvider):
                 error_hint="Check the flowchart YAML for syntax errors.",
             )
 
-        try:
-            output = fc.run(
-                agents=agents,
-                initial_input=initial_input,
-                max_steps=self.max_steps,
-            )
+        result_holder: list[str] = []
+        exc_holder: list[BaseException] = []
+
+        def _run() -> None:
+            try:
+                result_holder.append(
+                    fc.run(
+                        agents=agents,
+                        initial_input=initial_input,
+                        max_steps=self.max_steps,
+                    )
+                )
+            except BaseException as exc:  # noqa: BLE001 - re-raised in caller thread
+                exc_holder.append(exc)
+
+        # Run in a daemon thread with an overall wall-clock cap. A hung node
+        # (e.g. a CustomNode or GitNode already blocked past its own internal
+        # timeout) cannot be forcibly interrupted, so a timed-out run is
+        # abandoned rather than joined indefinitely -- the thread finishes on
+        # its own eventually since it is a daemon thread.
+        thread = threading.Thread(target=_run, daemon=True)
+        thread.start()
+        thread.join(timeout=self.timeout)
+
+        if thread.is_alive():
             return ToolResult(
-                success=True,
-                stdout=output,
-                stderr="",
-                exit_code=0,
+                success=False,
+                stdout="",
+                stderr=f"Flowchart '{flowchart_name}' timed out after "
+                f"{self.timeout} seconds",
+                exit_code=-1,
                 execution_time=time.time() - start,
                 command=command,
+                error_hint="This flowchart run timed out. Try a smaller or "
+                "simpler input, break the task into smaller steps, or "
+                "increase 'flowcharts.timeout' in tool_config.yaml.",
             )
-        except Exception as exc:
+
+        if exc_holder:
+            exc = exc_holder[0]
+            if isinstance(exc, TimeoutError):
+                # A node inside the flowchart (e.g. CustomNode, GitNode) hit
+                # its own internal timeout -- give a timeout-specific hint
+                # instead of the generic failure hint below.
+                return ToolResult(
+                    success=False,
+                    stdout="",
+                    stderr=str(exc),
+                    exit_code=1,
+                    execution_time=time.time() - start,
+                    command=command,
+                    error_hint="A step inside this flowchart timed out. Try "
+                    "a smaller or simpler input, or increase that step's "
+                    "timeout in the flowchart's YAML config.",
+                )
             return ToolResult(
                 success=False,
                 stdout="",
@@ -182,6 +230,16 @@ class FlowchartToolExecutor(ToolProvider):
                 error_hint="The flowchart execution failed. "
                 "Check agent availability and flowchart configuration.",
             )
+
+        output = result_holder[0] if result_holder else ""
+        return ToolResult(
+            success=True,
+            stdout=output,
+            stderr="",
+            exit_code=0,
+            execution_time=time.time() - start,
+            command=command,
+        )
 
     # ------------------------------------------------------------------
     # Helpers

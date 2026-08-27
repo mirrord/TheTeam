@@ -346,6 +346,47 @@ class TestToolCallNode:
         call_args = mock_executor.run.call_args[0][0]
         assert "Hello World" in call_args
 
+    def test_toolcall_node_preserves_error_hint(self):
+        """A ToolResult's error_hint (e.g. from a CLI timeout) must survive
+        into the tool_result dict saved to flowchart state, not be dropped."""
+        from pithos.flownode import ToolCallNode
+        from pithos.tools import ToolResult
+        from pithos.message import NodeInputState, Message, MessageRouter
+
+        node = ToolCallNode(
+            command="slow-command",
+            save_to="result",
+            error_handling="continue",
+            inputs=["default"],
+            outputs=["default"],
+        )
+
+        mock_executor = Mock()
+        mock_registry = Mock()
+        mock_executor.run.return_value = ToolResult(
+            success=False,
+            stdout="",
+            stderr="Command timed out after 30 seconds",
+            exit_code=-1,
+            execution_time=30.0,
+            command="slow-command",
+            error_hint="Command took too long. Try simplifying or use a faster operation.",
+        )
+
+        router = MessageRouter()
+        router.shared_context["tool_executor"] = mock_executor
+        router.shared_context["tool_registry"] = mock_registry
+
+        input_state = NodeInputState(node_id="test", required_inputs=["default"])
+        msg = Message(data="input", input_key="default")
+        input_state.receive_message(msg)
+
+        outputs = node.execute_with_messages(input_state, message_router=router)
+
+        assert outputs[0].data["error_hint"] == (
+            "Command took too long. Try simplifying or use a faster operation."
+        )
+
     def test_toolcall_node_error_handling_stop(self):
         """Test ToolCallNode with stop error handling."""
         from pithos.flownode import ToolCallNode
