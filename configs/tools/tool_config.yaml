@@ -184,6 +184,14 @@ craft_analysis:
 craft_writing:
   enabled: true
 
+# Coding harness virtual tool configuration
+# When enabled, the agent (or a subagent) can invoke `code <task>` to run a
+# full agentic coding harness: a single coding agent that plans, edits files,
+# runs tests, and self-corrects in a workspace-jailed loop. Full settings live
+# in code_config.yaml.
+code:
+  enabled: true
+
 # Text-to-image virtual tool configuration
 # When enabled, the agent can invoke `prompt2image <prompt>` to render an image
 # with a local model. Full settings live in prompt2image_config.yaml.
@@ -264,6 +272,7 @@ descriptions:
   research-news: "Collect and summarise recent news articles from whitelisted domains. Usage: research-news <inquiry text>"
   craft-notes: "Analyze a story's creative-writing craft and produce prescriptive how-to notes. Usage: craft-notes <file path or raw text>"
   craft-write: "Write a short story guided by previously analyzed craft notes. Usage: craft-write <direction text>"
+  code: "Subagent-driven coding harness: plans, edits files, runs tests, and self-corrects in a workspace-jailed loop. Usage: code [--root <path>] <task description>"
   prompt2image: "Generate an image from a text prompt with a local model. Usage: prompt2image <prompt text>"
 
 # Command safety analysis configuration

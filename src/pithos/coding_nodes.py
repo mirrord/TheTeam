@@ -28,6 +28,18 @@ from typing import Any, Iterable, Optional
 
 from .flownode import FlowNode
 from .message import Message
+from .tools.coder.file_ops import (
+    apply_edit as _shared_apply_edit,
+)
+from .tools.coder.file_ops import (
+    apply_unified_diff as _shared_apply_unified_diff,
+)
+from .tools.coder.file_ops import (
+    reject_if_binary as _shared_reject_if_binary,
+)
+from .tools.coder.file_ops import (
+    resolve_in_root as _shared_resolve_in_root,
+)
 
 # ---------------------------------------------------------------------------
 # RouterNode
@@ -408,135 +420,22 @@ class EditFileNode(FlowNode):
     # -- helpers -----------------------------------------------------------
 
     def _apply_edit(self, edit: dict[str, Any], root: Path) -> dict[str, Any]:
-        if not isinstance(edit, dict):
-            raise ValueError(
-                f"EditFileNode: each edit must be a dict, got {type(edit).__name__}"
-            )
-        mode = edit.get("mode")
-        if mode not in self._MODES:
-            raise ValueError(f"EditFileNode: unsupported mode {mode!r}")
-
-        rel_path = edit.get("path")
-        if not rel_path:
-            raise ValueError("EditFileNode: edit missing 'path'")
-
-        target = self._resolve_path(rel_path, root)
-
-        if mode == "create":
-            if target.exists():
-                raise FileExistsError(f"EditFileNode: {target} already exists")
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(edit.get("content", ""), encoding="utf-8")
-            return {"path": str(target), "mode": mode}
-
-        # All other modes operate on an existing file.
-        if not target.exists():
-            raise FileNotFoundError(f"EditFileNode: {target} does not exist")
-        self._reject_if_binary(target)
-
-        original = target.read_text(encoding="utf-8")
-        if self.backup:
-            backup_path = target.with_suffix(target.suffix + ".bak")
-            backup_path.write_text(original, encoding="utf-8")
-
-        if mode == "replace":
-            target.write_text(edit.get("content", ""), encoding="utf-8")
-        elif mode == "insert_at_line":
-            line = int(edit.get("line", 1))
-            content = edit.get("content", "")
-            if not content.endswith("\n"):
-                content += "\n"
-            lines = original.splitlines(keepends=True)
-            idx = max(0, min(line - 1, len(lines)))
-            lines.insert(idx, content)
-            target.write_text("".join(lines), encoding="utf-8")
-        elif mode == "patch":
-            patch_text = edit.get("patch")
-            if not patch_text:
-                raise ValueError("EditFileNode: patch mode requires 'patch'")
-            patched = self._apply_unified_diff(original, patch_text)
-            target.write_text(patched, encoding="utf-8")
-
-        return {"path": str(target), "mode": mode}
+        return _shared_apply_edit(edit, root, backup=self.backup)
 
     def _resolve_path(self, rel_path: str, root: Path) -> Path:
-        candidate = (root / rel_path).resolve()
-        try:
-            candidate.relative_to(root)
-        except ValueError as exc:
-            raise PermissionError(
-                f"EditFileNode: path {rel_path!r} escapes allowed_root {root}"
-            ) from exc
-        return candidate
+        return _shared_resolve_in_root(rel_path, root)
 
     @staticmethod
     def _reject_if_binary(path: Path) -> None:
-        try:
-            with path.open("rb") as fh:
-                chunk = fh.read(_BINARY_SNIFF_BYTES)
-        except OSError:
-            return
-        if b"\x00" in chunk:
-            raise ValueError(f"EditFileNode: refusing to edit binary file {path}")
+        _shared_reject_if_binary(path)
 
     @staticmethod
     def _apply_unified_diff(original: str, patch_text: str) -> str:
         """Apply a unified diff using a small, dependency-free patcher.
 
-        Only the body hunks are interpreted; file headers are ignored.  Each
-        hunk must match the surrounding context exactly.
+        Delegates to :func:`pithos.tools.coder.file_ops.apply_unified_diff`.
         """
-        src_lines = original.splitlines(keepends=True)
-        out_lines: list[str] = []
-        src_idx = 0
-
-        lines = patch_text.splitlines(keepends=True)
-        i = 0
-        while i < len(lines):
-            line = lines[i]
-            if line.startswith("@@"):
-                m = re.match(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", line)
-                if not m:
-                    raise ValueError(f"EditFileNode: malformed hunk header: {line!r}")
-                old_start = int(m.group(1))
-                # Copy untouched src up to the hunk
-                while src_idx < old_start - 1:
-                    out_lines.append(src_lines[src_idx])
-                    src_idx += 1
-                i += 1
-                while i < len(lines) and not lines[i].startswith("@@"):
-                    hl = lines[i]
-                    if hl.startswith("---") or hl.startswith("+++"):
-                        i += 1
-                        continue
-                    if hl.startswith(" "):
-                        if src_idx >= len(src_lines) or src_lines[src_idx] != hl[1:]:
-                            raise ValueError("EditFileNode: patch context mismatch")
-                        out_lines.append(src_lines[src_idx])
-                        src_idx += 1
-                    elif hl.startswith("-"):
-                        if src_idx >= len(src_lines) or src_lines[src_idx] != hl[1:]:
-                            raise ValueError("EditFileNode: patch deletion mismatch")
-                        src_idx += 1
-                    elif hl.startswith("+"):
-                        out_lines.append(hl[1:])
-                    elif hl.strip() == "":
-                        # blank trailing line — tolerate
-                        pass
-                    else:
-                        raise ValueError(
-                            f"EditFileNode: unrecognised patch line {hl!r}"
-                        )
-                    i += 1
-                continue
-            i += 1
-
-        # tail
-        while src_idx < len(src_lines):
-            out_lines.append(src_lines[src_idx])
-            src_idx += 1
-
-        return "".join(out_lines)
+        return _shared_apply_unified_diff(original, patch_text)
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,43 @@
+# Coding harness (`code` virtual tool) configuration
+#
+# The coding harness drives a single coding subagent through a tight
+# query -> act -> observe loop. Each step the subagent emits [RUN] / [EDIT] /
+# [SUBMIT] blocks which the harness executes against a workspace-jailed tool
+# registry (CLIToolProvider + safe file-edit/git actions), feeding truncated
+# observations back until the agent submits or a limit is reached.
+
+enabled: true
+
+# --- Subagent --------------------------------------------------------------
+subagent_config_name: "code_harness"   # configs/agents/code_harness.yaml
+subagent_model: null                   # null = use the value from the agent config
+subagent_timeout: 300                  # per-generation wall-clock cap (seconds); null = none
+
+# --- Loop limits -----------------------------------------------------------
+step_limit: 40                         # max agent steps (0 = unlimited)
+wall_time_limit_seconds: 0             # overall wall-clock cap (0 = no limit)
+max_consecutive_format_errors: 3       # stop after this many unparseable replies (0 = no limit)
+
+# --- Command execution -----------------------------------------------------
+command_timeout: 60                    # per-command subprocess timeout (seconds)
+review_policy: "allow"                 # how to treat REVIEW safety verdicts: allow | block
+
+# --- Observation shaping ---------------------------------------------------
+max_output_chars: 10000                # truncate command output beyond this
+output_head_chars: 5000
+output_tail_chars: 5000
+
+# --- Workspace / editing ---------------------------------------------------
+allowed_root: null                     # null = use per-request root, else the cwd
+backup_edits: true                     # write a .bak snapshot before in-place edits
+include_file_listing: true             # show a file listing in the first prompt
+max_listed_files: 200
+
+# --- Git -------------------------------------------------------------------
+allow_git: true
+allow_destructive_git: false           # reset/clean/push/rebase/merge stay blocked unless true
+auto_commit: false                     # commit the working tree after a successful submit
+
+# --- Output ----------------------------------------------------------------
+output_dir: "./data/coding"            # where run trajectories are written
+write_trajectory: true

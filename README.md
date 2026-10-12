@@ -154,6 +154,7 @@ pithos-agent chat glm-4.7-flash:latest --flowchart simple_reflect
 - **News Research Tool**: Recent-news collector (`research-news`) that derives search terms with a small model, scrapes recent (configurable age) articles from whitelisted domains/RSS feeds into the knowledge base, and summarises + relevance-judges each article via a subagent
 - **Craft Analysis Tool**: Creative-writing craft analyzer (`craft-notes`) that ingests a story (text, file, or directory of files) and produces prescriptive how-to notes across characterization, scene construction, themes, prose style, dialogue, and plot structure, persisted to the knowledge base
 - **Craft Writing Tool**: Subagent-driven story writer (`craft-write`) that retrieves craft notes from the knowledge base and drives a 3-stage outline → per-section draft → revision pipeline to write a short story from freeform direction
+- **Coding Harness Tool**: Subagent-driven coding harness (`code`) — a single coding agent that plans, edits files, runs tests, and self-corrects in a tight query → act → observe loop, confined to a workspace root (reuses the CLI safety checks and root-jailed file-edit/git actions). See [docs/CODING_HARNESS.md](docs/CODING_HARNESS.md)
 - **Text-to-Image Tool**: Generate images from text prompts with a local model (`prompt2image`). Pluggable backends: Automatic1111/Forge HTTP API, ComfyUI node-graph API, or in-process Hugging Face `diffusers`
 - **Conditions**: Define conditional logic for flowchart branching
 - **Configuration**: YAML-based configuration for agents, flowcharts, and conditions
@@ -807,6 +808,30 @@ finished story is persisted to the knowledge base and collected into a
 Markdown document under `data/research/stories/`. See
 [docs/CRAFT_WRITING.md](docs/CRAFT_WRITING.md) for architecture,
 configuration, and the in-flowchart `craftwrite` node.
+
+### pithos-code
+
+Run a coding task through the agentic harness: a single coding agent that
+plans, edits files, runs tests, and self-corrects in a workspace-jailed loop.
+No optional dependencies required.
+
+```bash
+# Run a task in the current directory
+pithos-code "fix the failing test in tests/test_foo.py"
+
+# Confine the agent to a specific workspace root
+pithos-code --root ./myrepo "add a --verbose flag to the CLI"
+
+# Cap the number of agent steps and emit JSON
+pithos-code --json --steps 20 "refactor utils.py into smaller modules"
+```
+
+The agent emits `[RUN]` / `[EDIT]` / `[SUBMIT]` actions each step; the harness
+executes them against a workspace-jailed tool registry (CLI safety checks +
+root-confined file-edit/git actions) and feeds truncated observations back
+until the agent submits or a limit is reached. A run trajectory is written to
+`data/coding/`. See [docs/CODING_HARNESS.md](docs/CODING_HARNESS.md) for
+architecture, configuration, and safety details.
 
 ### pithos-prompt2image
 

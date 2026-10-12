@@ -1127,6 +1127,22 @@ class Agent(ABC):
             except Exception:
                 pass  # optional feature — silently skip if deps are missing
 
+        # Optionally add a coding-harness provider.
+        code_config = tool_config.get("code", {})
+        if code_config.get("enabled", False):
+            try:
+                from ..tools.coder import (
+                    CODING_HARNESS_AVAILABLE,
+                    CoderToolExecutor,
+                )
+
+                if CODING_HARNESS_AVAILABLE:
+                    providers.append(
+                        CoderToolExecutor(config_manager=config_manager)
+                    )
+            except Exception:
+                pass  # optional feature — silently skip if deps are missing
+
         # Optionally add a prompt2image provider.
         t2i_config = tool_config.get("prompt2image", {})
         if t2i_config.get("enabled", False):

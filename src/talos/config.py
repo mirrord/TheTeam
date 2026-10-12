@@ -96,6 +96,7 @@ class ToolsConfig:
     prompt2image: Optional[dict[str, bool]] = None  # enable text-to-image tool
     craft_writing: Optional[dict[str, bool]] = None  # enable craft-write tool
     news_research: Optional[dict[str, bool]] = None  # enable research-news tool
+    code: Optional[dict[str, bool]] = None  # enable coding-harness tool
 
 
 @dataclass
@@ -371,6 +372,8 @@ def build_agent(config: TalosConfig) -> OllamaAgent:
         tool_overrides["craft_writing"] = tc.craft_writing
     if tc.news_research is not None:
         tool_overrides["news_research"] = tc.news_research
+    if tc.code is not None:
+        tool_overrides["code"] = tc.code
 
     needs_override = tc.enabled and (
         tc.mode != DEFAULT_TOOLS_MODE or tool_overrides or tc.allow or tc.deny

@@ -1040,6 +1040,13 @@ Two complementary additions extend the existing primitives:
 
 ### Example: `configs/flowcharts/general_coding.yaml`
 
+> **Note:** This multi-agent flowchart is now a **legacy** reference. The
+> recommended way to run a coding task is the single-agent **coding harness**
+> exposed as the `code` virtual tool / `pithos-code` CLI — a full
+> query → act → observe loop with iterative self-correction. See
+> [docs/CODING_HARNESS.md](CODING_HARNESS.md). The flowchart and its nodes
+> below remain supported for custom multi-role workflows.
+
 A multi-agent coding loop (`planner` → `coder` → `editfile` → `pytest` →
 `repairer` or `reviewer` → `git commit`) is provided as a reference
 configuration.  It expects four agents in `state['agents']`

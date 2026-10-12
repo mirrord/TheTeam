@@ -48,6 +48,7 @@ VIRTUAL_TOOLS: dict[str, str] = {
     "research-news": "news_research",
     "news-research": "news_research",
     "news_research": "news_research",
+    "code": "code",
 }
 
 
@@ -75,6 +76,8 @@ def _make_config_manager(tc: ToolsConfig) -> ConfigManager:
         tool_overrides["craft_writing"] = tc.craft_writing
     if tc.news_research is not None:
         tool_overrides["news_research"] = tc.news_research
+    if tc.code is not None:
+        tool_overrides["code"] = tc.code
 
     needs_override = (
         tc.mode != DEFAULT_TOOLS_MODE
@@ -185,6 +188,19 @@ def _build_registry(tc: ToolsConfig, cm: ConfigManager):
 
             if NEWS_RESEARCH_AVAILABLE:
                 providers.append(NewsResearcherToolExecutor(config_manager=cm))
+        except Exception:
+            pass
+
+    code_config = tool_config.get("code", {})
+    if code_config.get("enabled", False):
+        try:
+            from pithos.tools.coder import (
+                CODING_HARNESS_AVAILABLE,
+                CoderToolExecutor,
+            )
+
+            if CODING_HARNESS_AVAILABLE:
+                providers.append(CoderToolExecutor(config_manager=cm))
         except Exception:
             pass
 
@@ -566,6 +582,7 @@ def cmd_list_all(config: TalosConfig, config_path: Path) -> None:
             "flowcharts": ("flowcharts", tool_config.get("flowcharts", {})),
             "craft-write": ("craft_writing", tool_config.get("craft_writing", {})),
             "research-news": ("news_research", tool_config.get("news_research", {})),
+            "code": ("code", tool_config.get("code", {})),
         }
         for vname, (_, vcfg) in _vmap.items():
             enabled = vcfg.get("enabled", False)
@@ -592,6 +609,7 @@ def cmd_list_all(config: TalosConfig, config_path: Path) -> None:
             "flowcharts": tool_config.get("flowcharts", {}),
             "craft-write": tool_config.get("craft_writing", {}),
             "research-news": tool_config.get("news_research", {}),
+            "code": tool_config.get("code", {}),
         }
         for vname, vcfg in _vmap.items():
             enabled = vcfg.get("enabled", False)
