@@ -20,6 +20,36 @@ mode: strict
 
 # List of tools to include (used when mode is 'include')
 include:
+  - python
+  # --- File & text utilities ---
+  - echo
+  - cat
+  - type
+  - more
+  - less
+  - head
+  - tail
+  - ls
+  - dir
+  - pwd
+  - cd
+  - grep
+  - find
+  - which
+  - where
+  - sort
+  - wc
+  - awk
+  - sed
+  - tr
+  - diff
+  - tree
+  - touch
+  - cp
+  - copy
+  - mv
+  - move
+  - mkdir
   # --- Flowcharts (virtual tool) ---
   - flowchart
   # --- Web research (virtual tool) ---
@@ -54,7 +84,7 @@ confirm:
 # These are dangerous commands that should never be allowed
 exclude:
  # --- Python ---
-  - python
+  #- python
   - python3
   - pip
   - pip3

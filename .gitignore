@@ -150,11 +150,11 @@ Desktop.ini
 # Project-specific
 results/
 .benchmarks/
+.reference/
+data/
 *.png
 *.jpg
 *.jpeg
 *.gif
 .github/copilot-instructions.md
-data/conversations
-data/research
-data/memory
+
