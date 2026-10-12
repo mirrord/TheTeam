@@ -34,8 +34,9 @@ with a simpler, more capable single-agent harness inspired by `mini-swe-agent`.
 [RUN]code --root ./myrepo add a --verbose flag to the CLI[/RUN]
 ```
 
-An optional `--root <path>` prefix pins the workspace root; otherwise the
-configured `allowed_root` (or the current working directory) is used.
+An optional `--root <path>` prefix pins the workspace root; otherwise a fresh
+unique workspace is allocated under `~/.talos/code/` for each invocation (unless
+a fixed `allowed_root` is configured in `code_config.yaml`).
 
 ### From the CLI
 
@@ -153,7 +154,8 @@ the `code:` block in `configs/tools/tool_config.yaml`.
 | `command_timeout` | `60` | Per-command subprocess timeout (seconds) |
 | `review_policy` | `allow` | How to treat `REVIEW` safety verdicts: `allow` or `block` |
 | `max_output_chars` / `output_head_chars` / `output_tail_chars` | `10000` / `5000` / `5000` | Observation truncation |
-| `allowed_root` | `null` | Workspace root (null = per-request root, else cwd) |
+| `allowed_root` | `null` | Fixed workspace root (null = allocate a fresh unique workspace per run) |
+| `workspace_base` | `~/.talos/code` | Parent dir for auto-allocated workspaces (when `allowed_root` is null and no `--root` is given) |
 | `backup_edits` | `true` | Write `.bak` before in-place edits |
 | `include_file_listing` / `max_listed_files` | `true` / `200` | File listing in the first prompt |
 | `allow_git` / `allow_destructive_git` / `auto_commit` | `true` / `false` / `false` | git behaviour |

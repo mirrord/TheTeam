@@ -6,8 +6,9 @@ virtual tool, mirroring the other subagent-driven tools (``web-research``,
 
     [RUN]code fix the failing test in src/foo.py[/RUN]
 
-An optional ``--root <path>`` prefix pins the workspace root; otherwise the
-configured ``allowed_root`` (or the current working directory) is used.
+An optional ``--root <path>`` prefix pins the workspace root; otherwise a fresh
+unique workspace is allocated under ``~/.talos/code`` for each invocation
+(unless a fixed ``allowed_root`` is configured).
 """
 
 from __future__ import annotations

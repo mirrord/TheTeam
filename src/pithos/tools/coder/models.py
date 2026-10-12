@@ -53,7 +53,8 @@ class CodeHarnessConfig:
     output_tail_chars: int = 5000
 
     # --- Workspace / editing --------------------------------------------
-    allowed_root: Optional[str] = None  # None = resolve per-request (cwd)
+    allowed_root: Optional[str] = None  # None = allocate a unique workspace per run
+    workspace_base: str = "~/.talos/code"  # parent dir for auto-allocated workspaces
     backup_edits: bool = True
     include_file_listing: bool = True
     max_listed_files: int = 200

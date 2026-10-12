@@ -30,7 +30,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--root",
         default=None,
-        help="Workspace root the agent is confined to (defaults to config/cwd).",
+        help="Workspace root the agent is confined to (default: a fresh unique dir under ~/.talos/code).",
     )
     p.add_argument(
         "--test",

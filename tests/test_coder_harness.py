@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -138,3 +139,65 @@ class TestHarnessLoop:
         result = harness.run(CodeTaskRequest(task="my task", root=str(tmp_path)))
         assert result.trajectory_path is not None
         assert Path(result.trajectory_path).exists()
+
+
+class TestWorkspaceAllocation:
+    def test_allocates_unique_workspace_under_base(self, tmp_path: Path) -> None:
+        base = tmp_path / "wsbase"
+        cfg = CodeHarnessConfig(
+            write_trajectory=False,
+            include_file_listing=False,
+            workspace_base=str(base),
+        )
+        harness = CodeHarness(
+            _FakeCM(), config=cfg, agent_factory=lambda: _ScriptedAgent([])
+        )
+        r1 = harness._resolve_root(CodeTaskRequest(task="t"))
+        r2 = harness._resolve_root(CodeTaskRequest(task="t"))
+        assert r1 != r2
+        assert Path(r1).is_dir() and Path(r2).is_dir()
+        assert Path(r1).parent.resolve() == base.resolve()
+        assert Path(r2).parent.resolve() == base.resolve()
+
+    def test_explicit_root_overrides_allocation(self, tmp_path: Path) -> None:
+        base = tmp_path / "wsbase"
+        cfg = CodeHarnessConfig(workspace_base=str(base))
+        harness = CodeHarness(
+            _FakeCM(), config=cfg, agent_factory=lambda: _ScriptedAgent([])
+        )
+        root = harness._resolve_root(CodeTaskRequest(task="t", root=str(tmp_path)))
+        assert root == str(tmp_path)
+        assert not base.exists()  # no workspace allocated
+
+    def test_configured_allowed_root_overrides_allocation(self, tmp_path: Path) -> None:
+        fixed = tmp_path / "fixed"
+        base = tmp_path / "wsbase"
+        cfg = CodeHarnessConfig(allowed_root=str(fixed), workspace_base=str(base))
+        harness = CodeHarness(
+            _FakeCM(), config=cfg, agent_factory=lambda: _ScriptedAgent([])
+        )
+        root = harness._resolve_root(CodeTaskRequest(task="t"))
+        assert root == str(fixed)
+        assert not base.exists()
+
+    def test_run_without_root_uses_allocated_workspace(self, tmp_path: Path) -> None:
+        base = tmp_path / "wsbase"
+        out = tmp_path / "out"
+        cfg = CodeHarnessConfig(
+            include_file_listing=False,
+            write_trajectory=True,
+            output_dir=str(out),
+            workspace_base=str(base),
+        )
+        replies = [
+            "[EDIT path=made.txt mode=create]\nhi\n[/EDIT]",
+            "[SUBMIT]\ndone\n[/SUBMIT]",
+        ]
+        harness = CodeHarness(
+            _FakeCM(), config=cfg, agent_factory=lambda: _ScriptedAgent(replies)
+        )
+        result = harness.run(CodeTaskRequest(task="make it"))  # no root
+        data = json.loads(Path(result.trajectory_path).read_text(encoding="utf-8"))
+        root = Path(data["root"])
+        assert root.parent.resolve() == base.resolve()
+        assert (root / "made.txt").read_text() == "hi"

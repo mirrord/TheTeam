@@ -14,8 +14,10 @@ import json
 import logging
 import os
 import re
+import tempfile
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Optional
 
 from ...config_manager import ConfigManager
@@ -127,7 +129,9 @@ class CodeHarness:
 
         result.messages = [self._step_to_dict(s) for s in steps]
         if self.config.write_trajectory:
-            result.trajectory_path = self._write_trajectory(request, result, steps)
+            result.trajectory_path = self._write_trajectory(
+                request, result, steps, str(env.root)
+            )
         return result
 
     # ------------------------------------------------------------------
@@ -233,11 +237,27 @@ class CodeHarness:
         env.execute_action(_RunAction(f'git commit -m "{message}"'))
 
     def _resolve_root(self, request: CodeTaskRequest) -> str:
+        """Resolve the workspace root for this run.
+
+        Resolution order:
+        1. an explicit ``--root`` / ``request.root`` (used as-is);
+        2. a configured ``allowed_root`` (used as-is);
+        3. otherwise a brand-new unique directory allocated under
+           ``workspace_base`` (default ``~/.talos/code``), so every initial
+           invocation of the tool gets its own isolated workspace.
+        """
         if request.root:
             return request.root
         if self.config.allowed_root:
             return self.config.allowed_root
-        return os.getcwd()
+        return self._allocate_workspace()
+
+    def _allocate_workspace(self) -> str:
+        """Create and return a new unique workspace directory under ``workspace_base``."""
+        base = Path(self.config.workspace_base).expanduser()
+        base.mkdir(parents=True, exist_ok=True)
+        prefix = datetime.now().strftime("%Y%m%d_%H%M%S_")
+        return tempfile.mkdtemp(prefix=prefix, dir=str(base))
 
     def _tool_config(self) -> dict:
         try:
@@ -299,6 +319,7 @@ class CodeHarness:
         request: CodeTaskRequest,
         result: CodeTaskResult,
         steps: list[StepRecord],
+        root: str,
     ) -> Optional[str]:
         try:
             os.makedirs(self.config.output_dir, exist_ok=True)
@@ -308,7 +329,7 @@ class CodeHarness:
             )
             data = {
                 "task": request.task,
-                "root": self._resolve_root(request),
+                "root": root,
                 "exit_status": result.exit_status.value,
                 "summary": result.summary,
                 "diff": result.diff,
