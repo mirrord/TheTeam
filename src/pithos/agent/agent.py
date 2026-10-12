@@ -82,6 +82,9 @@ class Agent(ABC):
         # Artifact paths collected from the most recent send() call.
         self._pending_image_paths: list[str] = []
         self._pending_report_paths: list[str] = []
+        # Files surfaced as attachments only — their contents are NOT shown
+        # inline to the user (e.g. the coding harness trajectory/report).
+        self._pending_attachment_paths: list[str] = []
         # Create default context
         self.create_context("default", system_prompt)
 
@@ -690,6 +693,10 @@ class Agent(ABC):
                                 self._pending_image_paths.extend(_r.image_paths)
                             if _r.report_paths:
                                 self._pending_report_paths.extend(_r.report_paths)
+                            if _r.attachment_paths:
+                                self._pending_attachment_paths.extend(
+                                    _r.attachment_paths
+                                )
                         result_msg = (
                             "\n\n".join(
                                 self._format_tool_result(r) for r in raw_results
@@ -865,6 +872,16 @@ class Agent(ABC):
         """Return report file paths collected from the most recent :meth:`send` call."""
         return list(self._pending_report_paths)
 
+    @property
+    def last_attachment_paths(self) -> list[str]:
+        """Return attachment-only file paths from the most recent :meth:`send` call.
+
+        Unlike :attr:`last_report_paths`, these files should be surfaced to the
+        user as attachments *without* inlining their contents (e.g. the coding
+        harness trajectory/report).
+        """
+        return list(self._pending_attachment_paths)
+
     def send(
         self,
         content: str,
@@ -892,6 +909,7 @@ class Agent(ABC):
         """
         self._pending_image_paths = []
         self._pending_report_paths = []
+        self._pending_attachment_paths = []
         return "".join(self.stream(content, context_name, workspace, verbose, model))
 
     def _extract_tool_calls(self, content: str) -> list:

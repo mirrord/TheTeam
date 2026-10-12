@@ -141,12 +141,14 @@ class CoderToolExecutor(ToolProvider):
             )
         return ToolResult(
             success=result.success,
-            stdout=result.to_markdown(),
+            stdout=result.to_summary(),
             stderr="\n".join(result.errors),
             exit_code=0 if result.success else 1,
             execution_time=time.time() - start,
             command=command,
-            report_paths=[result.trajectory_path] if result.trajectory_path else [],
+            attachment_paths=(
+                [result.trajectory_path] if result.trajectory_path else []
+            ),
         )
 
     @staticmethod

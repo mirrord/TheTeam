@@ -77,6 +77,26 @@ class TestExecute:
         assert not result.success
         assert result.exit_code == 1
 
+    def test_report_surfaced_as_attachment_not_inline(self, tmp_path: Path) -> None:
+        out_dir = tmp_path / "traj"
+        cfg = CodeHarnessConfig(
+            write_trajectory=True,
+            include_file_listing=False,
+            output_dir=str(out_dir),
+        )
+        replies = ["[SUBMIT]\nAll done.\n[/SUBMIT]"]
+        agent = _ScriptedAgent(replies)
+        coder = Coder(_FakeCM(), config=cfg, agent_factory=lambda: agent)
+        ex = CoderToolExecutor(_FakeCM(), coder=coder)
+        result = ex.execute(f"code --root {tmp_path} do a thing")
+        # The report file is surfaced as an attachment, never inlined.
+        assert result.attachment_paths
+        assert result.report_paths == []
+        assert Path(result.attachment_paths[0]).exists()
+        # stdout is a concise summary, not the full report/diff markdown.
+        assert "# Coding task result" not in result.stdout
+        assert "All done." in result.stdout
+
 
 class TestParseRemainder:
     def test_no_root(self) -> None:

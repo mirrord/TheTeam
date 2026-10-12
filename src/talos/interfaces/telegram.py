@@ -98,6 +98,21 @@ class TelegramInterface:
                 continue
             await update.message.reply_text(f"\U0001f4c4 Report: {p.name}")
             await self._send_chunked(update, content)
+        # Surface attachment-only artifacts (e.g. the coding harness report) as
+        # file attachments WITHOUT dumping their contents — the user gets the
+        # report file plus the agent's own prose reply, not the raw report body.
+        for attachment_path in self.agent.last_attachment_paths:
+            p = Path(attachment_path)
+            if not p.exists():
+                logger.warning(
+                    "Attachment file not found, skipping: %s", attachment_path
+                )
+                continue
+            try:
+                with p.open("rb") as fh:
+                    await update.message.reply_document(document=fh, filename=p.name)
+            except Exception as exc:
+                logger.warning("Failed to send attachment %s: %s", attachment_path, exc)
 
     @staticmethod
     async def _send_chunked(update: Any, text: str, chunk_size: int = 4000) -> None:
@@ -114,6 +129,7 @@ class TelegramInterface:
         # accumulating the full reply for Telegram delivery.
         self.agent._pending_image_paths = []
         self.agent._pending_report_paths = []
+        self.agent._pending_attachment_paths = []
         print("[Talos] ", end="", flush=True)
         parts: list[str] = []
         for chunk in self.agent.stream(

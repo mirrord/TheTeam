@@ -115,6 +115,28 @@ class CodeTaskResult:
         """True when the agent submitted a result (as opposed to a limit/error)."""
         return self.exit_status == ExitStatus.SUBMITTED
 
+    def to_summary(self) -> str:
+        """Render a concise, user-facing summary (no full diff).
+
+        This is what the tool surfaces as ``stdout`` to the calling agent, so
+        the agent's own reply is based on a short summary rather than the full
+        report + diff. The complete report/diff lives in the trajectory file,
+        which is surfaced separately as an attachment.
+        """
+        lines = [
+            f"Coding task {self.exit_status.value} after {self.steps} step(s)."
+        ]
+        if self.summary.strip():
+            lines.append("")
+            lines.append(self.summary.strip())
+        if self.errors:
+            lines.append("")
+            lines.append("Errors: " + "; ".join(self.errors))
+        if self.trajectory_path:
+            lines.append("")
+            lines.append(f"Full report and diff saved to: {self.trajectory_path}")
+        return "\n".join(lines)
+
     def to_markdown(self) -> str:
         """Render the result as a Markdown report."""
         parts = [

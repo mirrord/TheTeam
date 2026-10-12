@@ -300,6 +300,57 @@ def test_telegram_skips_missing_report_without_crash() -> None:
     assert calls == ["response"]
 
 
+def test_telegram_sends_attachment_as_document_not_inline(tmp_path) -> None:
+    """Attachment-only artifacts (e.g. coding reports) are sent as files, not inlined."""
+    report = tmp_path / "code_task.json"
+    report.write_text('{"summary": "did the thing", "diff": "secret"}', encoding="utf-8")
+
+    agent = _make_agent()
+    iface = TelegramInterface(agent, TelegramConfig(bot_token="t"))
+
+    def fake_send(text, context_name=None, **kwargs):
+        return "I made the change."
+
+    agent.send = fake_send  # type: ignore[assignment]
+    agent._pending_image_paths = []
+    agent._pending_report_paths = []
+    agent._pending_attachment_paths = [str(report)]
+
+    update = _make_update(20, "code do the thing")
+    update.message.reply_document = AsyncMock()
+    asyncio.run(iface._handle_message(update, MagicMock()))
+
+    # The agent's prose reply is sent as text.
+    text_calls = [c.args[0] for c in update.message.reply_text.await_args_list]
+    assert "I made the change." in text_calls
+    # The report file is attached as a document.
+    update.message.reply_document.assert_awaited_once()
+    # Its contents are NOT dumped into any text message.
+    assert not any("secret" in c for c in text_calls)
+
+
+def test_telegram_skips_missing_attachment_without_crash(tmp_path) -> None:
+    """A non-existent attachment path is skipped gracefully; text reply still sent."""
+    agent = _make_agent()
+    iface = TelegramInterface(agent, TelegramConfig(bot_token="t"))
+
+    def fake_send(text, context_name=None, **kwargs):
+        return "response"
+
+    agent.send = fake_send  # type: ignore[assignment]
+    agent._pending_image_paths = []
+    agent._pending_report_paths = []
+    agent._pending_attachment_paths = ["/nonexistent/ghost_trajectory.json"]
+
+    update = _make_update(21, "code something")
+    update.message.reply_document = AsyncMock()
+    asyncio.run(iface._handle_message(update, MagicMock()))
+
+    calls = [c.args[0] for c in update.message.reply_text.await_args_list]
+    assert calls == ["response"]
+    update.message.reply_document.assert_not_awaited()
+
+
 # ---------------------------------------------------------------------------
 # Voice — only test the constructor wiring; full pipeline requires audio deps.
 # ---------------------------------------------------------------------------

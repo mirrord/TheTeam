@@ -120,6 +120,23 @@ Limits that stop the loop: `step_limit`, `wall_time_limit_seconds`, and
   (`reset`, `clean`, `push`, `rebase`, `merge`) require
   `allow_destructive_git: true`.
 
+## Output and talos integration
+
+The `code` tool keeps its agent-facing output lean:
+
+- **`stdout`** is a concise summary (exit status, step count, the agent's submit
+  summary, and a pointer to the report file) — **not** the full diff. This is
+  what the calling agent sees, so its reply is a short summary rather than a
+  reproduction of the whole report.
+- **The full report/trajectory** is written to `data/coding/` and surfaced on
+  the `ToolResult` via `attachment_paths` (an *attach-only* channel), distinct
+  from `report_paths` (which interfaces inline).
+
+In **talos**, this means the coding report is sent to the user **as a file
+attachment** alongside talos' own prose reply — the raw report contents are
+never dumped into the chat. (Other tools such as `web-research` continue to use
+`report_paths`, whose contents are shown inline.)
+
 ## Configuration
 
 Settings live in `configs/tools/code_config.yaml`. Enable/disable the tool via
