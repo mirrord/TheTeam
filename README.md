@@ -68,10 +68,22 @@ TheTeam is a local-first LLM agent coordination and development suite. It includ
 6. **Install optional LLM backends (optional):**
 
    The default install talks to a running [Ollama](https://ollama.ai) server.
+   You can also stream from a running [llama.cpp](https://github.com/ggml-org/llama.cpp)
+   server (`llama-server`) with **no extra packages** — just point
+   `LlamacppAgent` at its `base_url`:
+
+   ```python
+   from pithos.agent.llamacpp_agent import LlamacppAgent
+
+   agent = LlamacppAgent(default_model="qwen3", base_url="http://127.0.0.1:8080")
+   for tok in agent.stream("Hello"):
+       print(tok, end="")
+   ```
+
    Two additional in-process backends are available behind extras:
 
    ```bash
-   pip install -e ".[llamacpp]"    # GGUF inference via llama-cpp-python
+   pip install -e ".[llamacpp]"    # In-process GGUF inference via llama-cpp-python
    pip install -e ".[exllamav2]"   # Quantized GPU inference via ExLlamaV2
    ```
 
@@ -79,12 +91,15 @@ TheTeam is a local-first LLM agent coordination and development suite. It includ
 
    ```python
    from pithos.agent import OllamaAgent                       # default
-   from pithos.agent.llamacpp_agent import LlamacppAgent       # extras: [llamacpp]
+   from pithos.agent.llamacpp_agent import LlamacppAgent       # server mode, or extras: [llamacpp]
    from pithos.agent.exl_agent import EXLAgent                 # extras: [exllamav2]
    ```
 
-   Constructing one of the optional agents without its backend installed
-   raises `ImportError` with installation guidance.
+   `LlamacppAgent` in server mode needs no extra packages. In-process
+   mode (and `EXLAgent`) raise `ImportError` with installation guidance
+   when their backend package is missing. See
+   [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#llamacppagent-server-mode)
+   for server-mode options (reasoning models, sampling params, API keys).
 
 ### From PyPI (Coming Soon)
 

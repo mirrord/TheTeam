@@ -211,3 +211,287 @@ def test_mid_stream_tool_execution(fake_llama, tmp_path, monkeypatch):
     # System message containing the tool result must be in context.
     roles = [m["role"] for m in agent.contexts["default"].message_history]
     assert "system" in roles
+
+
+# =====================================================================
+# Server (HTTP, OpenAI-compatible) mode
+# =====================================================================
+
+import json as _json
+
+
+class _FakeHTTPResponse:
+    """Minimal stand-in for the object returned by ``urlopen``.
+
+    Iterating yields SSE byte lines; it also supports the context-manager
+    protocol used by ``with response:``.
+    """
+
+    def __init__(self, lines: list[bytes]) -> None:
+        self._lines = lines
+
+    def __iter__(self):
+        return iter(self._lines)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _sse(*chunks: dict) -> list[bytes]:
+    """Build SSE ``data:`` byte lines terminated by ``[DONE]``."""
+    lines = [b"data: " + _json.dumps(c).encode("utf-8") for c in chunks]
+    lines.append(b"data: [DONE]")
+    return lines
+
+
+def _delta(content=None, reasoning=None) -> dict:
+    d: dict[str, Any] = {}
+    if content is not None:
+        d["content"] = content
+    if reasoning is not None:
+        d["reasoning_content"] = reasoning
+    return {"choices": [{"index": 0, "delta": d, "finish_reason": None}]}
+
+
+def _usage_chunk(prompt: int, completion: int) -> dict:
+    return {
+        "choices": [],
+        "usage": {"prompt_tokens": prompt, "completion_tokens": completion},
+    }
+
+
+@pytest.fixture
+def mock_urlopen(monkeypatch):
+    """Patch ``urlopen`` to return canned SSE and capture the request."""
+    captured: dict[str, Any] = {}
+
+    def factory(lines: list[bytes]):
+        def fake_urlopen(request, timeout=None):  # noqa: ANN001
+            captured["url"] = request.full_url
+            captured["headers"] = dict(request.header_items())
+            captured["timeout"] = timeout
+            captured["body"] = _json.loads(request.data.decode("utf-8"))
+            return _FakeHTTPResponse(lines)
+
+        monkeypatch.setattr(
+            llamacpp_agent.urllib.request, "urlopen", fake_urlopen
+        )
+        return captured
+
+    return factory
+
+
+# ---- construction & endpoint normalisation --------------------------
+
+
+def test_server_mode_requires_no_backend_package(monkeypatch):
+    # Even with the backend package unavailable, server mode constructs fine.
+    monkeypatch.setattr(llamacpp_agent, "_LLAMACPP_AVAILABLE", False)
+    monkeypatch.setattr(llamacpp_agent, "Llama", None)
+    agent = LlamacppAgent(default_model="qwen3", base_url="http://127.0.0.1:8080")
+    assert agent.server_mode is True
+    assert agent._chat_endpoint == "http://127.0.0.1:8080/v1/chat/completions"
+
+
+@pytest.mark.parametrize(
+    "base,expected",
+    [
+        ("http://h:8080", "http://h:8080/v1/chat/completions"),
+        ("http://h:8080/", "http://h:8080/v1/chat/completions"),
+        ("http://h:8080/v1", "http://h:8080/v1/chat/completions"),
+        ("http://h:8080/v1/", "http://h:8080/v1/chat/completions"),
+        (
+            "http://h:8080/v1/chat/completions",
+            "http://h:8080/v1/chat/completions",
+        ),
+    ],
+)
+def test_endpoint_normalisation(base, expected):
+    agent = LlamacppAgent(default_model="m", base_url=base)
+    assert agent._chat_endpoint == expected
+
+
+def test_base_url_via_backend_options():
+    agent = LlamacppAgent(
+        default_model="m", backend_options={"base_url": "http://h:8080"}
+    )
+    assert agent.server_mode is True
+    assert agent._chat_endpoint == "http://h:8080/v1/chat/completions"
+
+
+# ---- streaming behaviour --------------------------------------------
+
+
+def test_server_stream_yields_content_and_commits(mock_urlopen):
+    mock_urlopen(_sse(_delta(content="Hello"), _delta(content=" world"),
+                      _usage_chunk(5, 2)))
+    agent = LlamacppAgent(default_model="qwen3", base_url="http://h:8080")
+    out = [t for t in agent.stream("Hi") if t]
+    assert out == ["Hello", " world"]
+    history = agent.contexts["default"].message_history
+    assert history[-1]["role"] == "assistant"
+    assert history[-1]["content"] == "Hello world"
+
+
+def test_server_reasoning_hidden_by_default(mock_urlopen):
+    mock_urlopen(
+        _sse(
+            _delta(reasoning="thinking..."),
+            _delta(reasoning=" more"),
+            _delta(content="Answer"),
+            _usage_chunk(3, 4),
+        )
+    )
+    agent = LlamacppAgent(default_model="qwen3", base_url="http://h:8080")
+    full = "".join(agent.stream("Hi"))
+    assert full == "Answer"
+    assert "<think>" not in full
+    assert agent.contexts["default"].message_history[-1]["content"] == "Answer"
+
+
+def test_server_reasoning_surfaced_when_enabled(mock_urlopen):
+    mock_urlopen(
+        _sse(
+            _delta(reasoning="step1"),
+            _delta(reasoning=" step2"),
+            _delta(content="Final"),
+            _usage_chunk(3, 4),
+        )
+    )
+    agent = LlamacppAgent(
+        default_model="qwen3",
+        base_url="http://h:8080",
+        backend_options={"include_reasoning": True},
+    )
+    full = "".join(agent.stream("Hi"))
+    assert full == "<think>step1 step2</think>\nFinal"
+
+
+def test_server_reasoning_only_closes_think_tag(mock_urlopen):
+    # No content chunk ever arrives — the closing tag must still be emitted.
+    mock_urlopen(_sse(_delta(reasoning="only thinking"), _usage_chunk(1, 1)))
+    agent = LlamacppAgent(
+        default_model="qwen3",
+        base_url="http://h:8080",
+        backend_options={"include_reasoning": True},
+    )
+    full = "".join(agent.stream("Hi"))
+    assert full == "<think>only thinking</think>\n"
+
+
+def test_server_request_body_contents(mock_urlopen):
+    captured = mock_urlopen(_sse(_delta(content="x"), _usage_chunk(1, 1)))
+    agent = LlamacppAgent(
+        default_model="qwen3", base_url="http://h:8080", temperature=0.2
+    )
+    agent.max_tokens = 42
+    list(agent.stream("Hi"))
+    body = captured["body"]
+    assert body["model"] == "qwen3"
+    assert body["stream"] is True
+    assert body["stream_options"] == {"include_usage": True}
+    assert body["temperature"] == 0.2
+    assert body["max_tokens"] == 42
+    assert body["messages"][-1]["content"] == "Hi"
+
+
+def test_server_omits_max_tokens_when_unset(mock_urlopen):
+    captured = mock_urlopen(_sse(_delta(content="x"), _usage_chunk(1, 1)))
+    agent = LlamacppAgent(default_model="qwen3", base_url="http://h:8080")
+    list(agent.stream("Hi"))
+    assert "max_tokens" not in captured["body"]
+
+
+def test_server_forwards_sampling_but_filters_load_options(mock_urlopen):
+    captured = mock_urlopen(_sse(_delta(content="x"), _usage_chunk(1, 1)))
+    agent = LlamacppAgent(
+        default_model="qwen3",
+        base_url="http://h:8080",
+        backend_options={"top_p": 0.9, "repeat_penalty": 1.1, "n_ctx": 8192},
+    )
+    list(agent.stream("Hi"))
+    body = captured["body"]
+    assert body["top_p"] == 0.9
+    assert body["repeat_penalty"] == 1.1
+    # Server-launch-only option must NOT leak into the request body.
+    assert "n_ctx" not in body
+
+
+def test_server_sets_api_key_header(mock_urlopen):
+    captured = mock_urlopen(_sse(_delta(content="x"), _usage_chunk(1, 1)))
+    agent = LlamacppAgent(
+        default_model="qwen3",
+        base_url="http://h:8080",
+        backend_options={"api_key": "secret"},
+    )
+    list(agent.stream("Hi"))
+    # urllib title-cases header names.
+    assert captured["headers"].get("Authorization") == "Bearer secret"
+
+
+def test_server_metrics_token_usage(mock_urlopen):
+    from pithos.metrics import MetricsCollector
+
+    mock_urlopen(_sse(_delta(content="hi"), _usage_chunk(7, 3)))
+    agent = LlamacppAgent(default_model="qwen3", base_url="http://h:8080")
+    metrics = MetricsCollector()
+    agent.attach_metrics(metrics)
+    list(agent.stream("Hi"))
+    tm = metrics._token_usage["qwen3"]
+    assert tm.prompt_tokens == 7
+    assert tm.completion_tokens == 3
+
+
+def test_server_http_error_is_wrapped(monkeypatch):
+    import urllib.error
+
+    def boom(request, timeout=None):  # noqa: ANN001
+        raise urllib.error.HTTPError(
+            request.full_url, 500, "Server Error", {}, None
+        )
+
+    monkeypatch.setattr(llamacpp_agent.urllib.request, "urlopen", boom)
+    agent = LlamacppAgent(default_model="qwen3", base_url="http://h:8080")
+    with pytest.raises(RuntimeError, match="HTTP 500"):
+        list(agent.stream("Hi"))
+
+
+def test_server_connection_error_rolls_back_user_message(monkeypatch):
+    def boom(request, timeout=None):  # noqa: ANN001
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(llamacpp_agent.urllib.request, "urlopen", boom)
+    agent = LlamacppAgent(default_model="qwen3", base_url="http://h:8080")
+    before = len(agent.contexts["default"].message_history)
+    with pytest.raises(RuntimeError, match="llama.cpp server"):
+        list(agent.stream("Hi"))
+    assert len(agent.contexts["default"].message_history) == before
+
+
+# ---- config construction --------------------------------------------
+
+
+def test_from_dict_builds_server_agent(tmp_path):
+    from pithos.config_manager import ConfigManager
+
+    cm = ConfigManager(config_dir=str(tmp_path))
+    agent = LlamacppAgent.from_dict(
+        {
+            "model": "qwen3",
+            "name": "qwen-server",
+            "base_url": "http://127.0.0.1:8080",
+            "temperature": 0.3,
+            "backend_options": {"top_p": 0.95, "include_reasoning": True},
+        },
+        cm,
+    )
+    assert agent.server_mode is True
+    assert agent.agent_name == "qwen-server"
+    assert agent.temperature == 0.3
+    assert agent.include_reasoning is True
+    assert agent._chat_endpoint == "http://127.0.0.1:8080/v1/chat/completions"
+    assert agent.backend_options["top_p"] == 0.95
+

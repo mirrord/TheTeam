@@ -99,6 +99,20 @@ class Agent(ABC):
             config.get("system_prompt", ""),
             config.get("temperature"),
         )
+        agent._apply_config_from_dict(config, config_manager)
+        return agent
+
+    def _apply_config_from_dict(
+        self, config: dict[str, Any], config_manager: ConfigManager
+    ) -> None:
+        """Apply the backend-agnostic portions of a config dict to ``self``.
+
+        Covers contexts, compaction, recall and the inference flowchart.
+        Split out from :meth:`from_dict` so subclasses that need custom
+        construction (e.g. passing ``backend_options`` / ``base_url``) can
+        reuse the shared configuration logic without duplicating it.
+        """
+        agent = self
 
         # Load contexts
         contexts = config.get("contexts", {})
@@ -142,8 +156,6 @@ class Agent(ABC):
         inference_cfg = config.get("inference")
         if inference_cfg is not None:
             agent.set_inference_flowchart(inference_cfg, config_manager)
-
-        return agent
 
     @classmethod
     def from_yaml(

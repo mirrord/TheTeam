@@ -594,14 +594,51 @@ runtimes by default.
 | Backend | Module | Install | Notes |
 |---|---|---|---|
 | **OllamaAgent** | `pithos.agent.ollama_agent` | bundled | Default backend. Talks to a running Ollama server. |
-| **LlamacppAgent** | `pithos.agent.llamacpp_agent` | `pip install theteam[llamacpp]` | In-process GGUF inference via `llama-cpp-python`. `default_model` is a path to a `.gguf` file; `backend_options` are forwarded to `Llama(...)`. |
+| **LlamacppAgent** | `pithos.agent.llamacpp_agent` | bundled (server mode) / `pip install theteam[llamacpp]` (in-process) | Two modes. **Server mode** (no extra packages): pass `base_url` to stream from a running `llama-server` over its OpenAI-compatible `/v1/chat/completions` endpoint. **In-process mode**: GGUF inference via `llama-cpp-python` where `default_model` is a path to a `.gguf` file and `backend_options` are forwarded to `Llama(...)`. |
 | **EXLAgent** | `pithos.agent.exl_agent` | `pip install theteam[exllamav2]` | In-process quantized GPU inference via `exllamav2`. `default_model` is the model directory; chat templating uses the embedded HF tokenizer. |
 
 The optional backends are intentionally **not** re-exported from
 `pithos.agent`; import them explicitly from their submodule.  Importing
-the submodule always succeeds, but constructing the agent without the
-backend package installed raises `ImportError` with installation
-guidance.
+the submodule always succeeds.  `LlamacppAgent` in **server mode** needs
+no extra packages (only the standard library); constructing it in
+**in-process mode** — or constructing `EXLAgent` — without the backend
+package installed raises `ImportError` with installation guidance.
+
+### LlamacppAgent server mode
+
+Point the agent at a running llama.cpp server (`llama-server`):
+
+```python
+from pithos.agent.llamacpp_agent import LlamacppAgent
+
+agent = LlamacppAgent(
+    default_model="qwen3",              # informational; the server serves its loaded model
+    base_url="http://127.0.0.1:8080",   # a running llama.cpp server
+)
+for tok in agent.stream("Hello"):
+    print(tok, end="")
+```
+
+Notes for server mode:
+
+- `base_url` may also be supplied inside `backend_options` or an agent
+  config (YAML) via `base_url` / `server_url`.  The endpoint is
+  normalised automatically (`/v1/chat/completions` is appended if
+  absent).
+- Extra sampling params in `backend_options` (`top_p`, `top_k`,
+  `repeat_penalty`, `chat_template_kwargs`, …) are forwarded to the
+  server request body.  Server-launch-only options (`n_ctx`,
+  `n_gpu_layers`, …) are ignored in server mode.
+- `api_key` → `Authorization: Bearer` header; `timeout` sets the
+  per-request socket timeout (default 600s).
+- **Reasoning models (Qwen3, etc.):** chain-of-thought arrives as
+  `reasoning_content` deltas and is **hidden** from the token stream by
+  default (keeps history and tool-call extraction clean).  Set
+  `backend_options={"include_reasoning": True}` to surface it wrapped in
+  `<think>…</think>`.  Because thinking consumes the generation budget,
+  give reasoning models a generous `max_tokens` (or leave it unlimited),
+  or disable thinking with
+  `backend_options={"chat_template_kwargs": {"enable_thinking": False}}`.
 
 All three backends share the same orchestration layer (streaming,
 mid-stream tool calls, recall, history, compaction, metrics) implemented

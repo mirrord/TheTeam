@@ -139,6 +139,49 @@ contexts:
 
 ### Model Parameters
 
+#### llama.cpp server backend
+
+`LlamacppAgent` can stream from a running llama.cpp server (`llama-server`)
+over its OpenAI-compatible API — no extra Python packages required. Add a
+`base_url` (and optional `backend_options`) to the agent config:
+
+```yaml
+model: qwen3                      # informational; the server serves its loaded model
+base_url: "http://127.0.0.1:8080" # a running llama.cpp server (server_url also accepted)
+system_prompt: "You are a helpful assistant."
+temperature: 0.7
+backend_options:
+  # Forwarded to the server request body:
+  top_p: 0.95
+  # Reasoning models (Qwen3, etc.): chain-of-thought is hidden by default.
+  # Surface it wrapped in <think>…</think>:
+  include_reasoning: false
+  # Or disable thinking entirely so the whole budget goes to the answer:
+  chat_template_kwargs:
+    enable_thinking: false
+  # Optional transport settings:
+  # api_key: "sk-..."    # -> Authorization: Bearer header
+  # timeout: 600          # per-request socket timeout (seconds)
+```
+
+Load it with `LlamacppAgent.from_dict(...)` / `.from_config(...)`:
+
+```python
+from pithos.agent.llamacpp_agent import LlamacppAgent
+
+agent = LlamacppAgent.from_config("my-agent", config_manager)
+```
+
+Notes:
+
+- The endpoint is normalised automatically — `base_url` may be
+  `http://host:8080`, `.../v1`, or a full `.../v1/chat/completions`.
+- Omitting `base_url` selects **in-process** GGUF mode instead, which
+  requires `pip install theteam[llamacpp]` and a `.gguf` path in `model`.
+- Because Qwen3-style thinking consumes the generation budget, give
+  reasoning models a generous (or unlimited) `max_tokens`, or disable
+  thinking as shown above.
+
 #### Temperature Parameter
 
 The `temperature` parameter controls the randomness of model responses:
