@@ -44,12 +44,25 @@ class Coder:
         self._config = config
         self._agent_factory = agent_factory
 
-    def code(self, request_or_task, **kwargs: Any) -> CodeTaskResult:
-        """Run a coding task and return a :class:`CodeTaskResult`."""
+    def code(
+        self,
+        request_or_task,
+        tool_config: Optional[dict] = None,
+        confirm_callback: Optional[Any] = None,
+        **kwargs: Any,
+    ) -> CodeTaskResult:
+        """Run a coding task and return a :class:`CodeTaskResult`.
+
+        ``tool_config`` and ``confirm_callback`` let the caller hand the coding
+        subagent its own tool policy and user-confirmation channel so the
+        subagent has the same tool access as the caller.
+        """
         harness = CodeHarness(
             self.config_manager,
             config=self._config,
             agent_factory=self._agent_factory,
+            tool_config=tool_config,
+            confirm_callback=confirm_callback,
         )
         return harness.run(request_or_task, **kwargs)
 
@@ -103,17 +116,52 @@ class CoderToolExecutor(ToolProvider):
         command: str,
         context: Optional[dict[str, Any]] = None,
     ) -> ToolResult:
-        """Execute the ``code`` tool call extracted from *command*."""
+        """Execute the ``code`` tool call extracted from *command*.
+
+        The calling agent is read from ``context['agent']`` so the coding
+        subagent inherits the caller's tool policy (``tool_registry.config``)
+        and its user-confirmation channel (``tool_confirm_callback``).
+        """
         parts = command.strip().split(None, 1)
         remainder = parts[1].strip() if len(parts) > 1 else ""
         root, task = self._parse_remainder(remainder)
-        return self.run(task, root=root)
+
+        tool_config, confirm_callback = self._caller_policy(context)
+        return self.run(
+            task,
+            root=root,
+            tool_config=tool_config,
+            confirm_callback=confirm_callback,
+        )
+
+    @staticmethod
+    def _caller_policy(
+        context: Optional[dict[str, Any]],
+    ) -> tuple[Optional[dict], Optional[Any]]:
+        """Extract (tool_config, confirm_callback) from the calling agent."""
+        agent = (context or {}).get("agent")
+        if agent is None:
+            return None, None
+        tool_config = None
+        registry = getattr(agent, "tool_registry", None)
+        if registry is not None:
+            cfg = getattr(registry, "config", None)
+            if isinstance(cfg, dict):
+                tool_config = dict(cfg)
+        confirm_callback = getattr(agent, "tool_confirm_callback", None)
+        return tool_config, confirm_callback
 
     # ------------------------------------------------------------------
     # Execution
     # ------------------------------------------------------------------
 
-    def run(self, task: str, root: Optional[str] = None) -> ToolResult:
+    def run(
+        self,
+        task: str,
+        root: Optional[str] = None,
+        tool_config: Optional[dict] = None,
+        confirm_callback: Optional[Any] = None,
+    ) -> ToolResult:
         """Run a coding task and wrap the result as a :class:`ToolResult`."""
         start = time.time()
         command = f"code {task}" if task else "code"
@@ -128,7 +176,11 @@ class CoderToolExecutor(ToolProvider):
                 error_hint="Usage: code [--root <path>] <task description>",
             )
         try:
-            result = self.coder.code(CodeTaskRequest(task=task, root=root))
+            result = self.coder.code(
+                CodeTaskRequest(task=task, root=root),
+                tool_config=tool_config,
+                confirm_callback=confirm_callback,
+            )
         except Exception as exc:
             logger.exception("coding harness failed")
             return ToolResult(

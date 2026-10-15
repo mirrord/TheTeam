@@ -107,12 +107,37 @@ consecutive format errors ends the run.
 Limits that stop the loop: `step_limit`, `wall_time_limit_seconds`, and
 `max_consecutive_format_errors`.
 
+## Tool access and user confirmation
+
+The coding subagent **inherits the calling agent's tool policy**: when invoked
+as a tool, `CoderToolExecutor` reads the caller from `context["agent"]` and
+hands the harness the caller's `tool_registry.config` (the same `mode`,
+`include`, `exclude`, `confirm`, and `descriptions`). So the coding agent can
+reach the same CLI tools its caller can.
+
+When the coding agent issues a command that the policy **would deny**, and the
+tool's bare name is in the caller's **`include`** or **`confirm`** group, the
+harness escalates to a **user confirmation** instead of denying outright:
+
+- The caller's confirmation channel (`agent.tool_confirm_callback`) is invoked
+  with the exact command string.
+- In **talos / Telegram**, this sends the user a message showing the exact tool
+  call; replying `yes` runs it, anything else denies it. (The agent turn runs
+  off the event loop so the bot stays responsive to the reply, and a pending
+  prompt consumes the user's next message as its answer.)
+- On the **CLI**, it falls back to an interactive `[y/N]` prompt.
+- With no confirmation channel available (non-interactive), the call is denied.
+
+Interfaces install the channel via `agent.set_tool_confirm_callback(...)`; it is
+also used by the agent's own `ToolExecutor` for `confirm`-group tools.
+
 ## Safety model
 
 - **Commands** go through the `CommandSafetyChecker`: shell-injection operators
-  and known-dangerous patterns are `BLOCK`ed outright; destructive flags are
-  `REVIEW` (handled per `review_policy`). Only allow-listed CLI tools run, with
-  the working directory pinned to the workspace root.
+  and known-dangerous patterns are `BLOCK`ed outright (never promptable);
+  destructive flags are `REVIEW` (handled per `review_policy`). Tools outside
+  the caller's policy are denied unless escalated to a user confirmation (see
+  above), with the working directory pinned to the workspace root.
 - **File edits** go through the root-jailed helpers in
   [`file_ops.py`](../src/pithos/tools/coder/file_ops.py): any path that escapes
   `allowed_root` raises `PermissionError`, binary files are refused, and `.bak`
@@ -125,10 +150,10 @@ Limits that stop the loop: `step_limit`, `wall_time_limit_seconds`, and
 
 The `code` tool keeps its agent-facing output lean:
 
-- **`stdout`** is a concise summary (exit status, step count, the agent's submit
-  summary, and a pointer to the report file) — **not** the full diff. This is
-  what the calling agent sees, so its reply is a short summary rather than a
-  reproduction of the whole report.
+- **`stdout`** is a concise summary (exit status, step count, **the workspace
+  directory the run used**, the agent's submit summary, and a pointer to the
+  report file) — **not** the full diff. This is what the calling agent sees, so
+  its reply is a short summary rather than a reproduction of the whole report.
 - **The full report/trajectory** is written to `data/coding/` and surfaced on
   the `ToolResult` via `attachment_paths` (an *attach-only* channel), distinct
   from `report_paths` (which interfaces inline).

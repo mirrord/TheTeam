@@ -33,6 +33,84 @@ def _env(tmp_path: Path, **overrides) -> WorkspaceEnvironment:
     return WorkspaceEnvironment(str(tmp_path), config, _TOOL_CONFIG)
 
 
+class TestConfirmation:
+    """Would-be-denied tool calls in the include/confirm groups prompt the user."""
+
+    def test_confirm_group_tool_approved_runs(self, tmp_path: Path) -> None:
+        cfg = {**_TOOL_CONFIG, "confirm": ["python"]}
+        calls: list[str] = []
+
+        def approve(command: str) -> bool:
+            calls.append(command)
+            return True
+
+        env = WorkspaceEnvironment(
+            str(tmp_path), CodeHarnessConfig(), cfg, confirm_callback=approve
+        )
+        obs = env.execute_action(Action(kind="run", command="python --version"))
+        assert calls == ["python --version"]  # user was asked
+        assert "denied by user" not in obs
+        assert "<returncode>0</returncode>" in obs
+
+    def test_confirm_group_tool_denied(self, tmp_path: Path) -> None:
+        cfg = {**_TOOL_CONFIG, "confirm": ["python"]}
+
+        def deny(command: str) -> bool:
+            return False
+
+        env = WorkspaceEnvironment(
+            str(tmp_path), CodeHarnessConfig(), cfg, confirm_callback=deny
+        )
+        obs = env.execute_action(Action(kind="run", command="python --version"))
+        assert "denied by user" in obs
+
+    def test_would_be_denied_include_tool_prompts(self, tmp_path: Path) -> None:
+        # A tool in the include group that isn't discoverable (not on PATH) is
+        # escalated to a prompt rather than denied outright.
+        cfg = {**_TOOL_CONFIG, "include": ["nonexistent_tool_abc"]}
+        asked: list[str] = []
+
+        def approve(command: str) -> bool:
+            asked.append(command)
+            return True
+
+        env = WorkspaceEnvironment(
+            str(tmp_path), CodeHarnessConfig(), cfg, confirm_callback=approve
+        )
+        obs = env.execute_action(
+            Action(kind="run", command="nonexistent_tool_abc foo")
+        )
+        assert asked  # the user was prompted
+        # Approved, so it is attempted (and fails to exec) — not denied/unavailable.
+        assert "not available" not in obs
+        assert "denied by user" not in obs
+
+    def test_unknown_tool_not_in_groups_denied_without_prompt(
+        self, tmp_path: Path
+    ) -> None:
+        asked: list[str] = []
+
+        def cb(command: str) -> bool:
+            asked.append(command)
+            return True
+
+        env = _env(tmp_path)
+        env._confirm_callback = cb  # type: ignore[attr-defined]
+        obs = env.execute_action(
+            Action(kind="run", command="totally_unknown_xyz foo")
+        )
+        assert not asked  # never prompted — not in include/confirm
+        assert "not available" in obs
+
+    def test_no_callback_denies_noninteractive(self, tmp_path: Path) -> None:
+        # With a confirm-group tool and no callback + no interactive stdin,
+        # the call is denied rather than hanging.
+        cfg = {**_TOOL_CONFIG, "confirm": ["python"]}
+        env = WorkspaceEnvironment(str(tmp_path), CodeHarnessConfig(), cfg)
+        obs = env.execute_action(Action(kind="run", command="python --version"))
+        assert "denied by user" in obs
+
+
 class TestRunAction:
     def test_runs_git(self, tmp_path: Path) -> None:
         import subprocess

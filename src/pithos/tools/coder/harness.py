@@ -54,10 +54,18 @@ class CodeHarness:
         config_manager: ConfigManager,
         config: Optional[CodeHarnessConfig] = None,
         agent_factory: Optional[Any] = None,
+        tool_config: Optional[dict] = None,
+        confirm_callback: Optional[Any] = None,
     ) -> None:
         self.config_manager = config_manager
         self.config = config or self._load_config(config_manager)
         self._agent_factory = agent_factory
+        # Optional overrides supplied by the calling agent so the coding
+        # subagent inherits the caller's tool policy (allow/deny/confirm) and
+        # user-confirmation channel. When ``tool_config`` is None the harness
+        # falls back to loading ``tool_config.yaml`` itself.
+        self._tool_config_override = tool_config
+        self._confirm_callback = confirm_callback
 
     # ------------------------------------------------------------------
     # Public API
@@ -81,7 +89,13 @@ class CodeHarness:
 
         root = self._resolve_root(request)
         tool_config = self._tool_config()
-        env = WorkspaceEnvironment(root, self.config, tool_config)
+        env = WorkspaceEnvironment(
+            root,
+            self.config,
+            tool_config,
+            confirm_callback=self._confirm_callback,
+        )
+        result.root = str(env.root)
 
         try:
             agent = self._build_agent()
@@ -260,6 +274,10 @@ class CodeHarness:
         return tempfile.mkdtemp(prefix=prefix, dir=str(base))
 
     def _tool_config(self) -> dict:
+        # Prefer the caller-supplied tool config so the coding subagent has the
+        # same tool access (allow/deny/confirm policy) as its caller.
+        if self._tool_config_override is not None:
+            return dict(self._tool_config_override)
         try:
             tmp = ToolRegistry(self.config_manager, providers=[])
             return dict(tmp.config)

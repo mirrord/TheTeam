@@ -85,11 +85,22 @@ class WorkspaceEnvironment:
         config: CodeHarnessConfig,
         tool_config: dict,
         safety_checker: Optional[CommandSafetyChecker] = None,
+        confirm_callback: Optional[Any] = None,
     ) -> None:
         self.root = Path(root).expanduser().resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.config = config
         self.tool_config = tool_config or {}
+        # Tools the caller places in the ``include`` / ``confirm`` groups: a
+        # would-be-denied call for one of these is escalated to a user
+        # confirmation rather than denied outright (see :meth:`_confirm`).
+        self._include_group = set(self.tool_config.get("include", []) or [])
+        self._confirm_group = set(self.tool_config.get("confirm", []) or [])
+        # Callback used to ask the user whether to allow a tool call. Receives
+        # the exact command string, returns True to allow. When None, falls
+        # back to an interactive prompt (CLI); non-interactive callers that
+        # pass None effectively deny.
+        self._confirm_callback = confirm_callback
         self.safety = safety_checker or CommandSafetyChecker(
             self.tool_config.get("safety", {})
         )
@@ -191,7 +202,19 @@ class WorkspaceEnvironment:
         if tool_name == "git":
             return self._run_git(command, argv)
 
-        if not self.cli.can_execute(tool_name):
+        requires_confirm = tool_name in self._confirm_group
+        allowed = self.cli.can_execute(tool_name)
+
+        # A confirm-group tool, or a would-be-denied tool that the caller
+        # nonetheless lists in its include/confirm groups, is escalated to a
+        # user confirmation instead of being auto-run or auto-denied.
+        if requires_confirm or (not allowed and tool_name in self._include_group):
+            decision = self._confirm(command)
+            if decision is False:
+                return self._fmt_run(command, -1, "", "denied by user")
+            return self._exec(command, argv)
+
+        if not allowed:
             return self._fmt_run(
                 command,
                 -1,
@@ -213,6 +236,35 @@ class WorkspaceEnvironment:
         if sub not in _GIT_SAFE_SUBCOMMANDS and sub not in _GIT_DESTRUCTIVE_SUBCOMMANDS:
             return self._fmt_run(command, -1, "", f"unsupported git subcommand {sub!r}")
         return self._exec(command, argv)
+
+    def _confirm(self, command: str) -> bool:
+        """Ask the user whether to allow *command*.
+
+        Uses the injected ``confirm_callback`` when present (e.g. a Telegram
+        prompt). Otherwise falls back to an interactive CLI prompt; when no
+        interactive channel is available the call is denied.
+        """
+        if self._confirm_callback is not None:
+            try:
+                return bool(self._confirm_callback(command))
+            except Exception as exc:  # pragma: no cover - callback guard
+                logger.debug("confirm callback failed: %s", exc)
+                return False
+
+        prompt_text = f"Allow coding-agent tool call: {command!r}?"
+        try:
+            from rich.prompt import Confirm
+
+            return bool(Confirm.ask(prompt_text))
+        except ImportError:
+            pass
+        except Exception:
+            pass
+        try:
+            answer = input(f"{prompt_text} [y/N]: ").strip().lower()
+            return answer in ("y", "yes")
+        except (EOFError, OSError):
+            return False
 
     def _exec(self, command: str, argv: list[str]) -> str:
         env = dict(os.environ)

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import threading
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from pithos.agent import Agent
 
@@ -12,6 +15,21 @@ from ..config import TelegramConfig
 from ..utils import clean_agent_response
 
 logger = logging.getLogger(__name__)
+
+#: How long (seconds) a mid-task tool-confirmation prompt waits for the user's
+#: reply before it is treated as a denial.
+_CONFIRM_TIMEOUT_SECONDS = 300.0
+
+#: Replies (case-insensitive, stripped) that approve a confirmation prompt.
+_AFFIRMATIVE = {"yes", "y", "yeah", "yep", "ok", "okay", "sure", "allow", "approve"}
+
+
+@dataclass
+class _PendingConfirm:
+    """State for an outstanding tool-confirmation prompt for one user."""
+
+    event: threading.Event = field(default_factory=threading.Event)
+    approved: bool = False
 
 
 def _context_name_for_user(user_id: int) -> str:
@@ -34,6 +52,11 @@ class TelegramInterface:
         # When True, mirror the conversation to stdout and stream the agent's
         # response tokens as they are produced.
         self.show = show
+        # Outstanding tool-confirmation prompts, keyed by Telegram user id. A
+        # user's next message is interpreted as the answer to their pending
+        # prompt rather than as a new chat turn.
+        self._pending_confirms: dict[int, _PendingConfirm] = {}
+        self._pending_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Handlers
@@ -57,11 +80,21 @@ class TelegramInterface:
         text = update.message.text or ""
         if not text.strip():
             return
+        # If this user has an outstanding tool-confirmation prompt, treat their
+        # message as the answer rather than a new chat turn.
+        if self._resolve_pending_confirm(user.id, text):
+            return
         ctx_name = self._ensure_context(user.id)
         if self.show:
             print(f"\n[{user.first_name} ({user.id})] {text}", flush=True)
+        loop = asyncio.get_running_loop()
+        confirm_cb = self._make_confirm_callback(user.id, update, loop)
         try:
-            response = self._generate_response(text, ctx_name)
+            # Run the (blocking) agent turn off the event loop so the loop stays
+            # free to receive the user's confirmation reply mid-task.
+            response = await asyncio.to_thread(
+                self._generate_response_with_confirm, text, ctx_name, confirm_cb
+            )
         except Exception as exc:  # surface backend errors to the user
             logger.exception("Agent send failed for user %s", user.id)
             if self.show:
@@ -120,6 +153,70 @@ class TelegramInterface:
         for i in range(0, len(text) or 1, chunk_size):
             chunk = text[i : i + chunk_size] or "(no response)"
             await update.message.reply_text(chunk)
+
+    # ------------------------------------------------------------------
+    # Tool-confirmation bridge
+    # ------------------------------------------------------------------
+
+    def _resolve_pending_confirm(self, user_id: int, text: str) -> bool:
+        """If *user_id* has a pending confirmation, resolve it with *text*.
+
+        Returns True when the message was consumed as a confirmation answer.
+        """
+        with self._pending_lock:
+            pending = self._pending_confirms.get(user_id)
+        if pending is None:
+            return False
+        pending.approved = text.strip().lower() in _AFFIRMATIVE
+        pending.event.set()
+        return True
+
+    def _make_confirm_callback(self, user_id: int, update: Any, loop: Any):
+        """Build a (blocking) confirm callback for one agent turn.
+
+        The callback runs in the worker thread executing the agent turn. It
+        posts the exact tool call to the user, then blocks until the user's
+        reply arrives (handled on the event loop) or the prompt times out.
+        """
+
+        def confirm(command: str) -> bool:
+            pending = _PendingConfirm()
+            # Register before sending so a fast reply is never missed.
+            with self._pending_lock:
+                self._pending_confirms[user_id] = pending
+            prompt = (
+                "\u26a0\ufe0f The coding agent wants to run this tool call:\n\n"
+                f"{command}\n\n"
+                "Reply 'yes' to allow, anything else to deny."
+            )
+            try:
+                future = asyncio.run_coroutine_threadsafe(
+                    update.message.reply_text(prompt), loop
+                )
+                future.result(timeout=30)
+            except Exception as exc:  # pragma: no cover - network guard
+                logger.warning("Failed to send confirmation prompt: %s", exc)
+                with self._pending_lock:
+                    self._pending_confirms.pop(user_id, None)
+                return False
+            got_reply = pending.event.wait(timeout=_CONFIRM_TIMEOUT_SECONDS)
+            with self._pending_lock:
+                self._pending_confirms.pop(user_id, None)
+            if not got_reply:
+                return False
+            return pending.approved
+
+        return confirm
+
+    def _generate_response_with_confirm(
+        self, text: str, ctx_name: str, confirm_cb
+    ) -> str:
+        """Run one agent turn with *confirm_cb* installed as the tool gate."""
+        self.agent.set_tool_confirm_callback(confirm_cb)
+        try:
+            return self._generate_response(text, ctx_name)
+        finally:
+            self.agent.set_tool_confirm_callback(None)
 
     def _generate_response(self, text: str, ctx_name: str) -> str:
         """Produce the agent's reply, streaming to stdout when ``show`` is set."""

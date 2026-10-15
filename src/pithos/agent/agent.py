@@ -61,6 +61,11 @@ class Agent(ABC):
         self.tool_executor: Optional[ToolExecutor] = None
         self.tool_auto_loop = False
         self.tool_max_iterations = 5
+        # Optional user-confirmation channel for tool calls. When set (e.g. by
+        # the Telegram/shell interface) it is consulted before running tools in
+        # the ``confirm`` group, and is inherited by subagent tools such as the
+        # coding harness. ``None`` falls back to an interactive CLI prompt.
+        self.tool_confirm_callback: Optional[Callable[[str], bool]] = None
         # Memory tool support
         self.memory_enabled = False
         self.memory_store: Optional[Any] = None  # MemoryStore instance
@@ -882,6 +887,21 @@ class Agent(ABC):
         """
         return list(self._pending_attachment_paths)
 
+    def set_tool_confirm_callback(
+        self, callback: Optional[Callable[[str], bool]]
+    ) -> None:
+        """Set the user-confirmation channel used for tool calls.
+
+        The callback receives the exact command string and returns ``True`` to
+        allow the call. It is used both by this agent's :class:`ToolExecutor`
+        (for ``confirm``-group tools) and inherited by subagent tools such as
+        the coding harness. Pass ``None`` to restore the interactive CLI
+        fallback.
+        """
+        self.tool_confirm_callback = callback
+        if self.tool_executor is not None:
+            self.tool_executor.confirm_callback = callback
+
     def send(
         self,
         content: str,
@@ -1178,7 +1198,7 @@ class Agent(ABC):
                 pass  # optional feature — silently skip if deps are missing
 
         self.tool_registry = ToolRegistry(config_manager, providers=providers)
-        self.tool_executor = ToolExecutor()
+        self.tool_executor = ToolExecutor(confirm_callback=self.tool_confirm_callback)
         self.tools_enabled = True
         self.tool_auto_loop = auto_loop
         self.tool_max_iterations = max_iterations

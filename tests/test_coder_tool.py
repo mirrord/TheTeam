@@ -97,6 +97,58 @@ class TestExecute:
         assert "# Coding task result" not in result.stdout
         assert "All done." in result.stdout
 
+    def test_workspace_location_reported_to_caller(self, tmp_path: Path) -> None:
+        ex = _executor(["[SUBMIT]\ndone\n[/SUBMIT]"], tmp_path)
+        result = ex.execute(f"code --root {tmp_path} do a thing")
+        # The caller is told which workspace the run used.
+        assert "Workspace:" in result.stdout
+        assert str(Path(tmp_path).resolve()) in result.stdout
+
+
+class TestCallerPolicy:
+    """The coding subagent inherits the caller's tool policy + confirm channel."""
+
+    def test_caller_policy_extracted_from_context(self, tmp_path: Path) -> None:
+        captured: dict[str, Any] = {}
+
+        class _RecordingCoder(Coder):
+            def code(self, request_or_task, tool_config=None, confirm_callback=None, **kw):
+                captured["tool_config"] = tool_config
+                captured["confirm_callback"] = confirm_callback
+                return super().code(
+                    request_or_task,
+                    tool_config=tool_config,
+                    confirm_callback=confirm_callback,
+                    **kw,
+                )
+
+        cfg = CodeHarnessConfig(write_trajectory=False, include_file_listing=False)
+        coder = _RecordingCoder(
+            _FakeCM(), config=cfg, agent_factory=lambda: _ScriptedAgent(["[SUBMIT]\nx\n[/SUBMIT]"])
+        )
+        ex = CoderToolExecutor(_FakeCM(), coder=coder)
+
+        def my_confirm(cmd: str) -> bool:
+            return True
+
+        class _Registry:
+            config = {"mode": "strict", "include": ["python"], "confirm": ["bash"]}
+
+        class _Caller:
+            tool_registry = _Registry()
+            tool_confirm_callback = staticmethod(my_confirm)
+
+        ex.execute(f"code --root {tmp_path} do it", context={"agent": _Caller()})
+        assert captured["tool_config"]["include"] == ["python"]
+        assert captured["tool_config"]["confirm"] == ["bash"]
+        assert captured["confirm_callback"] is my_confirm
+
+    def test_no_caller_agent_uses_defaults(self, tmp_path: Path) -> None:
+        root, cb = CoderToolExecutor._caller_policy(None)
+        assert root is None and cb is None
+        root, cb = CoderToolExecutor._caller_policy({"agent": None})
+        assert root is None and cb is None
+
 
 class TestParseRemainder:
     def test_no_root(self) -> None:

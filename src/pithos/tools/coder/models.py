@@ -107,6 +107,7 @@ class CodeTaskResult:
     summary: str = ""
     diff: str = ""
     steps: int = 0
+    root: Optional[str] = None  # the workspace directory the run operated in
     trajectory_path: Optional[str] = None
     messages: list[dict[str, Any]] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
@@ -127,6 +128,9 @@ class CodeTaskResult:
         lines = [
             f"Coding task {self.exit_status.value} after {self.steps} step(s)."
         ]
+        if self.root:
+            lines.append("")
+            lines.append(f"Workspace: {self.root}")
         if self.summary.strip():
             lines.append("")
             lines.append(self.summary.strip())
@@ -148,6 +152,8 @@ class CodeTaskResult:
             f"- **Exit status:** {self.exit_status.value}",
             f"- **Steps:** {self.steps}",
         ]
+        if self.root:
+            parts.append(f"- **Workspace:** {self.root}")
         if self.trajectory_path:
             parts.append(f"- **Trajectory:** {self.trajectory_path}")
         parts.append("")

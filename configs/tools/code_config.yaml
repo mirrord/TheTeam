@@ -28,7 +28,8 @@ output_head_chars: 5000
 output_tail_chars: 5000
 
 # --- Workspace / editing ---------------------------------------------------
-allowed_root: null                     # null = use per-request root, else the cwd
+allowed_root: null                     # null = allocate a fresh unique workspace per run
+workspace_base: "~/.talos/code"        # parent dir for auto-allocated workspaces (used when allowed_root is null and no --root is given)
 backup_edits: true                     # write a .bak snapshot before in-place edits
 include_file_listing: true             # show a file listing in the first prompt
 max_listed_files: 200

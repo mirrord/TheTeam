@@ -351,6 +351,106 @@ def test_telegram_skips_missing_attachment_without_crash(tmp_path) -> None:
     update.message.reply_document.assert_not_awaited()
 
 
+def test_telegram_resolve_pending_confirm() -> None:
+    """A pending confirmation consumes the next message as its yes/no answer."""
+    agent = _make_agent()
+    iface = TelegramInterface(agent, TelegramConfig(bot_token="t"))
+
+    # No pending → message is not consumed.
+    assert iface._resolve_pending_confirm(5, "hello") is False
+
+    from talos.interfaces.telegram import _PendingConfirm
+
+    pending = _PendingConfirm()
+    iface._pending_confirms[5] = pending
+    assert iface._resolve_pending_confirm(5, "YES") is True
+    assert pending.approved is True
+    assert pending.event.is_set()
+
+    pending2 = _PendingConfirm()
+    iface._pending_confirms[6] = pending2
+    assert iface._resolve_pending_confirm(6, "no thanks") is True
+    assert pending2.approved is False
+
+
+def test_telegram_tool_confirmation_round_trip() -> None:
+    """A mid-task tool-confirm prompt is answered by the user's next message."""
+
+    async def scenario() -> None:
+        agent = _make_agent()
+        iface = TelegramInterface(agent, TelegramConfig(bot_token="t"))
+        captured: dict[str, object] = {}
+
+        def fake_send(text, context_name=None, **kwargs):
+            # The coding subagent would consult the caller's confirm channel.
+            cb = agent.tool_confirm_callback
+            captured["approved"] = cb("powershell -Command whoami")
+            return "all done"
+
+        agent.send = fake_send  # type: ignore[assignment]
+        agent._pending_image_paths = []
+        agent._pending_report_paths = []
+        agent._pending_attachment_paths = []
+
+        update1 = _make_update(100, "code do the thing")
+        update1.message.reply_document = AsyncMock()
+
+        # Start the agent turn; it blocks in a worker thread awaiting confirm.
+        task = asyncio.create_task(iface._handle_message(update1, MagicMock()))
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            if 100 in iface._pending_confirms:
+                break
+        assert 100 in iface._pending_confirms  # user was prompted
+
+        # Deliver the approval as the user's next message.
+        update2 = _make_update(100, "yes")
+        await iface._handle_message(update2, MagicMock())
+        await task
+
+        assert captured["approved"] is True
+        # The confirm prompt included the exact command.
+        prompts = [c.args[0] for c in update1.message.reply_text.await_args_list]
+        assert any("powershell -Command whoami" in p for p in prompts)
+
+    asyncio.run(scenario())
+
+
+def test_telegram_tool_confirmation_denied() -> None:
+    """Replying with anything other than yes denies the tool call."""
+
+    async def scenario() -> None:
+        agent = _make_agent()
+        iface = TelegramInterface(agent, TelegramConfig(bot_token="t"))
+        captured: dict[str, object] = {}
+
+        def fake_send(text, context_name=None, **kwargs):
+            captured["approved"] = agent.tool_confirm_callback("bash -c rm")
+            return "ok"
+
+        agent.send = fake_send  # type: ignore[assignment]
+        agent._pending_image_paths = []
+        agent._pending_report_paths = []
+        agent._pending_attachment_paths = []
+
+        update1 = _make_update(101, "code do the thing")
+        update1.message.reply_document = AsyncMock()
+        task = asyncio.create_task(iface._handle_message(update1, MagicMock()))
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            if 101 in iface._pending_confirms:
+                break
+        assert 101 in iface._pending_confirms
+
+        update2 = _make_update(101, "no")
+        await iface._handle_message(update2, MagicMock())
+        await task
+
+        assert captured["approved"] is False
+
+    asyncio.run(scenario())
+
+
 # ---------------------------------------------------------------------------
 # Voice — only test the constructor wiring; full pipeline requires audio deps.
 # ---------------------------------------------------------------------------
