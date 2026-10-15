@@ -10,6 +10,14 @@ from .ollama_agent import OllamaAgent
 # raises :class:`ImportError` with installation guidance when the backend
 # package is unavailable.
 from .cli import interactive_chat, main
+from .factory import (
+    DEFAULT_PROVIDER,
+    SUPPORTED_PROVIDERS,
+    canonical_provider,
+    agent_class_for_provider,
+    build_agent,
+    build_agent_from_config,
+)
 from .history import ConversationStore, HistorySearchResult, MessageRecord
 from .compaction import CompactionConfig, MemoryCompactor
 from .recall import RecallConfig, AutoRecall
@@ -19,6 +27,12 @@ from ..context import Msg, UserMsg, AgentMsg, AgentContext
 __all__ = [
     "Agent",
     "OllamaAgent",
+    "DEFAULT_PROVIDER",
+    "SUPPORTED_PROVIDERS",
+    "canonical_provider",
+    "agent_class_for_provider",
+    "build_agent",
+    "build_agent_from_config",
     "AgentContext",
     "Msg",
     "UserMsg",

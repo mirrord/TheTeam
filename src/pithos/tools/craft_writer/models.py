@@ -50,6 +50,7 @@ class CraftWriteConfig:
     # --- Subagent ----------------------------------------------------------
     subagent_config_name: str = "craft_writer"
     subagent_model: Optional[str] = None
+    subagent_provider: Optional[str] = None  # ollama (default) / llamacpp / exl
 
     # --- Writing pipeline -------------------------------------------------
     target_word_count: int = 2000

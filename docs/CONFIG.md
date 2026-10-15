@@ -48,6 +48,64 @@ system_prompt: "You are a helpful assistant."
 temperature: 0.7  # Optional: Controls randomness (0.0-1.0). Default is 0.7.
 ```
 
+### Model Provider
+
+TheTeam ships three model-provider backends. Every place a model can be
+configured also accepts a `provider` key selecting which backend serves it.
+When `provider` is omitted it defaults to `ollama`, preserving existing
+behaviour.
+
+| `provider` value | Backend | Agent class |
+|---|---|---|
+| `ollama` *(default)* | [Ollama](https://ollama.com) | `OllamaAgent` |
+| `llamacpp` (aliases: `llama.cpp`, `llama_cpp`) | llama.cpp (server or in-process GGUF) | `LlamacppAgent` |
+| `exl` (aliases: `exl2`, `exllama`, `exllamav2`) | ExLlamaV2 quantized GPU inference | `EXLAgent` |
+
+```yaml
+# Ollama (default — provider may be omitted)
+model: glm-4.7-flash:latest
+provider: ollama
+system_prompt: "You are a helpful assistant."
+```
+
+```yaml
+# llama.cpp server backend
+model: qwen3
+provider: llamacpp
+base_url: "http://127.0.0.1:8080"
+backend_options:
+  top_p: 0.95
+```
+
+```yaml
+# ExLlamaV2 backend (path to an exl2 model directory)
+model: /models/Llama-3.2-8B-exl2-6bpw
+provider: exl
+backend_options:
+  max_seq_len: 16384
+  cache_bits: 8
+```
+
+The provider is honoured anywhere an agent is built from configuration —
+registered agent configs, the web chat/agent services, `AgentTeam`
+coordinators/workers, the research/craft/coder tool subagents (via their
+`subagent_provider` / `editor_provider` / `term_provider` config keys), and
+the Talos agent config. Programmatically, build an agent for any provider
+with the factory:
+
+```python
+from pithos.agent import build_agent, build_agent_from_config
+
+agent = build_agent("qwen3", provider="llamacpp", base_url="http://127.0.0.1:8080")
+# or from a config dict (dispatches on its ``provider`` key):
+agent = build_agent_from_config(config_dict, config_manager)
+```
+
+The llama.cpp and ExLlamaV2 backends depend on optional packages; see the
+[Model Parameters](#model-parameters) section below for backend-specific
+options. Selecting a provider whose package is not installed raises an
+`ImportError` with installation guidance.
+
 ### Agent with Flowchart
 
 An agent can have an optional **inference flowchart** (chain-of-thought) that runs at each step of agent inference instead of a single LLM round-trip. This is useful for structured reasoning patterns like reflection, iterative refinement, or multi-step analysis.

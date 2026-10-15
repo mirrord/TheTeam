@@ -16,6 +16,7 @@ from typing import Any, Iterator, Optional
 import logging
 
 from .agent import Agent
+from ..config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,8 @@ class EXLAgent(Agent):
             print(tok, end="")
     """
 
+    PROVIDER = "exl"
+
     def __init__(
         self,
         default_model: str,
@@ -114,6 +117,29 @@ class EXLAgent(Agent):
         # Per-call token counters surfaced to _extract_token_usage.
         self._last_prompt_tokens: int = 0
         self._last_completion_tokens: int = 0
+
+    @classmethod
+    def from_dict(
+        cls, config: dict[str, Any], config_manager: "ConfigManager"
+    ) -> "EXLAgent":
+        """Create an :class:`EXLAgent` from a config dict.
+
+        Extends the base implementation to honour the ``backend_options``
+        key (``max_seq_len``, ``cache_bits``, ``chat_template`` …) so
+        ExLlamaV2 agents can be defined entirely in YAML.
+        """
+        model = config.get("model")
+        if not model:
+            raise ValueError("Agent config must specify 'model'")
+        agent = cls(
+            model,
+            config.get("name"),
+            config.get("system_prompt", ""),
+            config.get("temperature"),
+            backend_options=config.get("backend_options"),
+        )
+        agent._apply_config_from_dict(config, config_manager)
+        return agent
 
     # ------------------------------------------------------------------
     # Model lifecycle

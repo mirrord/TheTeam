@@ -10,7 +10,8 @@ enabled: true
 
 # --- Subagent --------------------------------------------------------------
 subagent_config_name: "code_harness"   # configs/agents/code_harness.yaml
-subagent_model: null                   # null = use the value from the agent config
+subagent_model: qwen3.8-27B            # null = use the value from the agent config
+subagent_provider: llamacpp
 subagent_timeout: 300                  # per-generation wall-clock cap (seconds); null = none
 
 # --- Loop limits -----------------------------------------------------------

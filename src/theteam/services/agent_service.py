@@ -50,6 +50,7 @@ class AgentService:
                             "id": agent_id,
                             "name": config.get("name", agent_id),
                             "model": config.get("model", "unknown"),
+                            "provider": config.get("provider", "ollama"),
                             "source": "file",
                             "path": str(yaml_file),
                         }
@@ -64,6 +65,7 @@ class AgentService:
                     "id": agent_id,
                     "name": config.get("name", agent_id),
                     "model": config.get("model", "unknown"),
+                    "provider": config.get("provider", "ollama"),
                     "source": "runtime",
                 }
             )
@@ -218,35 +220,18 @@ class AgentService:
         Raises:
             ValueError: If agent not found.
         """
-        from pithos.agent import OllamaAgent
+        from pithos.agent import build_agent_from_config
+        from pithos.config_manager import ConfigManager
 
         agent_config = self.get_agent(agent_id)
         if not agent_config:
             raise ValueError(f"Agent {agent_id} not found")
 
         try:
-            # Create temporary agent instance
+            # Create temporary agent instance for the configured provider.
             config = agent_config["config"]
-            agent = OllamaAgent(
-                default_model=config.get("model", "glm-4.7-flash:latest"),
-                agent_name=config.get("name", agent_id),
-                system_prompt=config.get("system_prompt", ""),
-            )
-
-            # Apply inference flowchart if configured
-            inference_cfg = config.get("inference")
-            if inference_cfg is not None:
-                try:
-                    from pithos.config_manager import ConfigManager
-
-                    cm = ConfigManager()
-                    agent.set_inference_flowchart(inference_cfg, cm)
-                except Exception as exc:
-                    logger.warning(
-                        "Failed to load inference flowchart for agent %s: %s",
-                        agent_id,
-                        exc,
-                    )
+            cm = ConfigManager()
+            agent = build_agent_from_config(config, cm)
 
             # Generate response
             response = agent.send(prompt)

@@ -9,6 +9,7 @@ export interface Agent {
   id: string
   name: string
   model: string
+  provider?: string
   source: 'file' | 'runtime'
   path?: string
 }
@@ -17,6 +18,7 @@ export interface AgentConfig {
   id: string
   name?: string
   model: string
+  provider?: string
   system_prompt?: string
   temperature?: number
   tools?: string[]

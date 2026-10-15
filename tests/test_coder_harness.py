@@ -64,6 +64,19 @@ class TestHarnessLoop:
         assert result.steps == 2
         assert (tmp_path / "foo.txt").read_text() == "hello"
 
+    def test_create_alias_block_writes_file(self, tmp_path: Path) -> None:
+        # Regression: models often emit [CREATE path=...] instead of
+        # [EDIT ... mode=create]; the harness must accept it and write the file
+        # rather than abort with format_error_limit.
+        replies = [
+            "THOUGHT: make it\n[CREATE path=asteroids.py]\nimport pygame\n[/CREATE]",
+            "[DONE]\nWrote asteroids.py.\n[/DONE]",
+        ]
+        harness = _harness(replies, tmp_path)
+        result = harness.run(CodeTaskRequest(task="write game", root=str(tmp_path)))
+        assert result.exit_status == ExitStatus.SUBMITTED
+        assert (tmp_path / "asteroids.py").read_text() == "import pygame"
+
     def test_system_prompt_installed(self, tmp_path: Path) -> None:
         agent = _ScriptedAgent(["[SUBMIT]\ndone\n[/SUBMIT]"])
         cfg = CodeHarnessConfig(write_trajectory=False, include_file_listing=False)

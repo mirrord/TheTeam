@@ -86,6 +86,8 @@ class LlamacppAgent(Agent):
         )
     """
 
+    PROVIDER = "llamacpp"
+
     def __init__(
         self,
         default_model: str,

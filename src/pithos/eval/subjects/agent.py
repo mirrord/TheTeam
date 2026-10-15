@@ -1,11 +1,13 @@
-"""Agent subject — wraps a single :class:`~pithos.agent.OllamaAgent`.
+"""Agent subject — wraps a single pithos :class:`~pithos.agent.Agent`.
 
 Config keys (from ``EvalConfig.subjects.<name>``):
 
 * ``agent`` *(optional)* — registered agent config name to load via
-  :meth:`OllamaAgent.from_config`.  If omitted, a bare agent is built
-  with the supplied ``model`` / ``system_prompt`` / ``temperature``.
+  :meth:`Agent.from_config`.  If omitted, a bare agent is built with the
+  supplied ``model`` / ``provider`` / ``system_prompt`` / ``temperature``.
 * ``model`` *(optional)* — default model identifier.
+* ``provider`` *(optional)* — model provider (``ollama`` (default),
+  ``llamacpp`` or ``exl``).
 * ``system_prompt`` *(optional)* — system prompt override.
 * ``temperature`` *(optional)* — sampling temperature override.
 """
@@ -27,12 +29,14 @@ class AgentSubject(Subject):
         self._agent: Any = None  # lazily constructed
 
     def _build_agent(self) -> Any:
-        """Construct or fetch the underlying OllamaAgent.
+        """Construct or fetch the underlying agent.
 
-        Built lazily so importing the eval package does not require
-        Ollama to be installed/available.
+        Built lazily so importing the eval package does not require a
+        model backend to be installed/available. The ``provider`` config
+        key (``ollama`` (default), ``llamacpp`` or ``exl``) selects the
+        backend.
         """
-        from pithos.agent import OllamaAgent
+        from pithos.agent import Agent, build_agent
 
         if "instance" in self.config and self.config["instance"] is not None:
             # Test/programmatic injection path.
@@ -43,11 +47,12 @@ class AgentSubject(Subject):
             from pithos import ConfigManager
 
             cm = self.config.get("config_manager") or ConfigManager()
-            agent = OllamaAgent.from_config(registered, cm)
+            agent = Agent.from_config(registered, cm)
         else:
-            agent = OllamaAgent(
-                default_model=self.config.get("model", "llama3"),
-                default_system_prompt=self.config.get("system_prompt"),
+            agent = build_agent(
+                model=self.config.get("model", "llama3"),
+                provider=self.config.get("provider"),
+                system_prompt=self.config.get("system_prompt") or "",
                 temperature=self.config.get("temperature", 0.0),
             )
         return agent

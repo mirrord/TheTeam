@@ -113,6 +113,24 @@ def test_construction_succeeds(fake_exl):
     assert agent._exl_generator is None  # lazy
 
 
+def test_from_dict_honours_backend_options(fake_exl):
+    from unittest.mock import MagicMock
+
+    config = {
+        "model": "/models/exl-dir",
+        "name": "exl-agent",
+        "provider": "exl",
+        "temperature": 0.3,
+        "backend_options": {"max_seq_len": 16384, "cache_bits": 8},
+    }
+    agent = EXLAgent.from_dict(config, MagicMock())
+    assert agent.default_model == "/models/exl-dir"
+    assert agent.agent_name == "exl-agent"
+    assert agent.temperature == 0.3
+    assert agent.backend_options == {"max_seq_len": 16384, "cache_bits": 8}
+    assert agent.to_dict()["provider"] == "exl"
+
+
 def test_lazy_load_on_first_stream(fake_exl):
     agent = EXLAgent(default_model="/models/exl-dir")
     list(agent.stream("Hi"))

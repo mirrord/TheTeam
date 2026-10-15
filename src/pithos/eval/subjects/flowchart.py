@@ -50,17 +50,17 @@ class FlowchartSubject(Subject):
             return dict(self.config["agents_instance"])
 
         from pithos import ConfigManager
-        from pithos.agent import OllamaAgent
+        from pithos.agent import Agent
 
         cm = self.config.get("config_manager") or ConfigManager()
         raw = self.config.get("agents", {})
         agents: dict[str, Any] = {}
         if isinstance(raw, list):
             for alias in raw:
-                agents[alias] = OllamaAgent.from_config(alias, cm)
+                agents[alias] = Agent.from_config(alias, cm)
         elif isinstance(raw, dict):
             for alias, registered_name in raw.items():
-                agents[alias] = OllamaAgent.from_config(registered_name or alias, cm)
+                agents[alias] = Agent.from_config(registered_name or alias, cm)
         return agents
 
     def run(self, case: TaskCase, ctx: RunContext) -> SubjectRun:

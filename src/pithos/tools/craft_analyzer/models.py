@@ -72,6 +72,7 @@ class CraftAnalysisConfig:
     # --- Subagent ----------------------------------------------------------
     subagent_config_name: str = "craft_analyst"
     subagent_model: Optional[str] = None
+    subagent_provider: Optional[str] = None  # ollama (default) / llamacpp / exl
     max_notes_per_dimension: int = 8
     dedup_notes: bool = True
 

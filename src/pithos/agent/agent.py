@@ -35,6 +35,11 @@ class Agent(ABC):
     Subclasses must implement `send()` to provide the backend-specific LLM call.
     """
 
+    #: Canonical provider key this backend serves. Overridden by concrete
+    #: subclasses and used by the provider factory and ``to_dict`` so that a
+    #: configured model round-trips back to the same provider.
+    PROVIDER: str = "ollama"
+
     def __init__(
         self,
         default_model: str,
@@ -97,7 +102,17 @@ class Agent(ABC):
     def from_dict(
         cls: Type[_AgentT], config: dict[str, Any], config_manager: ConfigManager
     ) -> _AgentT:
-        """Create agent from configuration dictionary."""
+        """Create agent from configuration dictionary.
+
+        When called on the abstract base class (``Agent.from_dict``) the
+        ``provider`` key selects the concrete backend via the provider
+        factory. Calling on a concrete subclass builds that subclass
+        directly (ignoring ``provider``) for backward compatibility.
+        """
+        if cls is Agent:
+            from .factory import build_agent_from_config
+
+            return build_agent_from_config(config, config_manager)  # type: ignore[return-value]
         model = config.get("model")
         if not model:
             raise ValueError("Agent config must specify 'model'")
@@ -178,9 +193,17 @@ class Agent(ABC):
     def from_config(
         cls: Type[_AgentT], name: str, config_manager: ConfigManager
     ) -> _AgentT:
-        """Load agent from registered configuration."""
+        """Load agent from registered configuration.
+
+        On the base class the registered config's ``provider`` key selects
+        the backend; on a concrete subclass that subclass is used.
+        """
         config = config_manager.get_config(name, "agents")
         if not config:
+            if cls is Agent:
+                from .factory import build_agent
+
+                return build_agent(model=name)  # type: ignore[return-value]
             return cls(default_model=name)
         return cls.from_dict(config, config_manager)
 
@@ -189,6 +212,7 @@ class Agent(ABC):
         d: dict[str, Any] = {
             "name": self.agent_name,
             "model": self.default_model,
+            "provider": type(self).PROVIDER,
             "system_prompt": self.default_system_prompt,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,

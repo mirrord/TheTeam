@@ -76,7 +76,13 @@ action blocks:
 
 A `.bak` snapshot is written before any in-place edit (configurable).
 
-**Submit the final result** and end the run:
+The parser is **lenient** about the block syntax models naturally produce: the
+mode-named blocks `[CREATE ...]`, `[REPLACE ...]`, `[WRITE ...]` (= replace),
+`[PATCH ...]`, and `[INSERT ...]` / `[INSERT_AT_LINE ...]` are all accepted as
+edits (the block name sets the mode; an explicit `mode=` attribute still wins).
+Tag names are case-insensitive.
+
+**Submit the final result** and end the run (`[DONE]` / `[FINISH]` also work):
 
 ```
 [SUBMIT]

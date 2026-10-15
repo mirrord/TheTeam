@@ -376,7 +376,7 @@ class CraftWriter:
         if self._agent_factory is not None:
             return self._agent_factory()
 
-        from ...agent import OllamaAgent
+        from ...agent import build_agent, build_agent_from_config
 
         cfg = self.config
         agent_cfg = None
@@ -388,11 +388,12 @@ class CraftWriter:
             logger.debug("failed to load subagent config: %s", exc)
 
         if agent_cfg:
-            agent = OllamaAgent.from_dict(agent_cfg, self.config_manager)
+            agent = build_agent_from_config(agent_cfg, self.config_manager)
         else:
             model = cfg.subagent_model or "llama3.2"
-            agent = OllamaAgent(
-                default_model=model,
+            agent = build_agent(
+                model=model,
+                provider=cfg.subagent_provider,
                 agent_name="craft_writer",
                 system_prompt="",
             )

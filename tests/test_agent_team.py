@@ -71,11 +71,11 @@ def _make_mock_agent(responses=None):
 
 @pytest.fixture
 def patched_ollama():
-    """Patch OllamaAgent so AgentTeam constructs without network calls."""
-    with patch("pithos.team.agent_manager.OllamaAgent") as cls:
+    """Patch the provider factory so AgentTeam constructs without network calls."""
+    with patch("pithos.team.agent_manager.build_agent") as cls:
         instances: list[MagicMock] = []
 
-        def factory(default_model=None, **kwargs):
+        def factory(model=None, provider=None, **kwargs):
             mock = _make_mock_agent()
             instances.append(mock)
             return mock

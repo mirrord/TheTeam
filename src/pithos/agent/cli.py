@@ -7,7 +7,7 @@ from typing import List
 
 from ..config_manager import ConfigManager
 from .agent import Agent
-from .ollama_agent import OllamaAgent
+from .factory import build_agent
 
 # Sequences that open a tool-call span in agent output.  Used to detect the
 # start of markup so it can be held back from the display buffer.
@@ -166,19 +166,19 @@ def main() -> None:
     if args.command == "chat":
         agent_path = Path(args.agent_config)
         if agent_path.exists():
-            agent = OllamaAgent.from_yaml(str(agent_path), config_manager)
+            agent = Agent.from_yaml(str(agent_path), config_manager)
             print(f"Using agent config: {args.agent_config}")
         elif args.agent_config in config_manager.get_registered_agent_names():
-            agent = OllamaAgent.from_config(args.agent_config, config_manager)
+            agent = Agent.from_config(args.agent_config, config_manager)
             print(f"Using registered agent: {args.agent_config}")
         else:
-            agent = OllamaAgent(default_model=args.agent_config)
+            agent = build_agent(model=args.agent_config)
             print(f"Using base model: {args.agent_config}")
 
         interactive_chat(agent, args.verbose)
 
     elif args.command == "register":
-        agent = OllamaAgent.from_yaml(args.agent_config, config_manager)
+        agent = Agent.from_yaml(args.agent_config, config_manager)
         agent.register(config_manager, args.name)
         print(f"Agent registered as '{agent.agent_name}'")
 

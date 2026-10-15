@@ -35,6 +35,7 @@ function normalizeAgentConfig(agentId: string, raw: any): AgentConfigType {
     id: agentId,
     name: raw.name ?? agentId,
     model: raw.model ?? '',
+    provider: raw.provider ?? 'ollama',
     system_prompt: raw.system_prompt ?? '',
     temperature: raw.temperature ?? 0.7,
     tools,
@@ -116,6 +117,7 @@ export default function AgentConfig() {
       id: '',
       name: 'New Agent',
       model: 'glm-4.7-flash:latest',
+      provider: 'ollama',
       system_prompt: '',
       temperature: 0.7,
       tools: [],
@@ -241,7 +243,7 @@ export default function AgentConfig() {
               >
                 <div className="font-medium truncate">{agent.name}</div>
                 <div className="text-xs text-gray-400">{agent.model}</div>
-                <div className="text-xs text-gray-500">{agent.source}</div>
+                <div className="text-xs text-gray-500">{agent.provider || 'ollama'} · {agent.source}</div>
               </button>
               <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100">
                 <button
@@ -351,6 +353,22 @@ export default function AgentConfig() {
                         <option value="base_model">Base Model</option>
                         <option value="custom">Custom</option>
                       </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Provider</label>
+                      <select
+                        value={editingConfig.provider || 'ollama'}
+                        onChange={(e) => updateConfig('provider', e.target.value)}
+                        className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      >
+                        <option value="ollama">Ollama</option>
+                        <option value="llamacpp">llama.cpp</option>
+                        <option value="exl">ExLlamaV2</option>
+                      </select>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Backend that serves this model
+                      </p>
                     </div>
                     
                     {agentType === 'base_model' && (

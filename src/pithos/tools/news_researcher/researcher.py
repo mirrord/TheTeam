@@ -244,7 +244,7 @@ class NewsResearcher:
         if self._agent_factory is not None:
             return self._agent_factory()
 
-        from ...agent import OllamaAgent
+        from ...agent import build_agent, build_agent_from_config
 
         cfg = self.config
         agent_cfg = None
@@ -256,11 +256,12 @@ class NewsResearcher:
             logger.debug("failed to load subagent config: %s", exc)
 
         if agent_cfg:
-            agent = OllamaAgent.from_dict(agent_cfg, self.config_manager)
+            agent = build_agent_from_config(agent_cfg, self.config_manager)
         else:
             model = cfg.subagent_model or "llama3.2"
-            agent = OllamaAgent(
-                default_model=model,
+            agent = build_agent(
+                model=model,
+                provider=cfg.subagent_provider,
                 agent_name="news_researcher",
                 system_prompt="",
             )
@@ -276,7 +277,7 @@ class NewsResearcher:
         cfg = self.config
         # Prefer a dedicated term agent config when one is registered.
         if cfg.term_config_name:
-            from ...agent import OllamaAgent
+            from ...agent import build_agent_from_config
 
             try:
                 agent_cfg = self.config_manager.get_config(
@@ -285,7 +286,7 @@ class NewsResearcher:
             except Exception:
                 agent_cfg = None
             if agent_cfg:
-                agent = OllamaAgent.from_dict(agent_cfg, self.config_manager)
+                agent = build_agent_from_config(agent_cfg, self.config_manager)
                 if cfg.term_model:
                     agent.default_model = cfg.term_model
                 return agent
@@ -295,11 +296,12 @@ class NewsResearcher:
         if self._agent_factory is not None:
             return self._agent_factory()
 
-        from ...agent import OllamaAgent
+        from ...agent import build_agent
 
         model = cfg.term_model or cfg.subagent_model or "llama3.2"
-        return OllamaAgent(
-            default_model=model,
+        return build_agent(
+            model=model,
+            provider=cfg.term_provider or cfg.subagent_provider,
             agent_name="news_terms",
             system_prompt="",
         )

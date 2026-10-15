@@ -295,7 +295,7 @@ class ChatService:
             socketio: Socket.io instance for real-time updates.
             client_id: Optional client identifier for socket events.
         """
-        from pithos.agent import OllamaAgent
+        from pithos.agent import build_agent
         from theteam.services.agent_service import AgentService
         from theteam.api.socketio_handlers import emit_to_client
 
@@ -334,10 +334,13 @@ class ChatService:
 
             config = agent_config["config"]
             model = config.get("model") or "glm-4.7-flash:latest"
-            agent = OllamaAgent(
-                default_model=model,
+            agent = build_agent(
+                model=model,
+                provider=config.get("provider"),
                 system_prompt=config.get("system_prompt") or "",
                 temperature=float(config.get("temperature", 0.7)),
+                backend_options=config.get("backend_options"),
+                base_url=config.get("base_url") or config.get("server_url"),
             )
 
             # Pre-populate agent context with prior conversation history.

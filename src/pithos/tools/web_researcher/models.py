@@ -67,6 +67,7 @@ class WebResearchConfig:
     keep_collection: bool = False
     subagent_config_name: str = "web_researcher"
     subagent_model: Optional[str] = None  # overrides config if set
+    subagent_provider: Optional[str] = None  # ollama (default) / llamacpp / exl
     # Wall-clock cap (seconds) on any single subagent generation. Bounds
     # worst-case runtime so a runaway/looping model cannot hang the tool
     # indefinitely (Ollama streaming has no timeout of its own). A time
@@ -84,6 +85,7 @@ class WebResearchConfig:
     verify_citations: bool = True
     editor_config_name: str = "editor"
     editor_model: Optional[str] = None
+    editor_provider: Optional[str] = None  # ollama (default) / llamacpp / exl
 
     @classmethod
     def from_dict(cls, data: Optional[dict[str, Any]]) -> "WebResearchConfig":

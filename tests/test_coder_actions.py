@@ -72,6 +72,59 @@ class TestParseActions:
         assert actions[0].body == "line1\n\nline3"
 
 
+class TestEditAliases:
+    """Mode-named edit blocks models commonly emit are accepted as edits."""
+
+    def test_create_alias(self) -> None:
+        # The exact form that previously caused format_error_limit failures.
+        text = "THOUGHT: make it\n[CREATE path=asteroids.py]\nimport pygame\n[/CREATE]"
+        actions = parse_actions(text)
+        assert len(actions) == 1
+        a = actions[0]
+        assert a.kind == "edit"
+        assert a.path == "asteroids.py"
+        assert a.mode == "create"
+        assert a.body == "import pygame"
+
+    def test_replace_and_write_aliases(self) -> None:
+        for tag in ("REPLACE", "WRITE"):
+            actions = parse_actions(f"[{tag} path=x.py]\nbody\n[/{tag}]")
+            assert actions[0].kind == "edit"
+            assert actions[0].mode == "replace"
+
+    def test_patch_alias(self) -> None:
+        actions = parse_actions("[PATCH path=x.py]\n@@ -1 +1 @@\n[/PATCH]")
+        assert actions[0].mode == "patch"
+
+    def test_insert_aliases(self) -> None:
+        a1 = parse_actions("[INSERT path=x.py line=2]\nNEW\n[/INSERT]")[0]
+        assert a1.mode == "insert_at_line"
+        assert a1.line == 2
+        a2 = parse_actions("[INSERT_AT_LINE path=x.py line=3]\nNEW\n[/INSERT_AT_LINE]")[0]
+        assert a2.mode == "insert_at_line"
+        assert a2.line == 3
+
+    def test_explicit_mode_attr_wins_over_tag(self) -> None:
+        actions = parse_actions("[CREATE path=x.py mode=replace]\nb\n[/CREATE]")
+        assert actions[0].mode == "replace"
+
+    def test_lowercase_tags_accepted(self) -> None:
+        actions = parse_actions("[create path=x.py]\nb\n[/create]")
+        assert actions[0].kind == "edit"
+        assert actions[0].mode == "create"
+
+    def test_submit_aliases(self) -> None:
+        for tag in ("DONE", "FINISH"):
+            actions = parse_actions(f"[{tag}]\nwrapped up\n[/{tag}]")
+            assert actions[0].kind == "submit"
+            assert actions[0].summary == "wrapped up"
+
+    def test_alias_mixed_with_run(self) -> None:
+        text = "[CREATE path=a.py]\nx=1\n[/CREATE]\n[RUN]python a.py[/RUN]"
+        actions = parse_actions(text)
+        assert [a.kind for a in actions] == ["edit", "run"]
+
+
 class TestEditActionToSpec:
     def test_content_spec(self) -> None:
         action = Action(kind="edit", path="x.py", mode="replace", body="data")

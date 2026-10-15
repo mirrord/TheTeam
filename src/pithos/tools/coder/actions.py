@@ -1,8 +1,8 @@
 """Parse a coding subagent's reply into executable actions.
 
-The harness uses a small, unambiguous block grammar so multi-line file content
-can be embedded safely (unlike a single-line command string).  Three block
-types are recognised, matched in the order they appear in the reply:
+The harness uses a small block grammar so multi-line file content can be
+embedded safely (unlike a single-line command string).  Three block types are
+recognised, matched in the order they appear in the reply:
 
 * **Run a command** (routed through the workspace-jailed tool registry)::
 
@@ -18,13 +18,21 @@ types are recognised, matched in the order they appear in the reply:
   (default ``replace``).  ``line`` is required for ``insert_at_line``.  For
   ``patch`` the body is a unified diff.
 
-* **Submit the final result** and end the run::
+  For robustness the parser also accepts **mode-named edit blocks** that models
+  frequently emit instead of ``[EDIT ... mode=X]``: ``[CREATE ...]``,
+  ``[REPLACE ...]``, ``[WRITE ...]`` (= replace), ``[PATCH ...]`` and
+  ``[INSERT ...]`` / ``[INSERT_AT_LINE ...]``.  The block name sets the mode
+  (an explicit ``mode=`` attribute still wins).
+
+* **Submit the final result** and end the run (``[DONE]`` / ``[FINISH]`` are
+  accepted as aliases)::
 
       [SUBMIT]
       <summary of what was done>
       [/SUBMIT]
 
-Any reply that contains no recognised block is a *format error*.
+Parsing is case-insensitive.  Any reply that contains no recognised block is a
+*format error*.
 """
 
 from __future__ import annotations
@@ -33,16 +41,30 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
-# Block matchers. ``re.DOTALL`` so bodies may span multiple lines; non-greedy so
-# adjacent blocks do not merge.
-_EDIT_RE = re.compile(r"\[EDIT\b([^\]]*)\](.*?)\[/EDIT\]", re.DOTALL)
-_SUBMIT_RE = re.compile(r"\[SUBMIT\](.*?)\[/SUBMIT\]", re.DOTALL)
-_RUN_RE = re.compile(r"\[(?:RUN|EXEC)\](.*?)\[/(?:RUN|EXEC)\]", re.DOTALL)
-_COMBINED_RE = re.compile(
-    r"\[EDIT\b[^\]]*\].*?\[/EDIT\]"
-    r"|\[SUBMIT\].*?\[/SUBMIT\]"
-    r"|\[(?:RUN|EXEC)\].*?\[/(?:RUN|EXEC)\]",
-    re.DOTALL,
+# Edit-block tag names (longest alternatives first so e.g. INSERT_AT_LINE is
+# preferred over INSERT). Each maps to a file-edit mode; ``EDIT`` defers to the
+# block's ``mode=`` attribute.
+_TAG_TO_MODE: dict[str, Optional[str]] = {
+    "EDIT": None,
+    "CREATE": "create",
+    "REPLACE": "replace",
+    "WRITE": "replace",
+    "PATCH": "patch",
+    "INSERT_AT_LINE": "insert_at_line",
+    "INSERT": "insert_at_line",
+}
+_EDIT_TAGS = "EDIT|CREATE|REPLACE|WRITE|PATCH|INSERT_AT_LINE|INSERT"
+_SUBMIT_TAGS = "SUBMIT|DONE|FINISH"
+_RUN_TAGS = "RUN|EXEC"
+
+# One master matcher. ``re.DOTALL`` so bodies span multiple lines; non-greedy so
+# adjacent blocks do not merge. ``re.IGNORECASE`` tolerates lower-case tags.
+# Closing tags use backreferences so an open/close pair must agree.
+_BLOCK_RE = re.compile(
+    rf"\[(?P<etag>{_EDIT_TAGS})\b(?P<eattrs>[^\]]*)\](?P<ebody>.*?)\[/(?P=etag)\]"
+    rf"|\[(?P<stag>{_SUBMIT_TAGS})\b[^\]]*\](?P<sbody>.*?)\[/(?P=stag)\]"
+    rf"|\[(?P<rtag>{_RUN_TAGS})\](?P<rbody>.*?)\[/(?P=rtag)\]",
+    re.DOTALL | re.IGNORECASE,
 )
 _ATTR_RE = re.compile(r"(\w+)\s*=\s*(\"[^\"]*\"|'[^']*'|\S+)")
 
@@ -76,8 +98,8 @@ def _parse_attrs(attr_text: str) -> dict[str, str]:
 def _strip_block_body(body: str) -> str:
     """Trim a single leading/trailing newline that frames a block body.
 
-    File content inside ``[EDIT]`` blocks is usually written on its own lines,
-    which introduces a newline right after ``]`` and before ``[/EDIT]``.  We
+    File content inside edit blocks is usually written on its own lines, which
+    introduces a newline right after ``]`` and before the closing tag.  We
     strip exactly one such framing newline on each side while preserving the
     author's internal blank lines and trailing content newline intent.
     """
@@ -92,12 +114,12 @@ def _strip_block_body(body: str) -> str:
     return body
 
 
-def _build_edit_action(raw: str) -> Optional[Action]:
-    m = _EDIT_RE.match(raw)
-    if not m:
-        return None
-    attrs = _parse_attrs(m.group(1))
-    body = _strip_block_body(m.group(2))
+def _build_edit_action(tag: str, attrs_text: str, body_raw: str, raw: str) -> Action:
+    attrs = _parse_attrs(attrs_text)
+    body = _strip_block_body(body_raw)
+    # An explicit mode= attribute wins; otherwise the block name sets the mode.
+    tag_mode = _TAG_TO_MODE.get(tag.upper())
+    mode = attrs.get("mode") or tag_mode or "replace"
     line_val = attrs.get("line")
     line = None
     if line_val is not None:
@@ -109,7 +131,7 @@ def _build_edit_action(raw: str) -> Optional[Action]:
         kind="edit",
         raw=raw,
         path=attrs.get("path", ""),
-        mode=attrs.get("mode", "replace"),
+        mode=mode,
         line=line,
         body=body,
     )
@@ -122,19 +144,22 @@ def parse_actions(text: str) -> list[Action]:
     reply contained no recognised action (a format error).
     """
     actions: list[Action] = []
-    for match in _COMBINED_RE.finditer(text or ""):
+    for match in _BLOCK_RE.finditer(text or ""):
         raw = match.group(0)
-        if raw.startswith("[EDIT"):
-            action = _build_edit_action(raw)
-            if action is not None:
-                actions.append(action)
-        elif raw.startswith("[SUBMIT]"):
-            sm = _SUBMIT_RE.match(raw)
-            summary = _strip_block_body(sm.group(1)) if sm else ""
-            actions.append(Action(kind="submit", raw=raw, summary=summary.strip()))
-        else:  # RUN / EXEC
-            rm = _RUN_RE.match(raw)
-            command = rm.group(1).strip() if rm else ""
+        if match.group("etag"):
+            actions.append(
+                _build_edit_action(
+                    match.group("etag"),
+                    match.group("eattrs"),
+                    match.group("ebody"),
+                    raw,
+                )
+            )
+        elif match.group("stag"):
+            summary = _strip_block_body(match.group("sbody") or "").strip()
+            actions.append(Action(kind="submit", raw=raw, summary=summary))
+        elif match.group("rtag"):
+            command = (match.group("rbody") or "").strip()
             if command:
                 actions.append(Action(kind="run", raw=raw, command=command))
     return actions

@@ -23,7 +23,7 @@ import re
 import time
 from typing import Optional
 
-from ..agent import OllamaAgent
+from ..agent import Agent, build_agent
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +138,7 @@ class AgentTeam:
         coordinator_model: str,
         init_context: str = "DEFAULT",
         team_task: Optional[str] = None,
+        coordinator_provider: Optional[str] = None,
     ) -> None:
         """Initialize the agent team.
 
@@ -145,6 +146,8 @@ class AgentTeam:
             coordinator_model: Model name for the coordinator agent.
             init_context: Initial context name.
             team_task: Optional initial team task.
+            coordinator_provider: Model provider for the coordinator
+                (``ollama`` (default), ``llamacpp`` or ``exl``).
 
         Raises:
             ValueError: If coordinator_model or init_context is empty.
@@ -154,8 +157,8 @@ class AgentTeam:
         if not init_context or not init_context.strip():
             raise ValueError("init_context cannot be empty")
 
-        self.agents: dict[str, OllamaAgent] = {}
-        self.init_coordinator(coordinator_model)
+        self.agents: dict[str, Agent] = {}
+        self.init_coordinator(coordinator_model, provider=coordinator_provider)
         self.workspaces: dict[str, TeamContext] = {
             init_context: TeamContext(team_task or "", "")
         }
@@ -165,9 +168,13 @@ class AgentTeam:
     # Roster management
     # ------------------------------------------------------------------
 
-    def init_coordinator(self, model_name: str) -> None:
+    def init_coordinator(
+        self, model_name: str, provider: Optional[str] = None
+    ) -> None:
         """Initialize the coordinator agent."""
-        self.agents["coordinator"] = OllamaAgent(default_model=model_name)
+        self.agents["coordinator"] = build_agent(
+            model=model_name, provider=provider
+        )
         self.agents["coordinator"].create_context(
             "DEFAULT",
             "You are a project manager and team coordinator. You have been "
@@ -177,8 +184,16 @@ class AgentTeam:
             "the JSON object.",
         )
 
-    def add_agent(self, agent_name: str, model_name: str) -> None:
+    def add_agent(
+        self, agent_name: str, model_name: str, provider: Optional[str] = None
+    ) -> None:
         """Add a new agent to the team.
+
+        Args:
+            agent_name: Unique worker name.
+            model_name: Model served to the worker.
+            provider: Model provider (``ollama`` (default), ``llamacpp`` or
+                ``exl``).
 
         Raises:
             ValueError: If agent with same name already exists or names are empty.
@@ -191,7 +206,9 @@ class AgentTeam:
             raise ValueError("'coordinator' is reserved for the team coordinator")
         if agent_name in self.agents:
             raise ValueError(f"Agent '{agent_name}' already exists.")
-        self.agents[agent_name] = OllamaAgent(default_model=model_name)
+        self.agents[agent_name] = build_agent(
+            model=model_name, provider=provider
+        )
 
     def remove_agent(self, agent_name: str) -> None:
         """Remove an agent from the team.

@@ -137,7 +137,7 @@ def test_send_message_appends_user_message_and_streams(service):
     socketio.start_background_task.side_effect = lambda fn, *a, **kw: fn(*a, **kw)
 
     with (
-        patch("pithos.agent.OllamaAgent", return_value=fake_agent),
+        patch("pithos.agent.build_agent", return_value=fake_agent),
         patch(
             "theteam.services.agent_service.AgentService",
             return_value=fake_agent_service,
@@ -170,7 +170,7 @@ def test_send_message_emits_error_on_exception(service):
     socketio.start_background_task.side_effect = lambda fn, *a, **kw: fn(*a, **kw)
 
     with (
-        patch("pithos.agent.OllamaAgent", side_effect=RuntimeError("boom")),
+        patch("pithos.agent.build_agent", side_effect=RuntimeError("boom")),
         patch(
             "theteam.services.agent_service.AgentService",
             return_value=fake_agent_service,

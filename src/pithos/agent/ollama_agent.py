@@ -25,6 +25,8 @@ class OllamaAgent(Agent):
     Ollama Python client.
     """
 
+    PROVIDER = "ollama"
+
     def _raw_stream(
         self,
         messages: list[dict[str, Any]],

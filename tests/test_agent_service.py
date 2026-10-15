@@ -142,7 +142,9 @@ def test_test_agent_invokes_ollama(service):
     service.create_agent({"id": "a", "model": "test-model"})
     fake_agent = MagicMock()
     fake_agent.send.return_value = "hi back"
-    with patch("pithos.agent.OllamaAgent", return_value=fake_agent) as cls:
+    with patch(
+        "pithos.agent.build_agent_from_config", return_value=fake_agent
+    ) as cls:
         result = service.test_agent("a", "hello")
     cls.assert_called_once()
     fake_agent.send.assert_called_once_with("hello")

@@ -99,11 +99,13 @@ class NewsResearchConfig:
     # --- Term extraction (small language model) ----------------------------
     term_model: Optional[str] = None  # small model used to derive search terms
     term_config_name: Optional[str] = None  # optional agent config for terms
+    term_provider: Optional[str] = None  # ollama (default) / llamacpp / exl
     max_terms: int = 6
 
     # --- Summarise + relevance subagent ------------------------------------
     subagent_config_name: str = "news_researcher"
     subagent_model: Optional[str] = None
+    subagent_provider: Optional[str] = None  # ollama (default) / llamacpp / exl
     # Emit the summary and relevance verdict in a single LLM call per article.
     combine_summary_and_judgement: bool = True
     # Truncate article body sent to the model (head+tail slice) to this many

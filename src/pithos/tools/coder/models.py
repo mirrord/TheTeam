@@ -36,6 +36,7 @@ class CodeHarnessConfig:
     # --- Subagent --------------------------------------------------------
     subagent_config_name: str = "code_harness"
     subagent_model: Optional[str] = None
+    subagent_provider: Optional[str] = None  # ollama (default) / llamacpp / exl
     subagent_timeout: Optional[float] = None  # per-generation wall-clock cap
 
     # --- Loop limits -----------------------------------------------------

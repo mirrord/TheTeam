@@ -254,7 +254,7 @@ class WebResearcher:
         if self._agent_factory is not None:
             return self._agent_factory()
 
-        from ...agent import OllamaAgent
+        from ...agent import build_agent, build_agent_from_config
 
         cfg = self.config
         agent_cfg = None
@@ -266,11 +266,12 @@ class WebResearcher:
             logger.debug("failed to load subagent config: %s", exc)
 
         if agent_cfg:
-            agent = OllamaAgent.from_dict(agent_cfg, self.config_manager)
+            agent = build_agent_from_config(agent_cfg, self.config_manager)
         else:
             model = cfg.subagent_model or "llama3.2"
-            agent = OllamaAgent(
-                default_model=model,
+            agent = build_agent(
+                model=model,
+                provider=cfg.subagent_provider,
                 agent_name="web_researcher",
                 system_prompt="",
             )
@@ -286,7 +287,7 @@ class WebResearcher:
     def _build_editor_agent(self) -> Any:
         """Build the editor subagent for citation verification + rewrite.
 
-        Falls back to a minimal :class:`OllamaAgent` if no
+        Falls back to a minimal agent (for the configured provider) if no
         ``editor_config_name`` agent config is registered. The system
         prompt is set per call by the editor module.
         """
@@ -295,7 +296,7 @@ class WebResearcher:
         if self._agent_factory is not None:
             return self._agent_factory()
 
-        from ...agent import OllamaAgent
+        from ...agent import build_agent, build_agent_from_config
 
         cfg = self.config
         agent_cfg = None
@@ -305,11 +306,12 @@ class WebResearcher:
             logger.debug("failed to load editor agent config: %s", exc)
 
         if agent_cfg:
-            agent = OllamaAgent.from_dict(agent_cfg, self.config_manager)
+            agent = build_agent_from_config(agent_cfg, self.config_manager)
         else:
             model = cfg.editor_model or cfg.subagent_model or "llama3.2"
-            agent = OllamaAgent(
-                default_model=model,
+            agent = build_agent(
+                model=model,
+                provider=cfg.editor_provider or cfg.subagent_provider,
                 agent_name="editor",
                 system_prompt="",
             )

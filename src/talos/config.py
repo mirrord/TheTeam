@@ -13,6 +13,7 @@ from typing import Optional, Any
 import yaml
 
 from pithos import OllamaAgent, ConfigManager
+from pithos.agent import build_agent as build_provider_agent
 
 DEFAULT_CONFIG_PATH = Path.home() / ".talos" / "config.yaml"
 
@@ -134,6 +135,7 @@ class AgentConfig:
     """Agent settings used to build the underlying pithos agent."""
 
     model: str = DEFAULT_MODEL
+    provider: Optional[str] = None  # ollama (default) / llamacpp / exl
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
     temperature: float = DEFAULT_TEMPERATURE
     tools: ToolsConfig = field(default_factory=ToolsConfig)
@@ -337,15 +339,18 @@ def ensure_config(
 
 
 def build_agent(config: TalosConfig) -> OllamaAgent:
-    """Construct a configured :class:`OllamaAgent` from a Talos config.
+    """Construct a configured pithos agent from a Talos config.
 
-    Wires up tools (with optional discovery-mode override), the vector
-    memory store, automatic compaction / recall / persistent history, and
-    LLM-driven memory tag suggestions, according to the user's Talos
-    config.  Each feature is independently toggleable.
+    The provider (``ollama`` (default), ``llamacpp`` or ``exl``) is chosen
+    from ``config.agent.provider``. Wires up tools (with optional
+    discovery-mode override), the vector memory store, automatic
+    compaction / recall / persistent history, and LLM-driven memory tag
+    suggestions, according to the user's Talos config.  Each feature is
+    independently toggleable.
     """
-    agent = OllamaAgent(
-        default_model=config.agent.model,
+    agent = build_provider_agent(
+        model=config.agent.model,
+        provider=config.agent.provider,
         agent_name="talos",
         system_prompt=config.agent.system_prompt,
         temperature=config.agent.temperature,
