@@ -7,7 +7,7 @@ from typing import Any, Optional
 
 from ..config_manager import ConfigManager
 from .models import ToolMetadata, ToolResult
-from .provider import ToolProvider
+from .provider import ToolProvider, parse_no_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -185,16 +185,17 @@ class FlowchartToolExecutor(ToolProvider):
         # timeout) cannot be forcibly interrupted, so a timed-out run is
         # abandoned rather than joined indefinitely -- the thread finishes on
         # its own eventually since it is a daemon thread.
+        timeout = self.get_timeout(flowchart_name)
         thread = threading.Thread(target=_run, daemon=True)
         thread.start()
-        thread.join(timeout=self.timeout)
+        thread.join(timeout=timeout)
 
         if thread.is_alive():
             return ToolResult(
                 success=False,
                 stdout="",
                 stderr=f"Flowchart '{flowchart_name}' timed out after "
-                f"{self.timeout} seconds",
+                f"{timeout} seconds",
                 exit_code=-1,
                 execution_time=time.time() - start,
                 command=command,
@@ -254,16 +255,39 @@ class FlowchartToolExecutor(ToolProvider):
         ]
 
     # ------------------------------------------------------------------
-    # Per-flowchart enable/disable
+    # Per-flowchart config (enable/disable, timeout override)
     # ------------------------------------------------------------------
+
+    def _get_tool_config(self) -> dict[str, Any]:
+        """Return the full tool_config dict, or ``{}`` if unavailable."""
+        try:
+            cfg = self.config_manager.get_config("tool_config", "tools")
+            return cfg if isinstance(cfg, dict) else {}
+        except Exception:
+            return {}
+
+    def get_timeout(self, flowchart_name: str) -> Optional[float]:
+        """Return the effective wall-clock timeout for running *flowchart_name*.
+
+        The timeout is disabled (``None``) when the top-level ``no_timeout``
+        list in ``tool_config.yaml`` contains either ``flowchart`` (all
+        flowcharts) or ``flowchart:<flowchart_name>`` (this flowchart only).
+
+        Args:
+            flowchart_name: Registered config name of the flowchart.
+
+        Returns:
+            ``None`` for no limit, otherwise :attr:`timeout`.
+        """
+        no_timeout = parse_no_timeout(self._get_tool_config())
+        if "flowchart" in no_timeout or f"flowchart:{flowchart_name}" in no_timeout:
+            return None
+        return self.timeout
 
     def _get_items_config(self) -> dict[str, Any]:
         """Return the ``flowcharts.items`` dict from tool_config, or ``{}``."""
         try:
-            cfg = self.config_manager.get_config("tool_config", "tools")
-            if not isinstance(cfg, dict):
-                return {}
-            items = cfg.get("flowcharts", {}).get("items")
+            items = self._get_tool_config().get("flowcharts", {}).get("items")
             return items if isinstance(items, dict) else {}
         except Exception:
             return {}

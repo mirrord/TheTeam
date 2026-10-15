@@ -527,6 +527,10 @@ exclude:
 # Execution limits
 timeout: 30  # seconds
 max_output_size: 10240  # bytes
+
+# Tools exempt from the timeout (run arbitrarily long).
+# Accepts CLI tool names, `flowchart` (all flowcharts) or `flowchart:<name>`.
+no_timeout: []
 ```
 
 ### Tool Discovery

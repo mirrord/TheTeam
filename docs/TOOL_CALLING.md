@@ -229,6 +229,23 @@ timeout: 60
 max_output_size: 102400  # 100 KB
 ```
 
+#### Disabling Timeouts for Specific Tools
+
+List tools under `no_timeout` to let them run arbitrarily long. This overrides
+the global `timeout` for CLI tools and `flowcharts.timeout` for flowcharts:
+
+```yaml
+no_timeout:
+  - python                          # CLI tool by name
+  - flowchart:multi_agent_research  # one specific flowchart
+  # - flowchart                     # every flowchart
+```
+
+A hung tool on this list blocks the calling agent indefinitely, so only use it
+for tools you trust to terminate. Virtual tools such as `web-research` or
+`code` have no overall tool timeout; their internal limits (e.g.
+`subagent_timeout`, `command_timeout`) are set in their own config files.
+
 ## Tool Execution
 
 ### How Tools Are Executed

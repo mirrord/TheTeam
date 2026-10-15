@@ -20,6 +20,30 @@ from typing import Any, Optional
 from .models import ToolMetadata, ToolResult
 
 
+def parse_no_timeout(config: Any) -> frozenset[str]:
+    """Return the set of tool names whose execution timeout is disabled.
+
+    Reads the ``no_timeout`` key of a tool config dict.  Accepts a list of
+    tool names or a single tool name string; anything else (missing key,
+    ``None``, malformed value, non-dict config) yields an empty set so a bad
+    config never removes a timeout by accident.
+
+    Args:
+        config: Tool configuration dict (from ``tool_config.yaml``).
+
+    Returns:
+        Frozen set of tool names that should run without a timeout.
+    """
+    if not isinstance(config, dict):
+        return frozenset()
+    raw = config.get("no_timeout")
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, (list, tuple, set)):
+        return frozenset()
+    return frozenset(str(name).strip() for name in raw if str(name).strip())
+
+
 class ToolProvider(ABC):
     """Interface that all tool providers must implement.
 

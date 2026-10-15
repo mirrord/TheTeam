@@ -594,7 +594,7 @@ nodes:
 
 **Security:**
 - Only whitelisted tools can be executed
-- Configurable timeouts prevent hanging
+- Configurable timeouts prevent hanging (individual tools can opt out via `no_timeout` in `tool_config.yaml`)
 - Output size limits prevent memory exhaustion
 - Command injection protection via subprocess
 

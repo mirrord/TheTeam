@@ -23,7 +23,7 @@ import time
 from typing import Any, Optional
 
 from .models import RiskLevel, ToolMetadata, ToolResult
-from .provider import ToolProvider
+from .provider import ToolProvider, parse_no_timeout
 
 
 class CLIToolProvider(ToolProvider):
@@ -32,6 +32,8 @@ class CLIToolProvider(ToolProvider):
     Attributes:
         config: Tool configuration dict (from ``tool_config.yaml`` / defaults).
         timeout: Per-command subprocess timeout in seconds.
+        no_timeout: Tool names (from the ``no_timeout`` config list) that run
+            without any subprocess timeout.
         max_output_size: Byte cap on captured stdout/stderr.
         safety_checker: Optional
             :class:`~pithos.tools.safety.CommandSafetyChecker`.  When set,
@@ -57,7 +59,7 @@ class CLIToolProvider(ToolProvider):
 
         Args:
             config: Tool config dict (keys: mode, include, exclude, confirm,
-                timeout, max_output_size, descriptions).
+                timeout, no_timeout, max_output_size, descriptions).
             timeout: Subprocess timeout in seconds.
             max_output_size: Maximum bytes to keep from stdout/stderr.
             safety_checker: Optional
@@ -66,6 +68,7 @@ class CLIToolProvider(ToolProvider):
         self.config = config
         self.timeout = config.get("timeout", timeout)
         self.max_output_size = config.get("max_output_size", max_output_size)
+        self.no_timeout = parse_no_timeout(config)
         self.safety_checker = safety_checker
         self._platform = self._get_platform()
         self._discovered: dict[str, ToolMetadata] = {}
@@ -205,12 +208,13 @@ class CLIToolProvider(ToolProvider):
                 )
 
         # Execute via subprocess.
+        timeout = self.get_timeout(tool_name)
         try:
             result = subprocess.run(
                 [tool_meta.path] + args,
                 capture_output=True,
                 text=True,
-                timeout=self.timeout,
+                timeout=timeout,
                 errors="ignore",
             )
             execution_time = time.time() - start
@@ -238,7 +242,7 @@ class CLIToolProvider(ToolProvider):
             return ToolResult(
                 success=False,
                 stdout="",
-                stderr=f"Command timed out after {self.timeout} seconds",
+                stderr=f"Command timed out after {timeout} seconds",
                 exit_code=-1,
                 execution_time=time.time() - start,
                 command=command,
@@ -254,6 +258,20 @@ class CLIToolProvider(ToolProvider):
                 command=command,
                 error_hint="Tool path may be invalid or tool may not be installed properly.",
             )
+
+    def get_timeout(self, tool_name: str) -> Optional[float]:
+        """Return the effective subprocess timeout for *tool_name*.
+
+        Args:
+            tool_name: Leading token of the command string.
+
+        Returns:
+            ``None`` (no limit) when the tool is listed under ``no_timeout``
+            in the tool config, otherwise the provider-wide :attr:`timeout`.
+        """
+        if tool_name in self.no_timeout:
+            return None
+        return self.timeout
 
     # ------------------------------------------------------------------
     # Cache helpers

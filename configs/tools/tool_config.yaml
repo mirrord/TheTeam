@@ -6,6 +6,18 @@ enabled: true
 # Maximum execution time for any tool (seconds)
 timeout: 150
 
+# Tools that run with NO execution timeout (may run arbitrarily long).
+# Overrides 'timeout' (CLI tools) and 'flowcharts.timeout' (flowcharts).
+# - CLI tools:  list the tool name, e.g. `python`.
+# - Flowcharts: `flowchart` disables the timeout for every flowchart;
+#               `flowchart:<name>` disables it for one flowchart only.
+# Use with care: a hung tool will block the calling agent indefinitely.
+# Example:
+#   no_timeout:
+#     - python
+#     - flowchart:multi_agent_research
+no_timeout: []
+
 # Maximum size of captured output (bytes)
 max_output_size: 10000
 
