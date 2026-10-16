@@ -3,7 +3,7 @@
 from pathlib import Path
 import argparse
 import sys
-from typing import List
+from typing import Callable, List, Optional
 
 from ..config_manager import ConfigManager
 from .agent import Agent
@@ -67,7 +67,11 @@ def _format_tool_block(command: str, result: str) -> str:
     return "\n" + top + "\n" + "\n".join(body_lines) + "\n" + bottom + "\n"
 
 
-def interactive_chat(agent: Agent, verbose: bool = False) -> None:
+def interactive_chat(
+    agent: Agent,
+    verbose: bool = False,
+    command_handler: Optional[Callable[[str], Optional[str]]] = None,
+) -> None:
     """Interactive streaming chat interface for an agent.
 
     Tokens are printed as they arrive so the user sees output immediately.
@@ -75,6 +79,15 @@ def interactive_chat(agent: Agent, verbose: bool = False) -> None:
     tags (e.g. ``[RUN]...[/RUN]``) are suppressed from the display.
     The agent's context is not affected — only the text shown to the user
     changes.
+
+    Args:
+        agent: The agent to chat with.
+        verbose: Enable verbose streaming output.
+        command_handler: Optional callback invoked with each raw user input
+            before it is sent to the agent.  When it returns a string, the
+            input is treated as an interface-level command: the returned text
+            is printed and the agent is *not* prompted.  When it returns
+            ``None`` the input is forwarded to the agent as a normal turn.
     """
     print("Starting interactive chat. Press Ctrl+C to end the chat.")
 
@@ -87,6 +100,15 @@ def interactive_chat(agent: Agent, verbose: bool = False) -> None:
             user_input = input("You: ")
             if not user_input.strip():
                 continue
+
+            # Interface-level commands (e.g. "system reset") are handled
+            # locally and never forwarded to the agent.
+            if command_handler is not None:
+                command_response = command_handler(user_input)
+                if command_response is not None:
+                    if command_response:
+                        print(command_response)
+                    continue
 
             # Per-turn mutable state shared between the loop and the callback.
             _state: dict = {"buf": "", "pending_cmds": []}

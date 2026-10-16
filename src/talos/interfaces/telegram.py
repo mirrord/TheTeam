@@ -13,6 +13,7 @@ from pithos.agent import Agent
 
 from ..config import TelegramConfig
 from ..utils import clean_agent_response
+from .system_commands import handle_system_command
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,16 @@ class TelegramInterface:
         if self._resolve_pending_confirm(user.id, text):
             return
         ctx_name = self._ensure_context(user.id)
+        # Interface-level commands (e.g. "system reset") are handled locally
+        # against this user's context and never forwarded to the agent.
+        system_response = handle_system_command(
+            self.agent, text, context_name=ctx_name
+        )
+        if system_response is not None:
+            if self.show:
+                print(system_response, flush=True)
+            await update.message.reply_text(system_response)
+            return
         if self.show:
             print(f"\n[{user.first_name} ({user.id})] {text}", flush=True)
         loop = asyncio.get_running_loop()

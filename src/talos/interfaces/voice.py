@@ -25,6 +25,7 @@ from pithos.agent import Agent
 
 from ..config import VoiceConfig
 from ..utils import clean_agent_response
+from .system_commands import handle_system_command
 
 logger = logging.getLogger(__name__)
 
@@ -265,6 +266,15 @@ class VoiceInterface:
                     print("(no speech detected)")
                     continue
                 print(f"You: {text}")
+                # Interface-level commands (e.g. "system reset") are handled
+                # locally and never forwarded to the agent.
+                system_response = handle_system_command(
+                    self.agent, text, context_name=VOICE_CONTEXT_NAME
+                )
+                if system_response is not None:
+                    print(f"Talos: {system_response}")
+                    self._speak(system_response)
+                    continue
                 response = self.agent.send(text, context_name=VOICE_CONTEXT_NAME)
                 print(f"Talos: {response}")
                 # Strip tool-call syntax so it isn't spoken aloud.

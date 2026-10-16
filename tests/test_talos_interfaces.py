@@ -27,7 +27,11 @@ def test_shell_delegates_to_interactive_chat() -> None:
     iface = ShellInterface(agent, verbose=True)
     with patch("talos.interfaces.shell.interactive_chat") as chat:
         iface.run()
-    chat.assert_called_once_with(agent, verbose=True)
+    chat.assert_called_once()
+    args, kwargs = chat.call_args
+    assert args == (agent,)
+    assert kwargs["verbose"] is True
+    assert callable(kwargs["command_handler"])
 
 
 # ---------------------------------------------------------------------------

@@ -13,6 +13,7 @@ Configuration lives in `~/.talos/config.yaml`. On first run a guided setup wizar
   - [Shell](#shell)
   - [Voice](#voice)
   - [Telegram](#telegram)
+  - [System Commands](#system-commands)
 - [Configuration](#configuration)
   - [Agent Settings](#agent-settings)
   - [Tool Settings](#tool-settings)
@@ -114,6 +115,24 @@ talos telegram
 - Messages longer than 4 000 characters are automatically split to stay within Telegram's limit.
 
 **Requirements:** `pip install -e ".[talos]"` (includes `python-telegram-bot`).
+
+### System Commands
+
+Every text-driven interface recognises a small set of **system commands** —
+inputs that are intercepted and handled locally instead of being sent to the
+agent for inference.
+
+| Command | Effect |
+| --- | --- |
+| `system reset` | Clears the active context's conversation history and starts a fresh session. The system prompt is preserved. |
+
+- The input must be **exactly** `system reset` (surrounding whitespace is
+  ignored); embedding it in a longer sentence does not trigger it.
+- In the shell and voice interfaces the reset applies to the active context
+  (`default` and `voice` respectively); in Telegram it applies only to the
+  sending user's own context.
+- A short confirmation (`[system] History cleared — new session started.`) is
+  shown/spoken instead of an agent reply.
 
 ---
 
