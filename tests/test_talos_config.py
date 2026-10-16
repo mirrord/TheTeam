@@ -86,6 +86,52 @@ def test_agent_config_from_dict_handles_missing_nested_sections() -> None:
     assert ac.memory == MemoryConfig()
 
 
+def test_agent_config_provider_and_base_url_default_none() -> None:
+    ac = AgentConfig()
+    assert ac.provider is None
+    assert ac.base_url is None
+
+
+def test_agent_config_base_url_roundtrip(tmp_path: Path) -> None:
+    cfg = TalosConfig(
+        agent=AgentConfig(
+            model="qwen3", provider="llamacpp", base_url="http://127.0.0.1:8080"
+        )
+    )
+    path = tmp_path / "config.yaml"
+    save_config(cfg, path)
+    with path.open() as f:
+        raw = yaml.safe_load(f)
+    assert raw["agent"]["base_url"] == "http://127.0.0.1:8080"
+    loaded = load_config(path)
+    assert loaded.agent.provider == "llamacpp"
+    assert loaded.agent.base_url == "http://127.0.0.1:8080"
+
+
+def test_build_agent_llamacpp_uses_base_url() -> None:
+    from pithos.agent.llamacpp_agent import LlamacppAgent
+
+    cfg = TalosConfig(
+        agent=AgentConfig(
+            model="qwen3", provider="llamacpp", base_url="http://127.0.0.1:9090"
+        )
+    )
+    agent = build_agent(cfg)
+    assert isinstance(agent, LlamacppAgent)
+    assert agent.server_mode is True
+    assert agent.base_url == "http://127.0.0.1:9090"
+
+
+def test_build_agent_ollama_ignores_base_url() -> None:
+    from pithos.agent import OllamaAgent
+
+    cfg = TalosConfig(
+        agent=AgentConfig(model="m", base_url="http://127.0.0.1:9090")
+    )
+    agent = build_agent(cfg)
+    assert isinstance(agent, OllamaAgent)
+
+
 def test_agent_config_from_dict_nested_dicts() -> None:
     ac = AgentConfig.from_dict(
         {

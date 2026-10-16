@@ -23,6 +23,7 @@ DEFAULT_CONFIG_PATH = Path.home() / ".talos" / "config.yaml"
 # from the conservative programmatic defaults are prefixed with _WIZARD_.
 
 DEFAULT_MODEL: str = "glm-4.7-flash"
+DEFAULT_PROVIDER: str = "ollama"
 DEFAULT_SYSTEM_PROMPT: str = (
     "You are Talos, a helpful AI assistant. Answer concisely in 20 words or less."
 )
@@ -51,6 +52,7 @@ DEFAULT_MAX_RECORD_SECONDS: float = 30.0
 _WIZARD_TOOLS: bool = True
 _WIZARD_MEMORY: bool = True
 _WIZARD_DEVICE: str = "cuda"
+_WIZARD_LLAMACPP_URL: str = "http://127.0.0.1:8080"
 # ---------------------------------------------------------------------------
 
 
@@ -136,6 +138,9 @@ class AgentConfig:
 
     model: str = DEFAULT_MODEL
     provider: Optional[str] = None  # ollama (default) / llamacpp / exl
+    # Server URL for HTTP-backed providers (e.g. a llama.cpp ``llama-server``
+    # at http://127.0.0.1:8080). Ignored by providers that don't use it.
+    base_url: Optional[str] = None
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
     temperature: float = DEFAULT_TEMPERATURE
     tools: ToolsConfig = field(default_factory=ToolsConfig)
@@ -239,7 +244,19 @@ def run_wizard() -> TalosConfig:
 
     # Agent
     console.print("[bold]Agent[/bold]")
-    model = Prompt.ask("Model name (Ollama)", default=DEFAULT_MODEL)
+    provider = Prompt.ask(
+        "Model provider",
+        choices=["ollama", "llamacpp", "exl"],
+        default=DEFAULT_PROVIDER,
+    )
+    model = Prompt.ask("Model name", default=DEFAULT_MODEL)
+    base_url = None
+    if provider == "llamacpp":
+        url = Prompt.ask(
+            "llama.cpp server URL ('none' for in-process GGUF)",
+            default=_WIZARD_LLAMACPP_URL,
+        ).strip()
+        base_url = None if url.lower() in ("", "none") else url
     system_prompt = Prompt.ask(
         "System prompt",
         default=DEFAULT_SYSTEM_PROMPT,
@@ -265,6 +282,8 @@ def run_wizard() -> TalosConfig:
     return TalosConfig(
         agent=AgentConfig(
             model=model,
+            provider=provider,
+            base_url=base_url,
             system_prompt=system_prompt,
             temperature=temperature,
             tools=ToolsConfig(enabled=tools),
@@ -291,7 +310,15 @@ def _wizard_fallback() -> TalosConfig:
         val = input(f"{prompt} (y/n) [{d}]: ").strip().lower() or d
         return val.startswith("y")
 
-    model = ask("Model name (Ollama)", DEFAULT_MODEL)
+    provider = ask("Model provider (ollama/llamacpp/exl)", DEFAULT_PROVIDER)
+    model = ask("Model name", DEFAULT_MODEL)
+    base_url = None
+    if provider == "llamacpp":
+        url = ask(
+            "llama.cpp server URL ('none' for in-process GGUF)",
+            _WIZARD_LLAMACPP_URL,
+        ).strip()
+        base_url = None if url.lower() in ("", "none") else url
     system_prompt = ask("System prompt", DEFAULT_SYSTEM_PROMPT)
     temperature = float(ask("Temperature", str(DEFAULT_TEMPERATURE)))
     tools = ask_bool("Enable CLI tools?", _WIZARD_TOOLS)
@@ -303,6 +330,8 @@ def _wizard_fallback() -> TalosConfig:
     return TalosConfig(
         agent=AgentConfig(
             model=model,
+            provider=provider,
+            base_url=base_url,
             system_prompt=system_prompt,
             temperature=temperature,
             tools=ToolsConfig(enabled=tools),
@@ -342,7 +371,8 @@ def build_agent(config: TalosConfig) -> OllamaAgent:
     """Construct a configured pithos agent from a Talos config.
 
     The provider (``ollama`` (default), ``llamacpp`` or ``exl``) is chosen
-    from ``config.agent.provider``. Wires up tools (with optional
+    from ``config.agent.provider``; ``config.agent.base_url`` points
+    HTTP-backed providers (llama.cpp server) at their server. Wires up tools (with optional
     discovery-mode override), the vector memory store, automatic
     compaction / recall / persistent history, and LLM-driven memory tag
     suggestions, according to the user's Talos config.  Each feature is
@@ -351,6 +381,7 @@ def build_agent(config: TalosConfig) -> OllamaAgent:
     agent = build_provider_agent(
         model=config.agent.model,
         provider=config.agent.provider,
+        base_url=config.agent.base_url,
         agent_name="talos",
         system_prompt=config.agent.system_prompt,
         temperature=config.agent.temperature,

@@ -35,7 +35,9 @@ talos shell
 ```
 
 The wizard asks for:
-- Ollama model name
+- Model provider (`ollama`, `llamacpp`, or `exl`)
+- Model name
+- llama.cpp server URL (only when the provider is `llamacpp`; answer `none` for in-process GGUF)
 - System prompt
 - Whether to enable tools and vector memory
 - Compute device (cpu / cuda)
@@ -125,7 +127,10 @@ Run `talos config` to re-run the wizard at any time without starting an interfac
 
 ```yaml
 agent:
-  model: glm-4.7-flash          # Ollama model name
+  model: glm-4.7-flash          # Model name (or GGUF path / exl2 dir for local backends)
+  provider: ollama              # "ollama" (default) | "llamacpp" | "exl"
+  base_url: null                # Server URL for HTTP providers, e.g. http://127.0.0.1:8080
+                                # for a llama.cpp server (null = in-process / not used)
   system_prompt: "You are Talos, a helpful AI assistant. Answer concisely in 20 words or less."
   temperature: 0.7
   tools:
