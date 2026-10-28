@@ -4,7 +4,9 @@
 virtual tool, mirroring the other subagent-driven tools (``web-research``,
 ``craft-write``).  A calling agent invokes it as::
 
-    [RUN]code fix the failing test in src/foo.py[/RUN]
+    ```tool_call
+    {"name": "run", "arguments": {"command": "code fix the failing test in src/foo.py"}}
+    ```
 
 An optional ``--root <path>`` prefix pins the workspace root; otherwise a fresh
 unique workspace is allocated under ``~/.talos/code`` for each invocation

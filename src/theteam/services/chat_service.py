@@ -8,7 +8,7 @@ import json
 import threading
 from pathlib import Path
 from typing import Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timedelta
 from dataclasses import dataclass, asdict
 
 logger = logging.getLogger(__name__)
@@ -75,7 +75,14 @@ class ChatService:
 
         # In-memory conversations
         self.conversations: dict[str, Conversation] = {}
+        # Monotonic timestamp guard: the system clock's resolution can produce
+        # identical ISO timestamps for operations within the same microsecond,
+        # which would make updated_at-based ordering non-deterministic. Hand out
+        # strictly increasing timestamps instead.
+        self._ts_lock = threading.Lock()
+        self._last_ts: Optional[datetime] = None
         self._load_conversations()
+        self._seed_timestamp_clock()
 
         self.lock = threading.Lock()
 
@@ -107,6 +114,39 @@ class ChatService:
 
             except Exception as e:
                 logger.error(f"Error loading conversation from {conv_file}: {e}")
+
+    def _seed_timestamp_clock(self) -> None:
+        """Advance the monotonic clock past any persisted conversation timestamp.
+
+        Ensures timestamps minted this session sort after conversations loaded
+        from disk.
+        """
+        latest: Optional[datetime] = None
+        for conv in self.conversations.values():
+            for ts in (conv.updated_at, conv.created_at):
+                try:
+                    parsed = datetime.fromisoformat(ts)
+                except (TypeError, ValueError):
+                    continue
+                if latest is None or parsed > latest:
+                    latest = parsed
+        with self._ts_lock:
+            self._last_ts = latest
+
+    def _next_timestamp(self) -> str:
+        """Return a strictly increasing ISO timestamp for conversation updates.
+
+        Guards against the system clock's microsecond resolution producing
+        identical ``created_at`` / ``updated_at`` values for operations that
+        happen in quick succession, which would make ``updated_at``-based
+        ordering non-deterministic.
+        """
+        with self._ts_lock:
+            now = datetime.now()
+            if self._last_ts is not None and now <= self._last_ts:
+                now = self._last_ts + timedelta(microseconds=1)
+            self._last_ts = now
+            return now.isoformat()
 
     def _save_conversation(self, conversation: Conversation):
         """Save a conversation to disk."""
@@ -172,7 +212,7 @@ class ChatService:
             Created conversation ID.
         """
         conversation_id = str(uuid.uuid4())
-        timestamp = datetime.now().isoformat()
+        timestamp = self._next_timestamp()
 
         if not title:
             title = f"Conversation {datetime.now().strftime('%Y-%m-%d %H:%M')}"
@@ -255,7 +295,7 @@ class ChatService:
                 timestamp=datetime.now().isoformat(),
             )
             conversation.messages.append(user_message)
-            conversation.updated_at = datetime.now().isoformat()
+            conversation.updated_at = self._next_timestamp()
             # Persist any per-request tool override on the conversation so
             # it sticks across reloads.
             if enabled_tools is not None:
@@ -569,7 +609,7 @@ class ChatService:
                     timestamp=datetime.now().isoformat(),
                 )
                 conversation.messages.append(assistant_message)
-                conversation.updated_at = datetime.now().isoformat()
+                conversation.updated_at = self._next_timestamp()
                 self._save_conversation(conversation)
 
             if socketio and client_id:
@@ -731,7 +771,7 @@ class ChatService:
 
             conversation.agent_id = agent_id
             conversation.base_model = None
-            conversation.updated_at = datetime.now().isoformat()
+            conversation.updated_at = self._next_timestamp()
             self._save_conversation(conversation)
 
             logger.info(
@@ -754,7 +794,7 @@ class ChatService:
 
             conversation.agent_id = None
             conversation.base_model = base_model
-            conversation.updated_at = datetime.now().isoformat()
+            conversation.updated_at = self._next_timestamp()
             self._save_conversation(conversation)
 
             logger.info(
@@ -779,7 +819,7 @@ class ChatService:
             conversation.enabled_tools = (
                 None if enabled_tools is None else list(enabled_tools)
             )
-            conversation.updated_at = datetime.now().isoformat()
+            conversation.updated_at = self._next_timestamp()
             self._save_conversation(conversation)
             return True
 
@@ -799,7 +839,7 @@ class ChatService:
                 return False
 
             conversation.title = new_title
-            conversation.updated_at = datetime.now().isoformat()
+            conversation.updated_at = self._next_timestamp()
             self._save_conversation(conversation)
 
             logger.info(f"Renamed conversation {conversation_id} to '{new_title}'")
@@ -827,7 +867,7 @@ class ChatService:
                 timestamp=datetime.now().isoformat(),
             )
             conversation.messages.append(system_message)
-            conversation.updated_at = datetime.now().isoformat()
+            conversation.updated_at = self._next_timestamp()
             self._save_conversation(conversation)
 
             return True

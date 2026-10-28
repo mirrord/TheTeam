@@ -6,7 +6,7 @@ summaries — grounded in short evidence quotes from the source text. It is
 exposed three ways:
 
 1. **CLI**: [`pithos-craft-notes`](#cli).
-2. **Agent tool call**: `[RUN]craft-notes <file path or raw text>[/RUN]`
+2. **Agent tool call**: `{"name": "run", "arguments": {"command": "craft-notes <file path or raw text>"}}`
    (virtual tool, no external binary required).
 3. **Flowchart node**: the [`craftnotes` node](#flowchart-node).
 
@@ -223,7 +223,8 @@ response = agent.send(
 print(response)
 ```
 
-The agent emits a tool call such as `[RUN]craft-notes story.txt[/RUN]`.
+The agent emits a tool call such as `{"name": "run", "arguments": {"command":
+"craft-notes story.txt"}}`.
 Dispatch is handled in-process and the returned markdown report is injected as
 a system message before generation resumes.
 

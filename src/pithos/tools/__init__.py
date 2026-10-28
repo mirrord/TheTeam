@@ -4,6 +4,11 @@ from .models import ToolMetadata, ToolCallRequest, ToolResult
 from .provider import ToolProvider
 from .registry import ToolRegistry
 from .executor import ToolExecutor, format_tool_result_for_agent
+from .tool_calls import (
+    ParsedToolCall,
+    extract_tool_calls,
+    safe_prefix_len,
+)
 from .extractor import ToolCallExtractor
 from .memory_ops import MemoryOpRequest, MemoryOpExtractor
 from .memory_tool import MemoryStore, MemoryEntry, SearchResult, CHROMADB_AVAILABLE
@@ -21,6 +26,9 @@ __all__ = [
     "ToolRegistry",
     "ToolExecutor",
     "format_tool_result_for_agent",
+    "ParsedToolCall",
+    "extract_tool_calls",
+    "safe_prefix_len",
     "ToolCallExtractor",
     "MemoryOpRequest",
     "MemoryOpExtractor",

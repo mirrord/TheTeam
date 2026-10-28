@@ -5,7 +5,7 @@ direction, guided by prescriptive craft notes previously produced by the
 [`craft-notes`](CRAFT_ANALYSIS.md) tool. It is exposed three ways:
 
 1. **CLI**: [`pithos-craft-write`](#cli).
-2. **Agent tool call**: `[RUN]craft-write <direction text>[/RUN]`
+2. **Agent tool call**: `{"name": "run", "arguments": {"command": "craft-write <direction text>"}}`
    (virtual tool, no external binary required).
 3. **Flowchart node**: the [`craftwrite` node](#flowchart-node).
 
@@ -215,9 +215,9 @@ print(response)
 ```
 
 The agent emits a tool call such as
-`[RUN]craft-write a heist gone wrong, melancholy tone[/RUN]`. Dispatch is
-handled in-process and the returned markdown story is injected as a system
-message before generation resumes.
+`{"name": "run", "arguments": {"command": "craft-write a heist gone wrong, melancholy tone"}}`.
+Dispatch is handled in-process and the returned markdown story is injected as a
+system message before generation resumes.
 
 ## Optional dependencies
 

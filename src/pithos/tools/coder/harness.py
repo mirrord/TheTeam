@@ -203,7 +203,7 @@ class CodeHarness:
                     result.summary = result.summary or self._fallback_summary(steps)
                     return
                 next_prompt = format_error_prompt(
-                    "no [RUN], [EDIT], or [SUBMIT] block was found",
+                    "no run, edit, or submit tool call was found",
                     consecutive_format_errors,
                     limit,
                 )

@@ -8,12 +8,12 @@ import re
 def clean_agent_response(text: str) -> str:
     """Strip tool-call syntax from an agent response.
 
-    The pithos tool-calling system parses the inline bracket syntax
-    (``[RUN]...[/RUN]``, ``<RUN>...</RUN>``, ``[EXEC]...[/EXEC]``) directly
-    out of the agent's prose so the model can chain actions naturally.
+    The pithos tool-calling system parses the JSON tool-call syntax (fenced
+    ``tool_call`` blocks containing ``{"name": ..., "arguments": {...}}``)
+    directly out of the agent's prose so the model can chain actions naturally.
     Those snippets are noise for any downstream consumer that just wants
     the human-readable reply — most importantly the voice interface,
-    which should not synthesise speech for ``[RUN]ls -la[/RUN]``.
+    which should not synthesise speech for a raw tool call.
 
     This helper removes every detected tool-call span (matched by
     :class:`pithos.tools.ToolCallExtractor`) and collapses the resulting

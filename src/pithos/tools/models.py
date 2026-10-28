@@ -38,8 +38,10 @@ class ToolCallRequest:
     """Represents a parsed tool call request from agent output."""
 
     command: str  # The full command to execute
-    format: str  # Which format was matched: 'cli', 'function', 'bracket', 'legacy'
+    format: str  # Which format was matched (e.g. 'tool_call')
     raw_text: str  # Original matched text
+    name: str = ""  # The tool name from the JSON call (e.g. 'run', 'memory')
+    arguments: dict = field(default_factory=dict)  # Structured call arguments
 
 
 @dataclass

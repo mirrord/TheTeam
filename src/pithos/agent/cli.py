@@ -9,41 +9,11 @@ from ..config_manager import ConfigManager
 from .agent import Agent
 from .factory import build_agent
 
-# Sequences that open a tool-call span in agent output.  Used to detect the
-# start of markup so it can be held back from the display buffer.
-_TOOL_OPEN_SEQS: List[str] = [
-    "[RUN]",
-    "<RUN>",
-    "[EXEC]",
-    "<EXEC>",
-    "RUN: ",
-    "EXEC: ",
-    "TOOL: ",
-    "run(",
-    "tool(",
-    "execute(",
-    "runcommand(",
-]
-
-
-def _safe_prefix_len(buf: str) -> int:
-    """Return the number of leading characters in *buf* that are safe to print.
-
-    Holds back any text from the earliest position where a tool-call opener
-    might be starting (including partial matches at the end of the buffer).
-    """
-    earliest = len(buf)
-    for seq in _TOOL_OPEN_SEQS:
-        idx = buf.find(seq)
-        if idx >= 0:
-            earliest = min(earliest, idx)
-            continue
-        # Partial prefix at end of buffer — hold it back until we know more.
-        for length in range(1, len(seq)):
-            if buf.endswith(seq[:length]):
-                earliest = min(earliest, len(buf) - length)
-                break
-    return earliest
+# Detection of in-progress tool-call markup in a streaming buffer is delegated
+# to the shared JSON tool-call parser so the CLI, the web UI, and the agent loop
+# all agree on the format.  ``_safe_prefix_len`` is kept as a thin alias because
+# other modules (e.g. the web chat service) import it from here.
+from ..tools import safe_prefix_len as _safe_prefix_len
 
 
 def _format_tool_block(command: str, result: str) -> str:
@@ -75,8 +45,9 @@ def interactive_chat(
     """Interactive streaming chat interface for an agent.
 
     Tokens are printed as they arrive so the user sees output immediately.
-    Tool executions are shown as formatted command blocks; the raw markup
-    tags (e.g. ``[RUN]...[/RUN]``) are suppressed from the display.
+    Tool executions are shown as formatted command blocks; the raw JSON
+    tool-call markup (fenced ``tool_call`` blocks) is suppressed from the
+    display.
     The agent's context is not affected — only the text shown to the user
     changes.
 

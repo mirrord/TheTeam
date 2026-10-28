@@ -957,20 +957,36 @@ class Agent(ABC):
         return "".join(self.stream(content, context_name, workspace, verbose, model))
 
     def _extract_tool_calls(self, content: str) -> list:
-        """Extract tool calls from agent response using multiple formats.
+        """Extract executable tool calls from an agent response.
+
+        Memory calls (``{"name": "memory", ...}``) are deliberately excluded
+        here: they are not run through the generic command executor but by the
+        memory subsystem's post-stream pass (:meth:`MemoryToolProvider
+        .extract_and_execute`).  This keeps every subsystem on the one shared
+        JSON tool-call format while preserving single-path memory execution.
 
         Args:
             content: Agent response text.
 
         Returns:
-            List of ToolCallRequest objects.
+            List of ToolCallRequest objects (memory calls removed).
         """
         from ..tools import ToolCallExtractor
 
         if not hasattr(self, "_tool_extractor"):
             self._tool_extractor = ToolCallExtractor()
 
-        return self._tool_extractor.extract(content)
+        return [
+            req
+            for req in self._tool_extractor.extract(content)
+            if not self._is_memory_call(req)
+        ]
+
+    @staticmethod
+    def _is_memory_call(req) -> bool:
+        """True when a parsed tool call targets the memory subsystem."""
+        name = (getattr(req, "name", "") or "").split(":", 1)[0].strip().lower()
+        return name in {"memory", "remember", "recall"}
 
     def _run_tool_requests(self, requests: list) -> list:
         """Execute tool requests, record metrics, and return raw ToolResult list.
@@ -1265,7 +1281,7 @@ class Agent(ABC):
         tool_list = self.tool_registry.get_tool_list_text()
         format_examples = self._tool_extractor.get_usage_examples()
 
-        return f"""You have access to command-line tools invoked with the bracket format.
+        return f"""You have access to command-line tools invoked with JSON tool calls.
 
 {format_examples}
 

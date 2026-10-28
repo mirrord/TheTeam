@@ -58,18 +58,25 @@ If a tool fails, the agent still receives clear error feedback and can adapt.
 
 ## Tool Call Syntax
 
-pithos uses a single bracket-style syntax for tool calls. Wrap the command
-between an opening tag and its matching closing tag:
+pithos uses a single JSON tool-call syntax, shared by every subsystem (the main
+agent, the coding harness, and memory). Emit each call as a JSON object with a
+`name` and an `arguments` object inside a fenced ` ```tool_call ` code block.
+Use the `run` tool and put the full command line in its `command` argument:
 
+````
+```tool_call
+{"name": "run", "arguments": {"command": "python --version"}}
 ```
-[RUN]python --version[/RUN]
-<RUN>git status</RUN>
-[EXEC]npm list[/EXEC]
+```tool_call
+{"name": "run", "arguments": {"command": "git status"}}
 ```
+````
 
-The closing tag is **required**: a command is only executed once its closing
-tag has been produced. This keeps extraction unambiguous and prevents partial,
-mid-stream output from being misinterpreted as a complete tool call.
+You may place several calls in one block as a JSON array, or use one block per
+call. The closing ` ``` ` fence is **required**: a command is only executed once
+its closing fence has been produced. This keeps extraction unambiguous and
+prevents partial, mid-stream output from being misinterpreted as a complete tool
+call.
 
 ## Virtual Tools
 
@@ -93,9 +100,9 @@ dispatched in-process rather than as subprocesses:
   - `diffusers` — Hugging Face `diffusers` pipeline loaded in-process.
     Requires the `image` extra (`pip install -e ".[image]"`).
 
-  Usage: `[RUN]prompt2image <prompt text>[/RUN]`. All generation parameters
-  (size, steps, backend, output directory, …) are set in
-  `configs/tools/prompt2image_config.yaml`.
+  Usage: `{"name": "run", "arguments": {"command": "prompt2image <prompt text>"}}`.
+  All generation parameters (size, steps, backend, output directory, …) are set
+  in `configs/tools/prompt2image_config.yaml`.
 
 Virtual tools appear in `pithos-tools list` alongside CLI tools and use
 the same call syntax. They are gated in `configs/tools/tool_config.yaml`
@@ -440,9 +447,15 @@ Check the following:
 """)
 
 # Agent may respond with multiple tool calls:
-# [RUN]python --version[/RUN]
-# [RUN]git status[/RUN]
-# [RUN]ls[/RUN]
+# ```tool_call
+# {"name": "run", "arguments": {"command": "python --version"}}
+# ```
+# ```tool_call
+# {"name": "run", "arguments": {"command": "git status"}}
+# ```
+# ```tool_call
+# {"name": "run", "arguments": {"command": "ls"}}
+# ```
 ```
 
 Each tool executes in sequence and results are added to conversation.

@@ -14,6 +14,12 @@ from pithos.tools.coder.models import (
 )
 
 
+def _call(name: str, **arguments: Any) -> str:
+    """Render a single JSON tool call inside a fenced ``tool_call`` block."""
+    payload = {"name": name, "arguments": arguments}
+    return f"```tool_call\n{json.dumps(payload)}\n```"
+
+
 class _ScriptedAgent:
     """Agent stub that returns a queue of canned replies."""
 
@@ -53,8 +59,8 @@ def _harness(replies: list[str], tmp_path: Path, **cfg_overrides) -> CodeHarness
 class TestHarnessLoop:
     def test_submit_terminates(self, tmp_path: Path) -> None:
         replies = [
-            "[EDIT path=foo.txt mode=create]\nhello\n[/EDIT]",
-            "[SUBMIT]\nCreated foo.txt as requested.\n[/SUBMIT]",
+            _call("edit", path="foo.txt", mode="create", content="hello"),
+            _call("submit", summary="Created foo.txt as requested."),
         ]
         harness = _harness(replies, tmp_path)
         result = harness.run(CodeTaskRequest(task="make foo", root=str(tmp_path)))
@@ -64,13 +70,13 @@ class TestHarnessLoop:
         assert result.steps == 2
         assert (tmp_path / "foo.txt").read_text() == "hello"
 
-    def test_create_alias_block_writes_file(self, tmp_path: Path) -> None:
-        # Regression: models often emit [CREATE path=...] instead of
-        # [EDIT ... mode=create]; the harness must accept it and write the file
-        # rather than abort with format_error_limit.
+    def test_create_mode_writes_file(self, tmp_path: Path) -> None:
+        # An edit call with mode=create must write a new file and the agent can
+        # then submit; the harness must not abort with format_error_limit.
         replies = [
-            "THOUGHT: make it\n[CREATE path=asteroids.py]\nimport pygame\n[/CREATE]",
-            "[DONE]\nWrote asteroids.py.\n[/DONE]",
+            "THOUGHT: make it\n"
+            + _call("edit", path="asteroids.py", mode="create", content="import pygame"),
+            _call("submit", summary="Wrote asteroids.py."),
         ]
         harness = _harness(replies, tmp_path)
         result = harness.run(CodeTaskRequest(task="write game", root=str(tmp_path)))
@@ -78,7 +84,7 @@ class TestHarnessLoop:
         assert (tmp_path / "asteroids.py").read_text() == "import pygame"
 
     def test_system_prompt_installed(self, tmp_path: Path) -> None:
-        agent = _ScriptedAgent(["[SUBMIT]\ndone\n[/SUBMIT]"])
+        agent = _ScriptedAgent([_call("submit", summary="done")])
         cfg = CodeHarnessConfig(write_trajectory=False, include_file_listing=False)
         harness = CodeHarness(_FakeCM(), config=cfg, agent_factory=lambda: agent)
         harness.run(CodeTaskRequest(task="t", root=str(tmp_path)))
@@ -87,7 +93,7 @@ class TestHarnessLoop:
 
     def test_step_limit(self, tmp_path: Path) -> None:
         # Always emits a valid (non-submit) edit, so only the step limit stops it.
-        replies = ["[EDIT path=a.txt mode=create]\nx\n[/EDIT]"] * 5
+        replies = [_call("edit", path="a.txt", mode="create", content="x")] * 5
         harness = _harness(replies, tmp_path, step_limit=2)
         # create then subsequent creates fail, but each reply still parses as an
         # action, so the loop advances until the step limit.
@@ -96,7 +102,7 @@ class TestHarnessLoop:
         assert result.steps == 2
 
     def test_format_error_limit(self, tmp_path: Path) -> None:
-        replies = ["just prose, no action blocks"] * 5
+        replies = ["just prose, no tool calls"] * 5
         harness = _harness(
             replies, tmp_path, max_consecutive_format_errors=2
         )
@@ -107,8 +113,8 @@ class TestHarnessLoop:
     def test_format_error_then_recovery(self, tmp_path: Path) -> None:
         replies = [
             "no action yet",  # format error 1
-            "[EDIT path=b.txt mode=create]\nok\n[/EDIT]",  # recovers
-            "[SUBMIT]\ndone\n[/SUBMIT]",
+            _call("edit", path="b.txt", mode="create", content="ok"),  # recovers
+            _call("submit", summary="done"),
         ]
         harness = _harness(replies, tmp_path, max_consecutive_format_errors=2)
         result = harness.run(CodeTaskRequest(task="t", root=str(tmp_path)))
@@ -116,15 +122,15 @@ class TestHarnessLoop:
         assert (tmp_path / "b.txt").exists()
 
     def test_empty_task_errors(self, tmp_path: Path) -> None:
-        harness = _harness(["[SUBMIT]\nx\n[/SUBMIT]"], tmp_path)
+        harness = _harness([_call("submit", summary="x")], tmp_path)
         result = harness.run(CodeTaskRequest(task="  ", root=str(tmp_path)))
         assert result.exit_status == ExitStatus.ERROR
         assert "empty task" in result.errors
 
     def test_observation_fed_back(self, tmp_path: Path) -> None:
         replies = [
-            "[EDIT path=c.txt mode=create]\nhi\n[/EDIT]",
-            "[SUBMIT]\ndone\n[/SUBMIT]",
+            _call("edit", path="c.txt", mode="create", content="hi"),
+            _call("submit", summary="done"),
         ]
         agent = _ScriptedAgent(replies)
         cfg = CodeHarnessConfig(write_trajectory=False, include_file_listing=False)
@@ -134,15 +140,15 @@ class TestHarnessLoop:
         assert any("## Observation" in p for p in agent.sent)
 
     def test_messages_captured(self, tmp_path: Path) -> None:
-        replies = ["[SUBMIT]\ndone\n[/SUBMIT]"]
+        replies = [_call("submit", summary="done")]
         harness = _harness(replies, tmp_path)
         result = harness.run(CodeTaskRequest(task="t", root=str(tmp_path)))
         assert len(result.messages) == 1
-        assert result.messages[0]["reply"].startswith("[SUBMIT]")
+        assert '"name": "submit"' in result.messages[0]["reply"]
 
     def test_trajectory_written(self, tmp_path: Path) -> None:
         out_dir = tmp_path / "traj"
-        agent = _ScriptedAgent(["[SUBMIT]\ndone\n[/SUBMIT]"])
+        agent = _ScriptedAgent([_call("submit", summary="done")])
         cfg = CodeHarnessConfig(
             write_trajectory=True,
             include_file_listing=False,
@@ -203,8 +209,8 @@ class TestWorkspaceAllocation:
             workspace_base=str(base),
         )
         replies = [
-            "[EDIT path=made.txt mode=create]\nhi\n[/EDIT]",
-            "[SUBMIT]\ndone\n[/SUBMIT]",
+            _call("edit", path="made.txt", mode="create", content="hi"),
+            _call("submit", summary="done"),
         ]
         harness = CodeHarness(
             _FakeCM(), config=cfg, agent_factory=lambda: _ScriptedAgent(replies)

@@ -58,40 +58,36 @@ agent.enable_memory(config_manager)
 
 # Now the agent can use memory operations
 response = agent.send("Remember that Python was created by Guido van Rossum")
-# Agent outputs: storemem(facts, "Python was created by Guido van Rossum")
+# Agent outputs a memory tool call:
+#   ```tool_call
+#   {"name": "memory", "arguments": {"operation": "store", "category": "facts",
+#                                     "content": "Python was created by Guido van Rossum"}}
+#   ```
 
 # Later, retrieve the information
 response = agent.send("Who created Python?")
-# Agent outputs: retrievemem(facts, "Python creator")
+# Agent outputs:
+#   ```tool_call
+#   {"name": "memory", "arguments": {"operation": "retrieve", "category": "facts",
+#                                     "query": "Python creator"}}
+#   ```
 # System provides: Retrieved results from facts...
 # Agent responds: "Python was created by Guido van Rossum"
 ```
 
 ## Memory Operations
 
-When memory is enabled for an agent, it can use two operations with multiple syntax formats for reliability:
+When memory is enabled, the agent performs memory operations with the same
+unified JSON tool-call syntax used for every other tool: a `memory` tool call
+inside a fenced `tool_call` block. The `operation` argument selects the action.
 
 ### Store Operation
 
-pithos supports multiple syntax formats:
-
-**CLI-Style (Simplest):**
+````
+```tool_call
+{"name": "memory", "arguments": {"operation": "store", "category": "facts", "content": "The Eiffel Tower is 330 meters tall"}}
 ```
-STORE[facts]: The Eiffel Tower is 330 meters tall
-STORE[notes]: Important meeting on Friday
-```
-
-**Function-Style:**
-```
-store(facts, The Eiffel Tower is 330 meters tall)
-store(notes, Important meeting on Friday)
-```
-
-**Legacy (Still Supported):**
-```
-storemem(facts, "The Eiffel Tower is 330 meters tall")
-storemem(notes, "Important meeting on Friday")
-```
+````
 
 The system automatically:
 - Generates a unique ID
@@ -101,23 +97,11 @@ The system automatically:
 
 ### Retrieve Operation
 
-**CLI-Style (Simplest):**
+````
+```tool_call
+{"name": "memory", "arguments": {"operation": "retrieve", "category": "facts", "query": "Eiffel Tower height"}}
 ```
-RETRIEVE[facts]: Eiffel Tower height
-RETRIEVE[notes]: meeting schedule
-```
-
-**Function-Style:**
-```
-retrieve(facts, Eiffel Tower height)
-retrieve(notes, meeting schedule)
-```
-
-**Legacy (Still Supported):**
-```
-retrievemem(facts, "Eiffel Tower height")
-retrievemem(notes, "meeting schedule")
-```
+````
 
 Searches the category for relevant content. Returns:
 - Top N most relevant results (configurable)
@@ -125,7 +109,8 @@ Searches the category for relevant content. Returns:
 - Original content and metadata
 - Filtered by similarity threshold
 
-**All syntax formats work identically** - use whichever is most natural for your agent or workflow.
+The parser is lenient: `memory:store` / `memory:retrieve` sub-names and the
+`remember` / `recall` aliases are also accepted.
 
 ### Error Handling and Feedback
 
@@ -362,51 +347,49 @@ Store domain-specific information as the agent learns:
 
 ```python
 # Agent learns facts during conversation
-storemem(astronomy, "Mars has two moons: Phobos and Deimos")
-storemem(astronomy, "Jupiter is the largest planet in our solar system")
-storemem(astronomy, "Saturn's rings are made of ice and rock particles")
+```tool_call
+{"name": "memory", "arguments": {"operation": "store", "category": "astronomy", "content": "Mars has two moons: Phobos and Deimos"}}
+```
+```tool_call
+{"name": "memory", "arguments": {"operation": "store", "category": "astronomy", "content": "Jupiter is the largest planet in our solar system"}}
+```
 
 # Later, retrieve relevant context
-retrievemem(astronomy, "Tell me about planets with moons")
+```tool_call
+{"name": "memory", "arguments": {"operation": "retrieve", "category": "astronomy", "query": "Tell me about planets with moons"}}
 ```
 
 ### 2. Conversation Memory
 
 Remember user preferences and context:
 
-```python
-# Remember user details
-storemem(user_profile, "User prefers Python over JavaScript")
-storemem(user_profile, "User works on machine learning projects")
-
-# Recall when relevant
-retrievemem(user_profile, "What are the user's programming preferences?")
+```tool_call
+{"name": "memory", "arguments": {"operation": "store", "category": "user_profile", "content": "User prefers Python over JavaScript"}}
+```
+```tool_call
+{"name": "memory", "arguments": {"operation": "retrieve", "category": "user_profile", "query": "What are the user's programming preferences?"}}
 ```
 
 ### 3. Code Snippet Library
 
 Build a searchable code knowledge base:
 
-```python
-# Store useful code patterns
-storemem(code_snippets, "def fibonacci(n): return n if n <= 1 else fibonacci(n-1) + fibonacci(n-2)")
-storemem(code_snippets, "async def fetch_data(url): return await client.get(url)")
-
-# Find relevant patterns
-retrievemem(code_snippets, "How to implement recursion?")
+```tool_call
+{"name": "memory", "arguments": {"operation": "store", "category": "code_snippets", "content": "def fibonacci(n): return n if n <= 1 else fibonacci(n-1) + fibonacci(n-2)"}}
+```
+```tool_call
+{"name": "memory", "arguments": {"operation": "retrieve", "category": "code_snippets", "query": "How to implement recursion?"}}
 ```
 
 ### 4. Documentation Cache
 
 Cache frequently accessed documentation:
 
-```python
-# Cache API documentation
-storemem(api_docs, "requests.get(url, params, headers) - Send GET request")
-storemem(api_docs, "json.dumps(obj, indent) - Serialize object to JSON")
-
-# Quick lookup
-retrievemem(api_docs, "How to send HTTP GET request?")
+```tool_call
+{"name": "memory", "arguments": {"operation": "store", "category": "api_docs", "content": "requests.get(url, params, headers) - Send GET request"}}
+```
+```tool_call
+{"name": "memory", "arguments": {"operation": "retrieve", "category": "api_docs", "query": "How to send HTTP GET request?"}}
 ```
 
 ## Best Practices
@@ -447,13 +430,13 @@ memory.store(
 Each stored entry should be understandable on its own:
 
 ✅ **Good:**
-```python
-storemem(facts, "Python was created by Guido van Rossum and released in 1991")
+```tool_call
+{"name": "memory", "arguments": {"operation": "store", "category": "facts", "content": "Python was created by Guido van Rossum and released in 1991"}}
 ```
 
 ❌ **Avoid:**
-```python
-storemem(facts, "Created by Guido in 1991")  # Missing context
+```tool_call
+{"name": "memory", "arguments": {"operation": "store", "category": "facts", "content": "Created by Guido in 1991"}}
 ```
 
 ### 4. Regular Cleanup
@@ -892,14 +875,14 @@ agent.enable_memory(ConfigManager())
 
 # First interaction
 agent.send("I'm working on a Flask web app")
-# Agent: storemem(context, "User is working on a Flask web application")
+# Agent: {"name": "memory", "arguments": {"operation": "store", "category": "context", "content": "User is working on a Flask web application"}}
 
 agent.send("I need to add authentication")
-# Agent: storemem(context, "User needs to implement authentication in Flask app")
+# Agent: {"name": "memory", "arguments": {"operation": "store", "category": "context", "content": "User needs to implement authentication in Flask app"}}
 
 # Later interaction
 agent.send("How should I structure my project?")
-# Agent: retrievemem(context, "user project details")
+# Agent: {"name": "memory", "arguments": {"operation": "retrieve", "category": "context", "query": "user project details"}}
 # System provides previous context
 # Agent: "Based on your Flask web app with authentication needs, I recommend..."
 ```

@@ -1,10 +1,37 @@
-"""Memory operation request and extraction for agent memory interactions."""
+"""Memory operation request and extraction for agent memory interactions.
+
+Memory operations use the project-wide JSON tool-call syntax (see
+:mod:`pithos.tools.tool_calls`): the agent expresses them as ``memory`` tool
+calls inside fenced ``tool_call`` code blocks, parsed by the same shared parser
+that handles every other tool call::
+
+    ```tool_call
+    {"name": "memory", "arguments": {"operation": "store", "category": "facts",
+                                      "content": "..."}}
+    ```
+    ```tool_call
+    {"name": "memory", "arguments": {"operation": "retrieve", "category": "facts",
+                                      "query": "..."}}
+    ```
+
+:class:`MemoryOpExtractor` is a thin adapter that maps those parsed calls onto
+:class:`MemoryOpRequest` objects; execution lives in
+:class:`pithos.tools.memory_provider.MemoryToolProvider`.
+"""
 
 from dataclasses import dataclass
 from typing import Optional
-import re
 
-_VALID_FORMATS = {"cli", "function", "legacy"}
+from .tool_calls import extract_tool_calls, lookup, to_str
+
+#: Call names that denote a memory operation (``memory:store`` etc. also work).
+_MEMORY_NAMES = frozenset({"memory", "remember", "recall"})
+
+#: Operation aliases -> canonical ``store`` / ``retrieve``.
+_STORE_OPS = frozenset({"store", "add", "save", "remember", "write", "put"})
+_RETRIEVE_OPS = frozenset(
+    {"retrieve", "search", "recall", "query", "get", "find", "read"}
+)
 
 
 @dataclass
@@ -20,163 +47,93 @@ class MemoryOpRequest:
 
 
 class MemoryOpExtractor:
-    """Extracts memory operations from agent output using a single configured format.
+    """Extracts memory operations from agent output as JSON ``memory`` tool calls.
 
-    Supported formats (select one at construction time):
-    - ``"cli"`` (default): ``STORE[category]: content`` / ``RETRIEVE[category]: query``
-    - ``"function"``: ``store(category, content)`` / ``retrieve(category, query)``
-    - ``"legacy"``: ``storemem(category, "content")`` / ``retrievemem(category, "query")``
+    A memory operation is a JSON tool call whose name is ``memory`` (or
+    ``memory:store`` / ``memory:retrieve``, or the aliases ``remember`` /
+    ``recall``).  The ``operation`` argument selects store vs. retrieve; the
+    ``category`` argument names the memory bucket; ``content`` carries the text
+    to store and ``query`` the search text to retrieve.
     """
 
-    def __init__(self, format: str = "cli") -> None:
-        """Initialize the extractor for a single format.
-
-        Args:
-            format: The format to use.  Must be one of ``"cli"``, ``"function"``,
-                or ``"legacy"``.  Defaults to ``"cli"``.
-
-        Raises:
-            ValueError: If *format* is not a recognised value.
-        """
-        if format not in _VALID_FORMATS:
-            raise ValueError(
-                f"Unknown memory operation format {format!r}. "
-                f"Valid options are: {sorted(_VALID_FORMATS)}"
-            )
-        self.format = format
-
     def extract(self, content: str) -> list[MemoryOpRequest]:
-        """Extract memory operations from *content* using the configured format.
+        """Extract memory operations from *content*.
 
         Args:
             content: Text to extract memory operations from.
 
         Returns:
-            List of MemoryOpRequest objects.
+            List of MemoryOpRequest objects (empty when none are present).
         """
-        if self.format == "cli":
-            return self._extract_cli(content)
-        if self.format == "function":
-            return self._extract_function(content)
-        # self.format == "legacy"
-        return self._extract_legacy(content)
-
-    # ------------------------------------------------------------------
-    # Private per-format extractors
-    # ------------------------------------------------------------------
-
-    def _extract_cli(self, content: str) -> list[MemoryOpRequest]:
         operations: list[MemoryOpRequest] = []
-
-        store_pattern = r"\bSTORE\[([^\]]+)\]:\s*(.+?)(?:\n|$)"
-        for match in re.finditer(store_pattern, content, re.MULTILINE):
-            operations.append(
-                MemoryOpRequest(
-                    operation="store",
-                    category=match.group(1).strip(),
-                    content=match.group(2).strip(),
-                    format="cli",
-                    raw_text=match.group(0),
-                )
-            )
-
-        retrieve_pattern = r"\bRETRIEVE\[([^\]]+)\]:\s*(.+?)(?:\n|$)"
-        for match in re.finditer(retrieve_pattern, content, re.MULTILINE):
-            operations.append(
-                MemoryOpRequest(
-                    operation="retrieve",
-                    category=match.group(1).strip(),
-                    query=match.group(2).strip(),
-                    format="cli",
-                    raw_text=match.group(0),
-                )
-            )
-
+        for call in extract_tool_calls(content):
+            op = self._call_to_op(call)
+            if op is not None:
+                operations.append(op)
         return operations
 
-    def _extract_function(self, content: str) -> list[MemoryOpRequest]:
-        operations: list[MemoryOpRequest] = []
+    @staticmethod
+    def _call_to_op(call) -> Optional[MemoryOpRequest]:
+        base, _, sub = call.name.strip().lower().partition(":")
+        if base not in _MEMORY_NAMES:
+            return None
 
-        store_pattern = r"store\s*\(\s*([^,]+?)\s*,\s*([^)]+)\)"
-        for match in re.finditer(store_pattern, content, re.IGNORECASE):
-            operations.append(
-                MemoryOpRequest(
-                    operation="store",
-                    category=match.group(1).strip().strip("\"'"),
-                    content=match.group(2).strip().strip("\"'"),
-                    format="function",
-                    raw_text=match.group(0),
-                )
+        args = call.arguments
+        operation = to_str(
+            lookup(args, ("operation", "op", "action", "mode"))
+        ).strip().lower()
+        if not operation and sub:
+            operation = sub.strip().lower()
+        if not operation:
+            if base == "remember":
+                operation = "store"
+            elif base == "recall":
+                operation = "retrieve"
+
+        category = to_str(
+            lookup(args, ("category", "cat", "namespace", "collection"))
+        ).strip()
+
+        if operation in _STORE_OPS:
+            content_val = to_str(
+                lookup(args, ("content", "text", "value", "data", "information"))
+            ).strip()
+            return MemoryOpRequest(
+                operation="store",
+                category=category,
+                content=content_val,
+                format="tool_call",
+                raw_text=call.raw,
             )
-
-        retrieve_pattern = r"retrieve\s*\(\s*([^,]+?)\s*,\s*([^)]+)\)"
-        for match in re.finditer(retrieve_pattern, content, re.IGNORECASE):
-            operations.append(
-                MemoryOpRequest(
-                    operation="retrieve",
-                    category=match.group(1).strip().strip("\"'"),
-                    query=match.group(2).strip().strip("\"'"),
-                    format="function",
-                    raw_text=match.group(0),
-                )
+        if operation in _RETRIEVE_OPS:
+            query_val = to_str(
+                lookup(args, ("query", "q", "search", "text", "question"))
+            ).strip()
+            return MemoryOpRequest(
+                operation="retrieve",
+                category=category,
+                query=query_val,
+                format="tool_call",
+                raw_text=call.raw,
             )
-
-        return operations
-
-    def _extract_legacy(self, content: str) -> list[MemoryOpRequest]:
-        operations: list[MemoryOpRequest] = []
-
-        store_pattern = r'storemem\s*\(\s*([^,]+?)\s*,\s*["\']([^"\']+)["\']\s*\)'
-        for match in re.finditer(store_pattern, content):
-            operations.append(
-                MemoryOpRequest(
-                    operation="store",
-                    category=match.group(1).strip("\"'"),
-                    content=match.group(2),
-                    format="legacy",
-                    raw_text=match.group(0),
-                )
-            )
-
-        retrieve_pattern = r'retrievemem\s*\(\s*([^,]+?)\s*,\s*["\']([^"\']+)["\']\s*\)'
-        for match in re.finditer(retrieve_pattern, content):
-            operations.append(
-                MemoryOpRequest(
-                    operation="retrieve",
-                    category=match.group(1).strip("\"'"),
-                    query=match.group(2),
-                    format="legacy",
-                    raw_text=match.group(0),
-                )
-            )
-
-        return operations
+        return None
 
     # ------------------------------------------------------------------
     # Usage examples
     # ------------------------------------------------------------------
 
     def get_usage_examples(self) -> str:
-        """Get formatted examples for the configured format.
-
-        Returns:
-            Formatted string with examples.
-        """
-        if self.format == "cli":
-            return (
-                "Memory Operation Format (CLI-style):\n\n"
-                "  STORE[facts]: Important information here\n"
-                "  RETRIEVE[facts]: search query here"
-            )
-        if self.format == "function":
-            return (
-                "Memory Operation Format (function-style):\n\n"
-                "  store(facts, important information)\n"
-                "  retrieve(facts, search query)"
-            )
-        # legacy
+        """Get formatted examples of the JSON memory tool-call format."""
         return (
-            "Memory Operation Format (legacy):\n\n"
-            '  storemem(facts, "important information")\n'
-            '  retrievemem(facts, "search query")'
+            "Memory Operation Format (JSON tool calls):\n\n"
+            "Store an important fact:\n"
+            "   ```tool_call\n"
+            '   {"name": "memory", "arguments": {"operation": "store", '
+            '"category": "facts", "content": "important information here"}}\n'
+            "   ```\n\n"
+            "Retrieve relevant memories:\n"
+            "   ```tool_call\n"
+            '   {"name": "memory", "arguments": {"operation": "retrieve", '
+            '"category": "facts", "query": "search query here"}}\n'
+            "   ```"
         )

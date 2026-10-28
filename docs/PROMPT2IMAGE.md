@@ -14,7 +14,7 @@ this virtual tool with that unrelated program.
 It is exposed two ways:
 
 1. **CLI**: [`pithos-prompt2image`](#cli).
-2. **Agent tool call**: `[RUN]prompt2image <prompt>[/RUN]` (virtual tool, no
+2. **Agent tool call**: `{"name": "run", "arguments": {"command": "prompt2image <prompt>"}}` (virtual tool, no
    external binary required).
 
 The tool saves the PNG to `./data/generated_images/` and returns a
@@ -209,7 +209,9 @@ agent.enable_tools(config_manager)
 5. Prompt the agent:
 
 ```
-[RUN]prompt2image a wide ocean at dusk, photorealistic[/RUN]
+```tool_call
+{"name": "run", "arguments": {"command": "prompt2image a wide ocean at dusk, photorealistic"}}
+```
 ```
 
 ### Quick-start: Automatic1111/Forge

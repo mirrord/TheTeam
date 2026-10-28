@@ -1,13 +1,15 @@
 """Memory tool provider — owns memory operation execution for the agent system.
 
-When the ``memory`` virtual tool is invoked via the tool pipeline (e.g.
-``RUN: memory STORE[notes]: some content``), :class:`MemoryToolProvider`
-parses the memory operation and executes it directly against the agent's
-:class:`~pithos.tools.memory_tool.MemoryStore`.
+Memory operations use the project-wide JSON tool-call syntax (a ``memory`` tool
+call, e.g. ``{"name": "memory", "arguments": {"operation": "store", ...}}``).
+:class:`MemoryToolProvider` parses those operations (via
+:class:`~pithos.tools.memory_ops.MemoryOpExtractor`) and executes them directly
+against the agent's :class:`~pithos.tools.memory_tool.MemoryStore`.
 
-:class:`MemoryToolProvider` also provides :meth:`extract_and_execute` for
-the agent's post-stream pass that scans the full response text for inline
-memory operations (STORE / RETRIEVE) and executes them automatically.
+Memory is driven by the agent's post-stream pass
+(:meth:`extract_and_execute`), which scans the full response text for ``memory``
+tool calls and executes them automatically; this keeps memory on the one shared
+tool-call format while remaining a distinct, single-path subsystem.
 
 This provider is registered in the :class:`~pithos.tools.registry.ToolRegistry`
 when memory is enabled, via
@@ -55,8 +57,9 @@ class MemoryToolProvider(ToolProvider):
                 path="",
                 description=descriptions.get(
                     "memory",
-                    "Access agent long-term memory. "
-                    "Usage: memory STORE[category]: content  |  memory RETRIEVE[category]: query",
+                    "Access agent long-term memory. Usage (JSON tool call): "
+                    '{"name": "memory", "arguments": {"operation": "store"|"retrieve", '
+                    '"category": "...", "content"|"query": "..."}}',
                 ),
                 platform="cross-platform",
                 source="virtual",
@@ -87,16 +90,23 @@ class MemoryToolProvider(ToolProvider):
         command: str,
         context: Optional[dict[str, Any]] = None,
     ) -> ToolResult:
-        """Parse memory operations from *command* and execute them.
+        """Execute a memory operation.
+
+        Memory is normally driven by the agent's post-stream pass
+        (:meth:`extract_and_execute`); this direct entry point is kept for
+        callers that dispatch the ``memory`` tool explicitly.  The operation is
+        read from the structured ``arguments`` in *context* when present, and
+        otherwise parsed from any JSON ``memory`` tool call embedded in
+        *command*.
 
         Args:
-            command: Full command string, e.g.
-                ``"memory STORE[notes]: some text"`` or
-                ``"memory RETRIEVE[notes]: query"``.
-            context: Must contain ``"agent"`` with the calling agent instance.
+            command: The dispatched command string (typically just ``memory``).
+            context: Must contain ``"agent"``; may contain ``"arguments"`` with
+                the structured memory call arguments.
         """
         start = time.time()
-        agent = (context or {}).get("agent")
+        ctx = context or {}
+        agent = ctx.get("agent")
 
         if agent is None:
             return ToolResult(
@@ -109,19 +119,21 @@ class MemoryToolProvider(ToolProvider):
                 error_hint="Memory operations are only available when running inside an agent.",
             )
 
-        mem_ops = self._extractor.extract(command)
+        mem_ops = self._ops_from_arguments(ctx.get("arguments"))
+        if not mem_ops:
+            mem_ops = self._extractor.extract(command)
         if not mem_ops:
             return ToolResult(
                 success=False,
                 stdout="",
-                stderr="No valid memory operation found in command.",
+                stderr="No valid memory operation found.",
                 exit_code=-1,
                 execution_time=time.time() - start,
                 command=command,
                 error_hint=(
-                    "Memory tool expects commands like:\n"
-                    "  memory STORE[category]: <content>\n"
-                    "  memory RETRIEVE[category]: <query>"
+                    "Memory expects a JSON tool call like:\n"
+                    '  {"name": "memory", "arguments": {"operation": "store", '
+                    '"category": "...", "content": "..."}}'
                 ),
             )
 
@@ -134,6 +146,18 @@ class MemoryToolProvider(ToolProvider):
             execution_time=time.time() - start,
             command=command,
         )
+
+    @staticmethod
+    def _ops_from_arguments(arguments: Any) -> list[MemoryOpRequest]:
+        """Build a memory op from a structured ``arguments`` dict, if valid."""
+        if not isinstance(arguments, dict):
+            return []
+        from .tool_calls import ParsedToolCall
+
+        op = MemoryOpExtractor._call_to_op(
+            ParsedToolCall(name="memory", arguments=arguments, raw="")
+        )
+        return [op] if op is not None else []
 
     # ------------------------------------------------------------------
     # Core execution (used by both the tool-call path and the post-stream pass)
@@ -174,7 +198,9 @@ class MemoryToolProvider(ToolProvider):
                     if not op.content:
                         results.append(
                             f"\u2717 Store operation failed: No content provided\n"
-                            f"\U0001f4a1 Hint: Use format like STORE[{op.category}]: your content here"
+                            f'\U0001f4a1 Hint: {{"name": "memory", "arguments": '
+                            f'{{"operation": "store", "category": "{op.category}", '
+                            f'"content": "your content here"}}}}'
                         )
                         continue
 
@@ -210,7 +236,9 @@ class MemoryToolProvider(ToolProvider):
                     if not op.query:
                         results.append(
                             f"\u2717 Retrieve operation failed: No query provided\n"
-                            f"\U0001f4a1 Hint: Use format like RETRIEVE[{op.category}]: your search query"
+                            f'\U0001f4a1 Hint: {{"name": "memory", "arguments": '
+                            f'{{"operation": "retrieve", "category": "{op.category}", '
+                            f'"query": "your search query"}}}}'
                         )
                         continue
 

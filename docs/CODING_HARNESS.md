@@ -14,10 +14,11 @@ with a simpler, more capable single-agent harness inspired by `mini-swe-agent`.
 
 - **Single agent, one loop.** No planner/coder/reviewer/repairer roles — one
   agent iterates until the task is done.
-- **Native structured tool-calling.** Each step the agent emits `[RUN]`,
-  `[EDIT]`, and `[SUBMIT]` blocks, which the harness parses and executes through
-  a workspace-jailed `ToolRegistry` (reusing `CLIToolProvider`, the
-  `CommandSafetyChecker`, and root-jailed file-edit/git helpers).
+- **JSON tool calling.** Each step the agent emits `run`, `edit`, and `submit`
+  tool calls — JSON objects inside fenced `tool_call` blocks — which the harness
+  parses and executes through a workspace-jailed `ToolRegistry` (reusing
+  `CLIToolProvider`, the `CommandSafetyChecker`, and root-jailed file-edit/git
+  helpers).
 - **Local-first, root-jailed.** File edits and git are confined to an
   `allowed_root`; shell commands run with the working directory pinned to that
   root and pass through the standard safety checks. No Docker.
@@ -30,8 +31,12 @@ with a simpler, more capable single-agent harness inspired by `mini-swe-agent`.
 ### As a tool (from an agent or subagent)
 
 ```
-[RUN]code fix the failing test in tests/test_foo.py[/RUN]
-[RUN]code --root ./myrepo add a --verbose flag to the CLI[/RUN]
+```tool_call
+{"name": "run", "arguments": {"command": "code fix the failing test in tests/test_foo.py"}}
+```
+```tool_call
+{"name": "run", "arguments": {"command": "code --root ./myrepo add a --verbose flag to the CLI"}}
+```
 ```
 
 An optional `--root <path>` prefix pins the workspace root; otherwise a fresh
@@ -46,51 +51,55 @@ pithos-code --root ./myrepo "add a --verbose flag to the CLI"
 pithos-code --json --steps 20 "refactor utils.py into smaller modules"
 ```
 
-## The action grammar
+## The tool-call grammar
 
 Each turn the agent responds with a short `THOUGHT` followed by one or more
-action blocks:
+tool calls, each a JSON object inside a fenced `tool_call` code block. Several
+calls may share one block (as a JSON array), or each may use its own block.
 
 **Run a command** (shell / CLI tool, executed in the workspace root):
 
+````
+```tool_call
+{"name": "run", "arguments": {"command": "python -m pytest -q"}}
 ```
-[RUN]python -m pytest -q[/RUN]
-```
+````
 
 **Edit a file** (path relative to the workspace root):
 
+````
+```tool_call
+{"name": "edit", "arguments": {"path": "src/foo.py", "mode": "replace", "content": "<the complete new file contents>"}}
 ```
-[EDIT path=src/foo.py mode=replace]
-<the complete new file contents>
-[/EDIT]
-```
+````
 
 `mode` is one of:
 
-| mode             | body meaning                                             |
+| mode             | argument carrying the body                               |
 | ---------------- | -------------------------------------------------------- |
-| `replace`        | the complete new file contents                           |
-| `create`         | contents for a new file (fails if it already exists)     |
-| `insert_at_line` | text inserted before 1-based `line=N` (add the `line` attr) |
-| `patch`          | a unified diff applied to the file                       |
+| `replace`        | `content` — the complete new file contents               |
+| `create`         | `content` — contents for a new file (fails if it exists) |
+| `insert_at_line` | `content` inserted before 1-based `line` (add `"line": N`) |
+| `patch`          | `patch` — a unified diff applied to the file             |
 
 A `.bak` snapshot is written before any in-place edit (configurable).
 
-The parser is **lenient** about the block syntax models naturally produce: the
-mode-named blocks `[CREATE ...]`, `[REPLACE ...]`, `[WRITE ...]` (= replace),
-`[PATCH ...]`, and `[INSERT ...]` / `[INSERT_AT_LINE ...]` are all accepted as
-edits (the block name sets the mode; an explicit `mode=` attribute still wins).
-Tag names are case-insensitive.
+The parser is **lenient** about the shapes models naturally produce: a block may
+contain one object, a JSON array of calls, or several objects back-to-back;
+common key spellings (`tool`/`function` for the name, `args`/`parameters` for
+the arguments, `cmd` for the command, `file` for the path) are all accepted, and
+`arguments` may itself be a JSON-encoded string. Unfenced JSON tool-call objects
+are recovered as a fallback.
 
-**Submit the final result** and end the run (`[DONE]` / `[FINISH]` also work):
+**Submit the final result** and end the run:
 
+````
+```tool_call
+{"name": "submit", "arguments": {"summary": "<summary of what you did and how you verified it>"}}
 ```
-[SUBMIT]
-<summary of what you did and how you verified it>
-[/SUBMIT]
-```
+````
 
-A reply containing no recognised block is a *format error*; too many
+A reply containing no recognised tool call is a *format error*; too many
 consecutive format errors ends the run.
 
 ## How the loop works
@@ -198,7 +207,7 @@ the `code:` block in `configs/tools/tool_config.yaml`.
 src/pithos/tools/coder/
   models.py        # CodeHarnessConfig, CodeTaskRequest, CodeTaskResult, ExitStatus, StepRecord
   prompts.py       # system / instance / observation / format-error templates
-  actions.py       # parse [RUN]/[EDIT]/[SUBMIT] blocks into Action objects
+  actions.py       # parse run/edit/submit JSON tool calls into Action objects
   file_ops.py      # shared root-jailed edit helpers (also used by coding_nodes.EditFileNode)
   environment.py   # WorkspaceEnvironment: jailed command + file-edit execution
   harness.py       # CodeHarness: the query -> act -> observe loop

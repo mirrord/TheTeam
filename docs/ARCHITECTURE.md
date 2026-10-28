@@ -388,7 +388,7 @@ User: "What version of Python is installed?"
     v
 ┌──────────────────────────────────────┐
 │  Tool call detected mid-stream       │
-│  e.g. [RUN]python --version[/RUN]    │
+│  e.g. {"name":"run","arguments":…}   │
 └──────────────────────────────────────┘
     │
     v

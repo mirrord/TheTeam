@@ -1,8 +1,9 @@
 # Coding harness (`code` virtual tool) configuration
 #
 # The coding harness drives a single coding subagent through a tight
-# query -> act -> observe loop. Each step the subagent emits [RUN] / [EDIT] /
-# [SUBMIT] blocks which the harness executes against a workspace-jailed tool
+# query -> act -> observe loop. Each step the subagent emits run / edit /
+# submit tool calls (JSON objects in fenced tool_call blocks) which the harness
+# executes against a workspace-jailed tool
 # registry (CLIToolProvider + safe file-edit/git actions), feeding truncated
 # observations back until the agent submits or a limit is reached.
 

@@ -12,30 +12,34 @@ from typing import Optional
 #: The action grammar shown to the agent, shared by the system + format-error
 #: prompts so the two never drift.
 ACTION_GRAMMAR = """\
-Respond each turn with a short THOUGHT explaining your reasoning, followed by
-one or more ACTION blocks. Use ONLY these block types:
+Respond each turn with a short THOUGHT explaining your reasoning, then one or
+more tool calls. Emit each tool call as a JSON object inside a fenced
+```tool_call code block. Put several calls in one block as a JSON array, or use
+a separate block per call. Use ONLY these tools:
 
-1. Run a command (shell / CLI tool, executed in the workspace root):
+1. run — execute a command (shell / CLI tool) in the workspace root:
 
-   [RUN]python -m pytest -q[/RUN]
+   ```tool_call
+   {"name": "run", "arguments": {"command": "python -m pytest -q"}}
+   ```
 
-2. Edit a file (path is relative to the workspace root):
+2. edit — create or modify a file (path is relative to the workspace root):
 
-   [EDIT path=src/foo.py mode=replace]
-   <the complete new file contents>
-   [/EDIT]
+   ```tool_call
+   {"name": "edit", "arguments": {"path": "src/foo.py", "mode": "replace", "content": "<the complete new file contents>"}}
+   ```
 
    mode is one of: replace | create | insert_at_line | patch
-     - replace: overwrite the whole file with the body
-     - create: create a new file (fails if it already exists)
-     - insert_at_line: insert the body before 1-based line N (add line=N)
-     - patch: body is a unified diff applied to the file
+     - replace: overwrite the whole file with "content"
+     - create: create a new file from "content" (fails if it already exists)
+     - insert_at_line: insert "content" before 1-based line N (add "line": N)
+     - patch: apply "patch" (a unified diff) to the file instead of "content"
 
-3. Finish the task and report what you did:
+3. submit — finish the task and report what you did:
 
-   [SUBMIT]
-   <summary of the changes you made and how you verified them>
-   [/SUBMIT]
+   ```tool_call
+   {"name": "submit", "arguments": {"summary": "<summary of the changes you made and how you verified them>"}}
+   ```
 """
 
 
@@ -49,21 +53,23 @@ commands (including tests) to complete the task you are given.
 {ACTION_GRAMMAR}
 
 Important rules:
-- Every reply MUST contain at least one action block. If you have nothing left
-  to do, SUBMIT.
+- Every reply MUST contain at least one tool call. If you have nothing left
+  to do, call submit.
 - Work in small, verifiable steps: inspect first, make a focused change, then
   run the relevant tests or commands to confirm it.
-- Each [RUN] command executes independently in a fresh subshell rooted at the
+- Each run command executes independently in a fresh subshell rooted at the
   workspace. Directory changes and environment variables do NOT persist between
   commands. Combine setup into a single command when needed.
 - All file edits and commands are confined to the workspace root; paths that
   escape it are rejected.
 - Dangerous commands (shell-injection operators, mass deletes, piping the
-  network into a shell) are blocked. Prefer the [EDIT] action over shell
+  network into a shell) are blocked. Prefer the edit tool over shell
   here-docs / sed for changing files.
+- Each tool call must be valid JSON; put multi-line file content in the
+  "content" string with newlines escaped as \\n.
 - If a command's output is truncated, narrow it (head/tail/grep, or a more
   specific test target) rather than repeating it.
-- When the task is complete and verified, issue a single [SUBMIT] block.
+- When the task is complete and verified, issue a single submit tool call.
 """
 
 
@@ -99,9 +105,9 @@ def build_instance_prompt(
         "## Recommended workflow",
         "",
         "1. Explore the relevant files to understand the code.",
-        "2. Make a focused edit with an [EDIT] action.",
-        "3. Run the tests / reproduction command with a [RUN] action.",
-        "4. Iterate until it passes, then [SUBMIT] a summary.",
+        "2. Make a focused edit with the edit tool.",
+        "3. Run the tests / reproduction command with the run tool.",
+        "4. Iterate until it passes, then call submit with a summary.",
         "",
         "Begin now with your first THOUGHT and action.",
     ]
@@ -133,7 +139,7 @@ def truncate_output(
 def build_observation(blocks: list[str]) -> str:
     """Join per-action observation *blocks* into a single user message."""
     body = "\n\n".join(b for b in blocks if b is not None)
-    return f"## Observation\n\n{body}\n\nContinue with your next action, or [SUBMIT] if done."
+    return f"## Observation\n\n{body}\n\nContinue with your next tool call, or call submit if done."
 
 
 def format_error_prompt(reason: str, consecutive: int, limit: int) -> str:

@@ -1,9 +1,10 @@
 """Coder tool - a full agentic coding harness exposed as the ``code`` virtual tool.
 
 The harness drives a single coding subagent through a tight
-**query -> act -> observe** loop (inspired by mini-swe-agent) using pithos's
-native structured tool-calling.  Each step the subagent emits ``[RUN] ... [/RUN]``
-tool calls which the harness executes through a workspace-jailed
+**query -> act -> observe** loop (inspired by mini-swe-agent) using JSON
+tool calls.  Each step the subagent emits ``run`` / ``edit`` / ``submit`` tool
+calls (JSON objects in fenced ``tool_call`` blocks) which the harness executes
+through a workspace-jailed
 :class:`~pithos.tools.registry.ToolRegistry` (shell commands via
 ``CLIToolProvider`` + safe file-edit/git actions), feeding truncated
 observations back until the agent submits a result or a limit is reached.

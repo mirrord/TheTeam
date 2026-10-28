@@ -303,7 +303,7 @@ class WorkspaceEnvironment:
 
     def _edit(self, action: Action) -> str:
         if not action.path:
-            return "[EDIT] failed: missing path attribute"
+            return "[edit] failed: missing path argument"
         spec = edit_action_to_spec(action)
         try:
             result = apply_edit(spec, self.root, backup=self.config.backup_edits)
@@ -313,10 +313,10 @@ class WorkspaceEnvironment:
             FileNotFoundError,
             ValueError,
         ) as exc:
-            return f"[EDIT {action.path}] failed: {exc}"
+            return f"[edit {action.path}] failed: {exc}"
         except Exception as exc:  # pragma: no cover - defensive
-            return f"[EDIT {action.path}] failed: {exc}"
-        return f"[EDIT] applied {result['mode']} to {action.path}"
+            return f"[edit {action.path}] failed: {exc}"
+        return f"[edit] applied {result['mode']} to {action.path}"
 
     # ------------------------------------------------------------------
     # Helpers

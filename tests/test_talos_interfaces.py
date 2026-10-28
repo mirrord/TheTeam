@@ -555,7 +555,11 @@ def test_telegram_strips_tool_calls_before_replying() -> None:
     iface = TelegramInterface(agent, TelegramConfig(bot_token="t"))
 
     def fake_send(text, context_name=None, **kwargs):
-        return "Sure thing.\n[RUN]ls -la[/RUN]\nDone."
+        return (
+            "Sure thing.\n```tool_call\n"
+            '{"name": "run", "arguments": {"command": "ls -la"}}'
+            "\n```\nDone."
+        )
 
     agent.send = fake_send  # type: ignore[assignment]
 
@@ -563,7 +567,7 @@ def test_telegram_strips_tool_calls_before_replying() -> None:
     asyncio.run(iface._handle_message(update, MagicMock()))
 
     sent = update.message.reply_text.await_args.args[0]
-    assert "[RUN]" not in sent
+    assert "tool_call" not in sent
     assert "ls -la" not in sent
     assert "Sure thing." in sent
     assert "Done." in sent
@@ -576,7 +580,13 @@ def test_voice_strips_tool_calls_before_speaking() -> None:
     iface = VoiceInterface(agent, VoiceConfig())
 
     # Stub agent / TTS / audio so we can drive a single iteration of run().
-    agent.send = MagicMock(return_value="Yes.\n[RUN]echo hi[/RUN]\nOkay.")  # type: ignore[assignment]
+    agent.send = MagicMock(
+        return_value=(
+            "Yes.\n```tool_call\n"
+            '{"name": "run", "arguments": {"command": "echo hi"}}'
+            "\n```\nOkay."
+        )
+    )  # type: ignore[assignment]
     iface._load_audio_libs = MagicMock()  # type: ignore[assignment]
     iface._load_whisper = MagicMock()  # type: ignore[assignment]
     iface._load_tts = MagicMock()  # type: ignore[assignment]
@@ -598,7 +608,7 @@ def test_voice_strips_tool_calls_before_speaking() -> None:
     iface.run()
 
     spoken = iface._speak.call_args.args[0]
-    assert "[RUN]" not in spoken
+    assert "tool_call" not in spoken
     assert "echo hi" not in spoken
     assert "Yes." in spoken
     assert "Okay." in spoken

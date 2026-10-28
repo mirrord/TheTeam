@@ -229,10 +229,10 @@ agent.enable_memory(config_manager)
 
 # Agent can now use memory operations
 agent.send("Remember that Python was created by Guido van Rossum")
-# Agent: storemem(facts, "Python was created by Guido van Rossum")
+# Agent: {"name": "memory", "arguments": {"operation": "store", "category": "facts", "content": "Python was created by Guido van Rossum"}}
 
 agent.send("Who created Python?")
-# Agent: retrievemem(facts, "Python creator")
+# Agent: {"name": "memory", "arguments": {"operation": "retrieve", "category": "facts", "query": "Python creator"}}
 # System provides stored knowledge
 # Agent responds with the answer
 ```
@@ -282,9 +282,9 @@ pithos-memory export facts backup.json
 pithos-memory import backup.json
 ```
 
-**Memory Operations:**
-- `storemem(category, "content")` - Store knowledge in a category
-- `retrievemem(category, "query")` - Search for relevant knowledge
+**Memory Operations** (unified JSON tool-call format):
+- `{"name": "memory", "arguments": {"operation": "store", "category": "...", "content": "..."}}` - Store knowledge
+- `{"name": "memory", "arguments": {"operation": "retrieve", "category": "...", "query": "..."}}` - Search for relevant knowledge
 
 **Use Cases:**
 - Build domain knowledge bases
@@ -529,7 +529,8 @@ agent.enable_tools(config_manager)
 
 # Agent can now use tools in responses
 response = agent.send("What version of Python is installed?")
-# Agent will respond with: [RUN]python --version[/RUN]
+# Agent responds with a JSON tool call:
+#   {"name": "run", "arguments": {"command": "python --version"}}
 # Tool executes automatically and result is added to conversation
 ```
 
@@ -826,7 +827,7 @@ pithos-code --root ./myrepo "add a --verbose flag to the CLI"
 pithos-code --json --steps 20 "refactor utils.py into smaller modules"
 ```
 
-The agent emits `[RUN]` / `[EDIT]` / `[SUBMIT]` actions each step; the harness
+The agent emits `run` / `edit` / `submit` JSON tool calls each step; the harness
 executes them against a workspace-jailed tool registry (CLI safety checks +
 root-confined file-edit/git actions) and feeds truncated observations back
 until the agent submits or a limit is reached. A run trajectory is written to

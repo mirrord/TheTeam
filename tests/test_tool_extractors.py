@@ -5,220 +5,186 @@ from pithos.tools import ToolCallExtractor, MemoryOpExtractor
 
 
 class TestToolCallExtractor:
-    """Tests for ToolCallExtractor."""
+    """Tests for ToolCallExtractor (JSON tool-call format)."""
 
     @pytest.fixture
     def extractor(self):
         """Create a ToolCallExtractor."""
         return ToolCallExtractor()
 
+    def _block(self, command):
+        return (
+            '```tool_call\n'
+            '{"name": "run", "arguments": {"command": "' + command + '"}}\n'
+            '```'
+        )
+
+    def test_bracket_format_not_extracted(self, extractor):
+        """The old [RUN]...[/RUN] bracket syntax is no longer supported."""
+        content = "First [RUN]python --version[/RUN] and then <RUN>git status</RUN>."
+        requests = extractor.extract(content)
+        assert requests == []
+
     def test_cli_format_not_extracted(self, extractor):
-        """CLI-style syntax is no longer supported and must be ignored."""
-        content = """
-Let me check the Python version:
-RUN: python --version
-And also execute:
-EXEC: git status
-"""
+        """CLI-style syntax is not supported and must be ignored."""
+        content = "RUN: python --version\nEXEC: git status\n"
         requests = extractor.extract(content)
         assert requests == []
 
     def test_function_format_not_extracted(self, extractor):
-        """Function-style syntax is no longer supported and must be ignored."""
-        content = """
-Let me run(python --version) and then
-tool(git status) to check the repo.
-"""
+        """Bare function-style syntax is not supported and must be ignored."""
+        content = "Let me run(python --version) and then tool(git status)."
         requests = extractor.extract(content)
         assert requests == []
 
-    def test_bracket_format_extraction(self, extractor):
-        """Test extraction of bracket-style tool calls."""
-        content = """
-First [RUN]python --version[/RUN] and then
-<RUN>git status</RUN> to check everything.
-"""
-        requests = extractor.extract(content)
-        assert len(requests) == 2
-        assert requests[0].command == "python --version"
-        assert requests[0].format == "bracket"
-        assert requests[1].command == "git status"
-        assert requests[1].format == "bracket"
-
-    def test_legacy_format_not_extracted(self, extractor):
-        """Legacy runcommand() syntax is no longer supported and must be ignored."""
-        content = 'Let me check: runcommand("python --version")'
-        requests = extractor.extract(content)
-        assert requests == []
-
-    def test_exec_bracket_extraction(self, extractor):
-        """Test extraction of [EXEC]...[/EXEC] bracket calls."""
-        content = "Now [EXEC]echo done[/EXEC] to finish."
+    def test_json_run_extraction(self, extractor):
+        """A run tool call is extracted into a command string."""
+        content = "Check:\n" + self._block("python --version")
         requests = extractor.extract(content)
         assert len(requests) == 1
-        assert requests[0].command == "echo done"
-        assert requests[0].format == "bracket"
+        assert requests[0].command == "python --version"
+        assert requests[0].format == "tool_call"
+
+    def test_multiple_calls_extracted_in_order(self, extractor):
+        content = self._block("python --version") + "\nthen\n" + self._block("git status")
+        requests = extractor.extract(content)
+        assert [r.command for r in requests] == ["python --version", "git status"]
+
+    def test_json_array_in_one_block(self, extractor):
+        content = (
+            '```tool_call\n'
+            '[{"name": "run", "arguments": {"command": "echo a"}}, '
+            '{"name": "run", "arguments": {"command": "echo b"}}]\n'
+            '```'
+        )
+        requests = extractor.extract(content)
+        assert [r.command for r in requests] == ["echo a", "echo b"]
+
+    def test_directly_named_tool_is_flattened(self, extractor):
+        """A call naming a tool directly becomes '<tool> <args>'."""
+        content = (
+            '```tool_call\n'
+            '{"name": "git", "arguments": {"command": "status"}}\n'
+            '```'
+        )
+        requests = extractor.extract(content)
+        assert requests[0].command == "git status"
+
+    def test_raw_text_is_full_block(self, extractor):
+        """raw_text spans the whole fenced block so it can be stripped."""
+        block = self._block("echo done")
+        requests = extractor.extract("Now " + block + " to finish.")
+        assert requests[0].raw_text == block
 
     def test_no_extractions(self, extractor):
-        """Test content with no tool calls."""
+        """Content with no tool calls yields nothing."""
         content = "This is just regular text without any tool calls."
-        requests = extractor.extract(content)
-        assert len(requests) == 0
+        assert extractor.extract(content) == []
+
+    def test_non_tool_json_block_ignored(self, extractor):
+        """A json block without a recognised tool name is not a call."""
+        content = '```json\n{"foo": "bar"}\n```'
+        assert extractor.extract(content) == []
 
     def test_usage_examples(self, extractor):
-        """Test that usage examples advertise only the bracket format."""
+        """Usage examples advertise only the JSON tool-call format."""
         examples = extractor.get_usage_examples()
-        assert "[RUN]" in examples
-        assert "[/RUN]" in examples
+        assert "tool_call" in examples
+        assert '"name": "run"' in examples
         # Removed formats must not be advertised.
+        assert "[RUN]" not in examples
         assert "RUN:" not in examples
-        assert "run(" not in examples
         assert "runcommand" not in examples
 
 
 class TestMemoryOpExtractor:
-    """Tests for MemoryOpExtractor."""
+    """Tests for MemoryOpExtractor (JSON ``memory`` tool-call format)."""
 
     @pytest.fixture
     def extractor(self):
-        """Create a default (cli) MemoryOpExtractor."""
+        """Create a MemoryOpExtractor."""
         return MemoryOpExtractor()
 
-    @pytest.fixture
-    def extractor_function(self):
-        """Create a function-format MemoryOpExtractor."""
-        return MemoryOpExtractor("function")
+    def _store(self, category, content):
+        return (
+            '```tool_call\n{"name": "memory", "arguments": {"operation": "store", '
+            '"category": "' + category + '", "content": "' + content + '"}}\n```'
+        )
 
-    @pytest.fixture
-    def extractor_legacy(self):
-        """Create a legacy-format MemoryOpExtractor."""
-        return MemoryOpExtractor("legacy")
+    def _retrieve(self, category, query):
+        return (
+            '```tool_call\n{"name": "memory", "arguments": {"operation": "retrieve", '
+            '"category": "' + category + '", "query": "' + query + '"}}\n```'
+        )
 
-    def test_cli_store_extraction(self, extractor):
-        """Test extraction of CLI-style store operations."""
-        content = """
-Let me save this:
-STORE[facts]: Python is a programming language
-"""
+    def test_store_extraction(self, extractor):
+        content = "Let me save this:\n" + self._store(
+            "facts", "Python is a programming language"
+        )
         requests = extractor.extract(content)
         assert len(requests) == 1
         assert requests[0].operation == "store"
         assert requests[0].category == "facts"
         assert requests[0].content == "Python is a programming language"
-        assert requests[0].format == "cli"
+        assert requests[0].format == "tool_call"
 
-    def test_cli_retrieve_extraction(self, extractor):
-        """Test extraction of CLI-style retrieve operations."""
-        content = """
-Let me search:
-RETRIEVE[facts]: programming languages
-"""
+    def test_retrieve_extraction(self, extractor):
+        content = "Let me search:\n" + self._retrieve("facts", "programming languages")
         requests = extractor.extract(content)
         assert len(requests) == 1
         assert requests[0].operation == "retrieve"
         assert requests[0].category == "facts"
         assert requests[0].query == "programming languages"
-        assert requests[0].format == "cli"
+        assert requests[0].format == "tool_call"
 
-    def test_function_store_extraction(self, extractor_function):
-        """Test extraction of function-style store operations."""
-        content = "Let me store(facts, Python is great) for later."
-        requests = extractor_function.extract(content)
-        assert len(requests) == 1
-        assert requests[0].operation == "store"
-        assert requests[0].category == "facts"
-        assert requests[0].content == "Python is great"
-        assert requests[0].format == "function"
-
-    def test_function_retrieve_extraction(self, extractor_function):
-        """Test extraction of function-style retrieve operations."""
-        content = "Let me retrieve(facts, Python information) now."
-        requests = extractor_function.extract(content)
-        assert len(requests) == 1
-        assert requests[0].operation == "retrieve"
-        assert requests[0].category == "facts"
-        assert requests[0].query == "Python information"
-        assert requests[0].format == "function"
-
-    def test_legacy_store_extraction(self, extractor_legacy):
-        """Test extraction of legacy storemem() format."""
-        content = 'Let me save: storemem(facts, "Python is great")'
-        requests = extractor_legacy.extract(content)
-        assert len(requests) == 1
-        assert requests[0].operation == "store"
-        assert requests[0].category == "facts"
-        assert requests[0].content == "Python is great"
-        assert requests[0].format == "legacy"
-
-    def test_legacy_retrieve_extraction(self, extractor_legacy):
-        """Test extraction of legacy retrievemem() format."""
-        content = 'Let me search: retrievemem(facts, "Python info")'
-        requests = extractor_legacy.extract(content)
-        assert len(requests) == 1
-        assert requests[0].operation == "retrieve"
-        assert requests[0].category == "facts"
-        assert requests[0].query == "Python info"
-        assert requests[0].format == "legacy"
-
-    def test_cli_ignores_other_formats(self, extractor):
-        """CLI extractor only matches CLI syntax; other formats are ignored."""
-        content = """
-First STORE[facts]: Important information
-Then retrieve(facts, search term)
-And storemem(notes, "More data")
-"""
+    def test_sub_name_operation(self, extractor):
+        """``memory:retrieve`` sets the operation from the sub-name."""
+        content = (
+            '```tool_call\n{"name": "memory:retrieve", "arguments": '
+            '{"category": "facts", "query": "x"}}\n```'
+        )
         requests = extractor.extract(content)
-        # Only the CLI STORE[...] line is matched
-        assert len(requests) == 1
-        assert requests[0].operation == "store"
-        assert requests[0].format == "cli"
+        assert requests[0].operation == "retrieve"
+        assert requests[0].query == "x"
 
-    def test_cli_multiple_operations(self, extractor):
-        """CLI extractor finds multiple store and retrieve ops."""
-        content = """
-STORE[facts]: Important information
-RETRIEVE[facts]: search term
-STORE[notes]: More data
-"""
+    def test_remember_alias(self, extractor):
+        """The ``remember`` alias implies a store operation."""
+        content = (
+            '```tool_call\n{"name": "remember", "arguments": '
+            '{"category": "notes", "content": "hi"}}\n```'
+        )
+        requests = extractor.extract(content)
+        assert requests[0].operation == "store"
+        assert requests[0].content == "hi"
+
+    def test_ignores_non_memory_tool_calls(self, extractor):
+        """Non-memory tool calls are not memory operations."""
+        content = '```tool_call\n{"name": "run", "arguments": {"command": "ls"}}\n```'
+        assert extractor.extract(content) == []
+
+    def test_multiple_operations(self, extractor):
+        content = (
+            self._store("facts", "Important information") + "\n"
+            + self._retrieve("facts", "search term") + "\n"
+            + self._store("notes", "More data")
+        )
         requests = extractor.extract(content)
         assert len(requests) == 3
-        # stores are collected first, then retrieves
         ops = {(r.operation, r.category) for r in requests}
         assert ("store", "facts") in ops
         assert ("store", "notes") in ops
         assert ("retrieve", "facts") in ops
 
     def test_no_extractions(self, extractor):
-        """Test content with no memory operations."""
         content = "This is just regular text without any memory ops."
-        requests = extractor.extract(content)
-        assert len(requests) == 0
+        assert extractor.extract(content) == []
 
-    def test_usage_examples_cli(self, extractor):
-        """CLI extractor usage examples contain only CLI-format strings."""
+    def test_usage_examples(self, extractor):
         examples = extractor.get_usage_examples()
-        assert "STORE[" in examples
-        assert "RETRIEVE[" in examples
-        assert "store(" not in examples
-        assert "storemem(" not in examples
-
-    def test_usage_examples_function(self, extractor_function):
-        """Function extractor usage examples contain only function-format strings."""
-        examples = extractor_function.get_usage_examples()
-        assert "store(" in examples
-        assert "retrieve(" in examples
+        assert "tool_call" in examples
+        assert '"name": "memory"' in examples
+        assert '"operation": "store"' in examples
+        assert '"operation": "retrieve"' in examples
+        # Removed legacy formats must not be advertised.
         assert "STORE[" not in examples
         assert "storemem(" not in examples
-
-    def test_usage_examples_legacy(self, extractor_legacy):
-        """Legacy extractor usage examples contain only legacy-format strings."""
-        examples = extractor_legacy.get_usage_examples()
-        assert "storemem(" in examples
-        assert "retrievemem(" in examples
-        assert "STORE[" not in examples
-        assert "store(" not in examples
-
-    def test_invalid_format_raises(self):
-        """Unknown format raises ValueError at construction time."""
-        with pytest.raises(ValueError, match="Unknown memory operation format"):
-            MemoryOpExtractor("bracket")
