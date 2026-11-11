@@ -170,8 +170,6 @@ class MemoryCompactor:
             A ``(summary, entities)`` tuple where *entities* is a
             comma-separated string (may be ``"none"``).
         """
-        from ollama import chat as ollama_chat
-
         history_text = "\n".join(
             f"{m['role'].upper()}: {m['content']}" for m in messages
         )
@@ -187,14 +185,9 @@ class MemoryCompactor:
         raw = ""
         for attempt in range(3):  # Try twice: if parsing fails, retry once more
             try:
-                # print("Compaction LLM prompt:\n", prompt)
-                response = ollama_chat(
-                    model=model,
-                    messages=[{"role": "user", "content": prompt}],
-                    options=options,
-                )
-                # print("Compaction LLM raw response:\n", response.message.content)
-                raw = (response.message.content or "").strip()
+                # Route through the agent's own backend so compaction works
+                # regardless of provider (Ollama / llama.cpp / ExLlama).
+                raw = agent._raw_complete(prompt, model=model, options=options).strip()
             except Exception as exc:
                 logger.warning("Compaction LLM call failed: %s", exc)
                 return "[Summary unavailable due to LLM error]", "none"

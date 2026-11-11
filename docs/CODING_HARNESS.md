@@ -130,9 +130,36 @@ hands the harness the caller's `tool_registry.config` (the same `mode`,
 `include`, `exclude`, `confirm`, and `descriptions`). So the coding agent can
 reach the same CLI tools its caller can.
 
+### Guaranteed baseline toolset
+
+Regardless of the caller's policy (or whether any other tools are enabled), the
+harness **always** has access to a minimum toolset so it can read and search the
+codebase — without it the subagent is effectively useless. The baseline is
+defined by `_MINIMUM_TOOLS` in
+[`environment.py`](../src/pithos/tools/coder/environment.py) and covers:
+
+- **File IO / inspection:** `cat`, `head`, `tail`, `ls`, `dir`, `type`, `nl`,
+  `wc`, `stat`, `tree`, `file`, `realpath`, `basename`, `dirname`.
+- **Search / find / grep:** `grep`, `egrep`, `fgrep`, `rg`, `ag`, `ack`, `find`,
+  `findstr`, `where`, `fd`.
+
+File *writes* are handled by the built-in `edit` action, which is always
+available and root-jailed. Every other tool is gated by the caller's policy
+(i.e. enabled through the normal tool configuration / `tools_enabled`
+mechanism), **not** by this baseline.
+
+Baseline calls are **not** exempt from safety or confirmation: they still go
+through the `CommandSafetyChecker` and, when a confirmation channel is present,
+each specific call is **permission gated** exactly like any other command (see
+below). With no confirmation channel (non-interactive runs) the baseline stays
+available so automated runs can still read and search.
+
+### User confirmation
+
 When the coding agent issues a command that the policy **would deny**, and the
-tool's bare name is in the caller's **`include`** or **`confirm`** group, the
-harness escalates to a **user confirmation** instead of denying outright:
+tool's bare name is in the caller's **`include`** or **`confirm`** group (or is
+part of the baseline toolset), the harness escalates to a **user confirmation**
+instead of denying outright:
 
 - The caller's confirmation channel (`agent.tool_confirm_callback`) is invoked
   with the exact command string.
@@ -141,7 +168,11 @@ harness escalates to a **user confirmation** instead of denying outright:
   off the event loop so the bot stays responsive to the reply, and a pending
   prompt consumes the user's next message as its answer.)
 - On the **CLI**, it falls back to an interactive `[y/N]` prompt.
-- With no confirmation channel available (non-interactive), the call is denied.
+- All confirmations are serialized process-wide (see
+  [`confirmation.py`](../src/pithos/tools/confirmation.py)), so only one
+  approval prompt is ever pending at a time.
+- With no confirmation channel available (non-interactive), policy-gated calls
+  are denied; the guaranteed baseline toolset still runs.
 
 Interfaces install the channel via `agent.set_tool_confirm_callback(...)`; it is
 also used by the agent's own `ToolExecutor` for `confirm`-group tools.

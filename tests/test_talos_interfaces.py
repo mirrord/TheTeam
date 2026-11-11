@@ -455,6 +455,66 @@ def test_telegram_tool_confirmation_denied() -> None:
     asyncio.run(scenario())
 
 
+def test_telegram_refuses_concurrent_turn_while_busy() -> None:
+    """A new message while a turn is in flight must NOT start a second turn.
+
+    Regression: the agent (and its shared tool-confirm channel) runs one turn
+    at a time. If a message arrives mid-turn — before any approval prompt is
+    registered — it previously spawned a concurrent turn, so the agent kept
+    generating and sent extra approval prompts while an earlier one was still
+    pending. The second message must instead be refused with a "please wait".
+    """
+    import threading
+
+    async def scenario() -> None:
+        agent = _make_agent()
+        iface = TelegramInterface(agent, TelegramConfig(bot_token="t"))
+
+        started = threading.Event()
+        release = threading.Event()
+        calls: list[str] = []
+
+        def fake_send(text, context_name=None, **kwargs):
+            calls.append(text)
+            started.set()
+            # Simulate a long-running turn that has NOT yet asked for approval.
+            release.wait(timeout=5)
+            return "done"
+
+        agent.send = fake_send  # type: ignore[assignment]
+        agent._pending_image_paths = []
+        agent._pending_report_paths = []
+        agent._pending_attachment_paths = []
+
+        update1 = _make_update(200, "code do the thing")
+        update1.message.reply_document = AsyncMock()
+        task = asyncio.create_task(iface._handle_message(update1, MagicMock()))
+
+        # Wait until the first turn is actually running in its worker thread.
+        for _ in range(500):
+            await asyncio.sleep(0.01)
+            if started.is_set():
+                break
+        assert started.is_set()
+        assert 200 not in iface._pending_confirms  # no approval pending yet
+
+        # A second, unrelated message arrives mid-turn.
+        update2 = _make_update(200, "another request")
+        await iface._handle_message(update2, MagicMock())
+
+        # It must be refused, not run as a concurrent turn.
+        assert len(calls) == 1
+        prompts = [c.args[0] for c in update2.message.reply_text.await_args_list]
+        assert any("still working" in p.lower() or "wait" in p.lower() for p in prompts)
+
+        # Let the first turn finish.
+        release.set()
+        await task
+        assert len(calls) == 1
+
+    asyncio.run(scenario())
+
+
 # ---------------------------------------------------------------------------
 # Voice — only test the constructor wiring; full pipeline requires audio deps.
 # ---------------------------------------------------------------------------

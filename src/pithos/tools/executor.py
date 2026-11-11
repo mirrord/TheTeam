@@ -154,25 +154,33 @@ class ToolExecutor:
         3. Plain input() fallback.
 
         Returns False automatically when stdin is unavailable.
+
+        The prompt is serialized through the process-wide confirmation lock so
+        that no two tool calls can await approval at the same time (which would
+        leave the user unable to tell which prompt a reply answers and let the
+        agent keep working while an approval is pending).
         """
-        if self.confirm_callback is not None:
-            return self.confirm_callback(command)
+        from .confirmation import confirmation_lock
 
-        prompt_text = f"Allow tool call: {command!r}?"
-        try:
-            from rich.prompt import Confirm
+        with confirmation_lock():
+            if self.confirm_callback is not None:
+                return self.confirm_callback(command)
 
-            return Confirm.ask(prompt_text)
-        except ImportError:
-            pass
-        except Exception:
-            pass
+            prompt_text = f"Allow tool call: {command!r}?"
+            try:
+                from rich.prompt import Confirm
 
-        try:
-            answer = input(f"{prompt_text} [y/N]: ").strip().lower()
-            return answer in ("y", "yes")
-        except (EOFError, OSError):
-            return False
+                return Confirm.ask(prompt_text)
+            except ImportError:
+                pass
+            except Exception:
+                pass
+
+            try:
+                answer = input(f"{prompt_text} [y/N]: ").strip().lower()
+                return answer in ("y", "yes")
+            except (EOFError, OSError):
+                return False
 
     # ------------------------------------------------------------------
     # Command parsing

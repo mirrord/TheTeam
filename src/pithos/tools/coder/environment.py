@@ -56,6 +56,44 @@ _GIT_DESTRUCTIVE_SUBCOMMANDS = frozenset(
     {"reset", "clean", "push", "rebase", "merge"}
 )
 
+#: File-inspection and search/find/grep commands the coding harness may *always*
+#: attempt, independent of the caller's allow/deny policy or whether any other
+#: tools are enabled. Without this baseline the subagent cannot read or search
+#: the codebase, which makes it effectively useless. These calls are still
+#: permission-gated (confirmed when a confirmation channel is available) and
+#: remain subject to the safety checker; file *writes* are handled separately by
+#: the built-in ``edit`` action.
+_MINIMUM_TOOLS = frozenset(
+    {
+        # File IO / inspection (read)
+        "cat",
+        "head",
+        "tail",
+        "ls",
+        "dir",
+        "type",
+        "nl",
+        "wc",
+        "stat",
+        "tree",
+        "file",
+        "realpath",
+        "basename",
+        "dirname",
+        # Search / find / grep
+        "grep",
+        "egrep",
+        "fgrep",
+        "rg",
+        "ag",
+        "ack",
+        "find",
+        "findstr",
+        "where",
+        "fd",
+    }
+)
+
 #: Environment overrides that keep child tools non-interactive / un-paged.
 _CHILD_ENV = {
     "PAGER": "cat",
@@ -161,8 +199,13 @@ class WorkspaceEnvironment:
         return f"{u.system} {u.release} ({u.machine})"
 
     def tools_summary(self, limit: int = 25) -> str:
-        """Return a short comma-separated sample of allowed command names."""
-        names = sorted(getattr(self.cli, "_discovered", {}).keys())
+        """Return a short comma-separated sample of available command names.
+
+        Always includes the baseline file-IO / search toolset so the subagent
+        knows it can read and search the codebase even when the caller's policy
+        lists no other tools.
+        """
+        names = sorted(set(getattr(self.cli, "_discovered", {}).keys()) | _MINIMUM_TOOLS)
         if not names:
             return ""
         sample = names[:limit]
@@ -201,6 +244,17 @@ class WorkspaceEnvironment:
         tool_name = argv[0]
         if tool_name == "git":
             return self._run_git(command, argv)
+
+        # Baseline toolset: file-inspection and search/find/grep commands are
+        # always available to the harness, independent of the caller's
+        # allow/deny policy or whether other tools are enabled. Specific calls
+        # are still gated on a user confirmation whenever a confirmation channel
+        # is present; without one (non-interactive run) the baseline stays
+        # available so the subagent can still read and search the codebase.
+        if tool_name in _MINIMUM_TOOLS:
+            if self._confirm_callback is not None and self._confirm(command) is False:
+                return self._fmt_run(command, -1, "", "denied by user")
+            return self._exec(command, argv)
 
         requires_confirm = tool_name in self._confirm_group
         allowed = self.cli.can_execute(tool_name)
@@ -243,28 +297,34 @@ class WorkspaceEnvironment:
         Uses the injected ``confirm_callback`` when present (e.g. a Telegram
         prompt). Otherwise falls back to an interactive CLI prompt; when no
         interactive channel is available the call is denied.
+
+        Serialized through the process-wide confirmation lock so a coding run
+        can only ever have one approval prompt outstanding at a time.
         """
-        if self._confirm_callback is not None:
+        from ..confirmation import confirmation_lock
+
+        with confirmation_lock():
+            if self._confirm_callback is not None:
+                try:
+                    return bool(self._confirm_callback(command))
+                except Exception as exc:  # pragma: no cover - callback guard
+                    logger.debug("confirm callback failed: %s", exc)
+                    return False
+
+            prompt_text = f"Allow coding-agent tool call: {command!r}?"
             try:
-                return bool(self._confirm_callback(command))
-            except Exception as exc:  # pragma: no cover - callback guard
-                logger.debug("confirm callback failed: %s", exc)
+                from rich.prompt import Confirm
+
+                return bool(Confirm.ask(prompt_text))
+            except ImportError:
+                pass
+            except Exception:
+                pass
+            try:
+                answer = input(f"{prompt_text} [y/N]: ").strip().lower()
+                return answer in ("y", "yes")
+            except (EOFError, OSError):
                 return False
-
-        prompt_text = f"Allow coding-agent tool call: {command!r}?"
-        try:
-            from rich.prompt import Confirm
-
-            return bool(Confirm.ask(prompt_text))
-        except ImportError:
-            pass
-        except Exception:
-            pass
-        try:
-            answer = input(f"{prompt_text} [y/N]: ").strip().lower()
-            return answer in ("y", "yes")
-        except (EOFError, OSError):
-            return False
 
     def _exec(self, command: str, argv: list[str]) -> str:
         env = dict(os.environ)

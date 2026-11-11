@@ -158,6 +158,43 @@ class TestAgentContext:
         assert messages[2]["role"] == "user"
         assert messages[2]["content"] == "Hello"
 
+    def test_get_messages_demotes_midconversation_system(self):
+        # A system-role message injected mid-conversation (e.g. a tool/memory
+        # result) must be demoted to 'user' in the outgoing payload so chat
+        # templates that require the system message to come first do not fail
+        # ("System message must be at the beginning.").
+        ctx = AgentContext("test", "System")
+        ctx.add_message(UserMsg("do a thing"))
+        ctx.add_message(AgentMsg("working on it"))
+        ctx.add_message(Msg("system", "Tool execution result"))
+        ctx.add_message(AgentMsg("done"))
+
+        messages = ctx.get_messages()
+        assert [m["role"] for m in messages] == [
+            "system",
+            "user",
+            "assistant",
+            "user",
+            "assistant",
+        ]
+        # The demoted message keeps its content.
+        assert messages[3]["content"] == "Tool execution result"
+        # Stored history is left untouched (still 'system' for display/history).
+        assert ctx.message_history[2]["role"] == "system"
+
+    def test_get_messages_preserves_leading_system_block(self):
+        # A recall-style system message injected at the front of history stays
+        # 'system' because it is still in the leading block.
+        ctx = AgentContext("test", "System")
+        ctx.message_history.insert(0, {"role": "system", "content": "recalled"})
+        ctx.add_message(UserMsg("Hello"))
+
+        messages = ctx.get_messages()
+        assert messages[0]["role"] == "system"
+        assert messages[1]["role"] == "system"
+        assert messages[1]["content"] == "recalled"
+        assert messages[2]["role"] == "user"
+
     def test_to_dict(self):
         ctx = AgentContext("test", "System prompt")
         d = ctx.to_dict()

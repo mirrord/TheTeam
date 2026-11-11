@@ -18,6 +18,7 @@ import pytest
 from unittest.mock import MagicMock, patch, call
 
 from pithos.context import AgentContext
+from pithos.agent.agent import Agent
 from pithos.agent.compaction import CompactionConfig, MemoryCompactor
 
 
@@ -284,31 +285,28 @@ class TestGenerateSummaryDetails:
         compactor = _make_compactor(summary_model="custom-model")
         agent = _make_agent(model="default-model")
 
-        with patch("ollama.chat") as mock_chat:
-            mock_chat.return_value.message.content = "Summary: ok\nEntities: none"
-            compactor._generate_summary(agent, [{"role": "user", "content": "hi"}])
+        agent._raw_complete.return_value = "Summary: ok\nEntities: none"
+        compactor._generate_summary(agent, [{"role": "user", "content": "hi"}])
 
-        assert mock_chat.call_args[1]["model"] == "custom-model"
+        assert agent._raw_complete.call_args[1]["model"] == "custom-model"
 
     def test_falls_back_to_agent_model(self):
         compactor = _make_compactor()  # summary_model=None
         agent = _make_agent(model="agent-default")
 
-        with patch("ollama.chat") as mock_chat:
-            mock_chat.return_value.message.content = "Summary: ok\nEntities: none"
-            compactor._generate_summary(agent, [{"role": "user", "content": "hi"}])
+        agent._raw_complete.return_value = "Summary: ok\nEntities: none"
+        compactor._generate_summary(agent, [{"role": "user", "content": "hi"}])
 
-        assert mock_chat.call_args[1]["model"] == "agent-default"
+        assert agent._raw_complete.call_args[1]["model"] == "agent-default"
 
     def test_temperature_is_low(self):
         compactor = _make_compactor()
         agent = _make_agent()
 
-        with patch("ollama.chat") as mock_chat:
-            mock_chat.return_value.message.content = "Summary: ok\nEntities: none"
-            compactor._generate_summary(agent, [{"role": "user", "content": "hi"}])
+        agent._raw_complete.return_value = "Summary: ok\nEntities: none"
+        compactor._generate_summary(agent, [{"role": "user", "content": "hi"}])
 
-        options = mock_chat.call_args[1]["options"]
+        options = agent._raw_complete.call_args[1]["options"]
         assert options["temperature"] == 0.3
 
     def test_prompt_contains_message_history(self):
@@ -319,11 +317,10 @@ class TestGenerateSummaryDetails:
             {"role": "assistant", "content": "A programming language."},
         ]
 
-        with patch("ollama.chat") as mock_chat:
-            mock_chat.return_value.message.content = "Summary: ok\nEntities: none"
-            compactor._generate_summary(agent, messages)
+        agent._raw_complete.return_value = "Summary: ok\nEntities: none"
+        compactor._generate_summary(agent, messages)
 
-        prompt = mock_chat.call_args[1]["messages"][0]["content"]
+        prompt = agent._raw_complete.call_args[0][0]
         assert "USER: What is Python?" in prompt
         assert "ASSISTANT: A programming language." in prompt
 
@@ -331,11 +328,10 @@ class TestGenerateSummaryDetails:
         compactor = _make_compactor()
         agent = _make_agent()
 
-        with patch("ollama.chat") as mock_chat:
-            mock_chat.return_value.message.content = "Summary: ok\nEntities: none"
-            compactor._generate_summary(agent, [{"role": "user", "content": "hi"}])
+        agent._raw_complete.return_value = "Summary: ok\nEntities: none"
+        compactor._generate_summary(agent, [{"role": "user", "content": "hi"}])
 
-        prompt = mock_chat.call_args[1]["messages"][0]["content"]
+        prompt = agent._raw_complete.call_args[0][0]
         assert "Summary:" in prompt
         assert "Entities:" in prompt
 
@@ -343,10 +339,10 @@ class TestGenerateSummaryDetails:
         compactor = _make_compactor()
         agent = _make_agent()
 
-        with patch("ollama.chat", side_effect=ConnectionError("LLM unreachable")):
-            summary, entities = compactor._generate_summary(
-                agent, [{"role": "user", "content": "hi"}]
-            )
+        agent._raw_complete.side_effect = ConnectionError("LLM unreachable")
+        summary, entities = compactor._generate_summary(
+            agent, [{"role": "user", "content": "hi"}]
+        )
 
         assert "LLM error" in summary
         assert entities == "none"
@@ -355,11 +351,10 @@ class TestGenerateSummaryDetails:
         compactor = _make_compactor()
         agent = _make_agent()
 
-        with patch("ollama.chat") as mock_chat:
-            mock_chat.return_value.message.content = None
-            summary, entities = compactor._generate_summary(
-                agent, [{"role": "user", "content": "hi"}]
-            )
+        agent._raw_complete.return_value = ""
+        summary, entities = compactor._generate_summary(
+            agent, [{"role": "user", "content": "hi"}]
+        )
 
         assert summary.strip() != ""  # should fallback, not empty
 
@@ -367,11 +362,10 @@ class TestGenerateSummaryDetails:
         compactor = _make_compactor()
         agent = _make_agent()
 
-        with patch("ollama.chat") as mock_chat:
-            mock_chat.return_value.message.content = "   \n  "
-            summary, entities = compactor._generate_summary(
-                agent, [{"role": "user", "content": "hi"}]
-            )
+        agent._raw_complete.return_value = "   \n  "
+        summary, entities = compactor._generate_summary(
+            agent, [{"role": "user", "content": "hi"}]
+        )
 
         assert summary.strip() != ""
 
@@ -385,11 +379,10 @@ class TestGenerateSummaryDetails:
             {"role": "assistant", "content": "Cats are great"},
         ]
 
-        with patch("ollama.chat") as mock_chat:
-            mock_chat.return_value.message.content = "Summary: ok\nEntities: none"
-            compactor._generate_summary(agent, messages)
+        agent._raw_complete.return_value = "Summary: ok\nEntities: none"
+        compactor._generate_summary(agent, messages)
 
-        prompt = mock_chat.call_args[1]["messages"][0]["content"]
+        prompt = agent._raw_complete.call_args[0][0]
         lines = prompt.split("\n")
         history_lines = [l for l in lines if l.startswith(("USER:", "ASSISTANT:"))]
         assert len(history_lines) == 4
@@ -1057,3 +1050,54 @@ class TestCompactEndToEnd:
         ]
         assert len(non_summary) == 1
         assert non_summary[0]["content"] == "msg 5"
+
+
+# ===========================================================================
+# 12. Backend-agnostic summary routing (regression: ollama 404 on non-ollama
+#     backends — compaction must use the agent's own backend, not ollama)
+# ===========================================================================
+
+
+class _FakeBackendAgent(Agent):
+    """Minimal Agent whose backend records calls instead of hitting ollama."""
+
+    PROVIDER = "fake"
+
+    def __init__(self, response: str, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._response = response
+        self.raw_stream_calls: list[tuple[list[dict], str, dict]] = []
+
+    def _raw_stream(self, messages, model, options):
+        self.raw_stream_calls.append((messages, model, options))
+        # Emit the canned response in a couple of chunks to exercise joining.
+        half = len(self._response) // 2
+        yield self._response[:half], None
+        yield self._response[half:], None
+
+
+class TestSummaryUsesAgentBackend:
+    """_generate_summary must route through the agent backend for any provider."""
+
+    def test_summary_routes_through_backend_not_ollama(self):
+        agent = _FakeBackendAgent(
+            response="Summary: ok\nEntities: none",
+            default_model="Qwen3.8-27B-UD-Q3_K_XL",
+        )
+        compactor = _make_compactor()
+
+        # If compaction still called ollama.chat directly this would raise.
+        with patch("ollama.chat", side_effect=AssertionError("ollama must not be used")):
+            summary, entities = compactor._generate_summary(
+                agent, [{"role": "user", "content": "hi"}]
+            )
+
+        assert summary == "ok"
+        assert entities == "none"
+        assert len(agent.raw_stream_calls) == 1
+        # The non-ollama model name is forwarded to the agent's own backend.
+        assert agent.raw_stream_calls[0][1] == "Qwen3.8-27B-UD-Q3_K_XL"
+
+    def test_raw_complete_joins_tokens(self):
+        agent = _FakeBackendAgent(response="hello world", default_model="m")
+        assert agent._raw_complete("prompt") == "hello world"

@@ -173,8 +173,6 @@ class AutoRecall:
         Returns:
             Up to 3 search query strings.
         """
-        from ollama import chat as ollama_chat
-
         # Build a concise history snippet (last 6 non-internal messages)
         visible = [
             m
@@ -192,12 +190,11 @@ class AutoRecall:
         options: dict = {"temperature": 0.2, "num_predict": 200}
 
         try:
-            response = ollama_chat(
-                model=model_to_use,
-                messages=[{"role": "user", "content": prompt}],
-                options=options,
-            )
-            raw = (response.message.content or "").strip()
+            # Route through the agent's own backend so recall works regardless
+            # of provider (Ollama / llama.cpp / ExLlama).
+            raw = agent._raw_complete(
+                prompt, model=model_to_use, options=options
+            ).strip()
         except Exception as exc:
             logger.warning("Recall query generation failed: %s", exc)
             return []

@@ -570,12 +570,10 @@ class TestGenerateSummaryEmptyFallback:
         compactor = self._make_compactor()
         agent = self._make_agent()
 
-        # ollama_chat is imported inside _generate_summary, so patch at ollama level
-        with patch("ollama.chat") as mock_chat:
-            mock_chat.return_value.message.content = ""
-            summary, entities = compactor._generate_summary(
-                agent, [{"role": "user", "content": "hi"}]
-            )
+        agent._raw_complete.return_value = ""
+        summary, entities = compactor._generate_summary(
+            agent, [{"role": "user", "content": "hi"}]
+        )
 
         assert summary.strip() != ""
 
@@ -585,11 +583,10 @@ class TestGenerateSummaryEmptyFallback:
         agent = self._make_agent()
 
         raw_response = "Summary: \nEntities: none"
-        with patch("ollama.chat") as mock_chat:
-            mock_chat.return_value.message.content = raw_response
-            summary, entities = compactor._generate_summary(
-                agent, [{"role": "user", "content": "hi"}]
-            )
+        agent._raw_complete.return_value = raw_response
+        summary, entities = compactor._generate_summary(
+            agent, [{"role": "user", "content": "hi"}]
+        )
 
         # Should fall back to raw instead of returning empty string
         assert summary.strip() != ""
@@ -602,11 +599,10 @@ class TestGenerateSummaryEmptyFallback:
         raw_response = (
             "Summary: The conversation covered astronomy.\nEntities: Sun, Jupiter"
         )
-        with patch("ollama.chat") as mock_chat:
-            mock_chat.return_value.message.content = raw_response
-            summary, entities = compactor._generate_summary(
-                agent, [{"role": "user", "content": "hi"}]
-            )
+        agent._raw_complete.return_value = raw_response
+        summary, entities = compactor._generate_summary(
+            agent, [{"role": "user", "content": "hi"}]
+        )
 
         assert summary == "The conversation covered astronomy."
         assert entities == "Sun, Jupiter"
@@ -721,11 +717,10 @@ class TestFormatSpecifierSafePrompts:
             },
         ]
 
-        with patch("ollama.chat") as mock_chat:
-            mock_chat.return_value.message.content = (
-                "Summary: Discussion of Hubble constant.\nEntities: Hubble, H0"
-            )
-            summary, entities = compactor._generate_summary(agent, messages)
+        agent._raw_complete.return_value = (
+            "Summary: Discussion of Hubble constant.\nEntities: Hubble, H0"
+        )
+        summary, entities = compactor._generate_summary(agent, messages)
 
         assert "Hubble" in summary
         assert entities != "none"
@@ -742,11 +737,10 @@ class TestFormatSpecifierSafePrompts:
             }
         )
 
-        with patch("ollama.chat") as mock_chat:
-            mock_chat.return_value.message.content = "config lookup syntax"
-            queries = recall._generate_queries(
-                agent, ctx, "How do I look things up?", None
-            )
+        agent._raw_complete.return_value = "config lookup syntax"
+        queries = recall._generate_queries(
+            agent, ctx, "How do I look things up?", None
+        )
 
         assert len(queries) >= 1
 
@@ -756,11 +750,10 @@ class TestFormatSpecifierSafePrompts:
         agent = _make_agent()
         ctx = AgentContext("test", "sys")
 
-        with patch("ollama.chat") as mock_chat:
-            mock_chat.return_value.message.content = "JSON parsing"
-            queries = recall._generate_queries(
-                agent, ctx, 'Parse {"key": "value"} in Python', None
-            )
+        agent._raw_complete.return_value = "JSON parsing"
+        queries = recall._generate_queries(
+            agent, ctx, 'Parse {"key": "value"} in Python', None
+        )
 
         assert len(queries) >= 1
 

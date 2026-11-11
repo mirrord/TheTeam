@@ -458,6 +458,46 @@ class TestToolExecutorConfirm:
         callback.assert_not_called()
         assert result.success is True
 
+    def test_concurrent_confirmations_are_serialized(self):
+        """Overlapping tool confirmations must never prompt at the same time.
+
+        Regression: with several tool calls executing on parallel threads, each
+        raised its own approval prompt concurrently, leaving the user unable to
+        tell which one a reply answered. All confirmations are serialized
+        through the process-wide confirmation lock, so only one may be awaiting
+        approval at any moment.
+        """
+        import threading
+        import time
+
+        active = {"count": 0, "max": 0}
+        lock = threading.Lock()
+
+        def callback(command: str) -> bool:
+            with lock:
+                active["count"] += 1
+                active["max"] = max(active["max"], active["count"])
+            # Hold the "prompt" open briefly to expose any overlap.
+            time.sleep(0.05)
+            with lock:
+                active["count"] -= 1
+            return True
+
+        executor = ToolExecutor(confirm_callback=callback)
+        registry = self._make_registry_with_confirm(["echo"])
+
+        def worker():
+            executor.run("echo hello", registry)
+
+        threads = [threading.Thread(target=worker) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
+
+        # The confirmation lock guarantees at most one prompt is ever active.
+        assert active["max"] == 1
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

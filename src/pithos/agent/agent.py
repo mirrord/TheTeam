@@ -567,6 +567,41 @@ class Agent(ABC):
         """
         return RuntimeError(f"Backend communication failed: {exc}")
 
+    def _raw_complete(
+        self,
+        prompt: str,
+        model: Optional[str] = None,
+        options: Optional[dict[str, Any]] = None,
+    ) -> str:
+        """Run a single non-streaming backend completion for internal use.
+
+        Collects every token from :meth:`_raw_stream` and returns the
+        concatenated text.  Auxiliary LLM calls (context compaction, recall
+        query generation) MUST route through this helper rather than calling a
+        provider SDK directly, so they work regardless of whether the agent is
+        backed by Ollama, llama.cpp or ExLlama.  Calling a specific provider
+        would otherwise fail (e.g. Ollama ``404 model not found``) whenever the
+        agent's model is only served by a different backend.
+
+        Args:
+            prompt: User prompt to send as a single-message chat.
+            model: Model identifier; falls back to :attr:`default_model`.
+            options: Backend options (e.g. ``temperature``, ``num_predict``).
+
+        Returns:
+            The concatenated response text (may be empty).
+        """
+        model_to_use = model or self.default_model
+        messages = [{"role": "user", "content": prompt}]
+        parts: list[str] = [
+            token
+            for token, _chunk in self._raw_stream(
+                messages, model_to_use, dict(options or {})
+            )
+            if token
+        ]
+        return "".join(parts)
+
     # ------------------------------------------------------------------
     # Public streaming + send (backend-agnostic orchestration)
     # ------------------------------------------------------------------

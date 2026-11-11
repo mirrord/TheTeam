@@ -126,6 +126,13 @@ class AgentContext:
 
         Internal ``_pithos_*`` metadata keys are stripped from each message
         before the list is returned so the LLM backend never receives them.
+
+        The returned payload is normalised so that ``system`` messages only
+        appear in the leading block: mid-conversation injections stored with
+        the ``system`` role (e.g. tool / memory results) are demoted to
+        ``user`` to satisfy chat templates that require the system message to
+        come first (otherwise llama.cpp raises "System message must be at the
+        beginning."). Stored history is left unchanged.
         """
         messages = []
         if self.system_prompt["content"]:
@@ -136,7 +143,32 @@ class AgentContext:
             # Strip internal pithos metadata so the LLM only sees role+content
             clean = {k: v for k, v in msg.items() if not k.startswith("_pithos_")}
             messages.append(clean)
-        return messages
+        return self._normalize_system_messages(messages)
+
+    @staticmethod
+    def _normalize_system_messages(
+        messages: list[dict[str, str]],
+    ) -> list[dict[str, str]]:
+        """Demote any non-leading ``system`` message to ``user``.
+
+        Many chat templates (e.g. Qwen on llama.cpp) reject a ``system`` role
+        that appears after any non-system message. Continuation injections such
+        as tool and memory results are stored with the ``system`` role, so here
+        we relocate them onto the ``user`` role once a non-system message has
+        been seen. The leading run of system messages (the system prompt, plus
+        any recalled-context injection) is preserved. Input dicts are never
+        mutated — a shallow copy is made when a role is changed.
+        """
+        normalized: list[dict[str, str]] = []
+        seen_non_system = False
+        for msg in messages:
+            if msg.get("role") == "system":
+                if seen_non_system:
+                    msg = {**msg, "role": "user"}
+            else:
+                seen_non_system = True
+            normalized.append(msg)
+        return normalized
 
     def to_dict(self, with_history: bool = False) -> dict[str, Any]:
         """Serialize context to dictionary."""

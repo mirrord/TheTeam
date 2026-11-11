@@ -209,3 +209,81 @@ class TestWorkspaceHelpers:
     def test_system_info(self, tmp_path: Path) -> None:
         env = _env(tmp_path)
         assert env.system_info()
+
+
+class TestMinimumToolset:
+    """The harness always has a baseline of file-IO and search/find/grep tools,
+    independent of the caller's tool policy, and those calls stay permission
+    gated."""
+
+    def test_minimum_tool_available_despite_restrictive_config(
+        self, tmp_path: Path
+    ) -> None:
+        # _TOOL_CONFIG only includes python/git/echo — grep is NOT listed, yet
+        # it must still be runnable because it is part of the baseline toolset.
+        env = _env(tmp_path)
+        ran: dict[str, str] = {}
+
+        def fake_exec(command, argv):
+            ran["cmd"] = command
+            return "RAN"
+
+        env._exec = fake_exec  # type: ignore[assignment]
+
+        obs = env.execute_action(Action(kind="run", command="grep foo bar.py"))
+
+        assert obs == "RAN"
+        assert ran["cmd"] == "grep foo bar.py"
+
+    def test_minimum_tool_runs_noninteractive_without_callback(
+        self, tmp_path: Path
+    ) -> None:
+        # No confirm channel: the baseline stays available so the subagent can
+        # still read and search the codebase.
+        env = _env(tmp_path)
+        env._exec = lambda command, argv: "RAN"  # type: ignore[assignment]
+
+        obs = env.execute_action(Action(kind="run", command="find . -name x.py"))
+
+        assert obs == "RAN"
+
+    def test_minimum_tool_permission_gated_when_channel_present(
+        self, tmp_path: Path
+    ) -> None:
+        asked: list[str] = []
+
+        def deny(command: str) -> bool:
+            asked.append(command)
+            return False
+
+        env = WorkspaceEnvironment(
+            str(tmp_path), CodeHarnessConfig(), _TOOL_CONFIG, confirm_callback=deny
+        )
+        env._exec = lambda command, argv: "SHOULD_NOT_RUN"  # type: ignore[assignment]
+
+        obs = env.execute_action(Action(kind="run", command="cat secrets.txt"))
+
+        assert asked == ["cat secrets.txt"]  # the user was prompted
+        assert "denied by user" in obs
+
+    def test_minimum_tool_approved_runs(self, tmp_path: Path) -> None:
+        env = WorkspaceEnvironment(
+            str(tmp_path),
+            CodeHarnessConfig(),
+            _TOOL_CONFIG,
+            confirm_callback=lambda command: True,
+        )
+        env._exec = lambda command, argv: "RAN"  # type: ignore[assignment]
+
+        obs = env.execute_action(Action(kind="run", command="rg pattern src/"))
+
+        assert obs == "RAN"
+
+    def test_minimum_tool_still_safety_checked(self, tmp_path: Path) -> None:
+        # The baseline does not bypass the safety checker: shell-injection in a
+        # grep command is still blocked.
+        env = _env(tmp_path)
+        obs = env.execute_action(
+            Action(kind="run", command="grep foo bar.py && rm -rf /")
+        )
+        assert "blocked by safety checker" in obs.lower()

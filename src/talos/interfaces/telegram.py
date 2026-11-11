@@ -58,6 +58,13 @@ class TelegramInterface:
         # prompt rather than as a new chat turn.
         self._pending_confirms: dict[int, _PendingConfirm] = {}
         self._pending_lock = threading.Lock()
+        # Serializes agent turns. The agent (and its single, shared
+        # ``tool_confirm_callback``) can only safely run one turn at a time, so
+        # a new message must never start a second concurrent turn while another
+        # is in flight — otherwise the agent keeps generating and emits more
+        # approval prompts while an earlier one is still awaiting the user's
+        # reply. Held (non-blocking) for the duration of each turn.
+        self._turn_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Handlers
@@ -98,6 +105,20 @@ class TelegramInterface:
             return
         if self.show:
             print(f"\n[{user.first_name} ({user.id})] {text}", flush=True)
+        # Serialize agent turns. While a turn is in flight the agent may be
+        # paused waiting for a tool-call approval; starting a second turn here
+        # would run the shared agent concurrently, clobber its tool-confirm
+        # channel, and emit further approval prompts before the first is
+        # answered. Refuse to start a concurrent turn instead. (A reply to a
+        # *pending* approval is consumed earlier by ``_resolve_pending_confirm``
+        # and never reaches this point.)
+        if not self._turn_lock.acquire(blocking=False):
+            await update.message.reply_text(
+                "\u23f3 I'm still working on your previous message — please wait "
+                "for it to finish. If I asked you to approve a tool call, reply "
+                "to that prompt first."
+            )
+            return
         loop = asyncio.get_running_loop()
         confirm_cb = self._make_confirm_callback(user.id, update, loop)
         try:
@@ -112,6 +133,8 @@ class TelegramInterface:
                 print(f"[error] {exc}", flush=True)
             await update.message.reply_text(f"[error] {exc}")
             return
+        finally:
+            self._turn_lock.release()
         # Strip tool-call syntax so users see a clean reply.
         response = clean_agent_response(response)
         # Telegram caps messages at 4096 characters.

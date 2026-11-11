@@ -30,4 +30,4 @@ system_prompt: |
   complete and verified, issue a single submit tool call.
 
 tools:
-  enabled: true
+  enabled: false
