@@ -164,9 +164,14 @@ instead of denying outright:
 - The caller's confirmation channel (`agent.tool_confirm_callback`) is invoked
   with the exact command string.
 - In **talos / Telegram**, this sends the user a message showing the exact tool
-  call; replying `yes` runs it, anything else denies it. (The agent turn runs
-  off the event loop so the bot stays responsive to the reply, and a pending
-  prompt consumes the user's next message as its answer.)
+  call. The user answers by **reacting to that prompt message**: 👍 runs it,
+  any other reaction denies it (no reaction within 5 minutes also denies).
+  Reactions are used *only* for permission answers, and text messages are never
+  treated as an answer — a text sent while a prompt is pending just gets a
+  reminder to react, so a permission answer can never also be read as a chat
+  message to the agent. The bot subscribes to `message_reaction` updates and
+  processes updates concurrently so the reaction is handled while the agent
+  turn is paused; turns themselves remain strictly one at a time.
 - On the **CLI**, it falls back to an interactive `[y/N]` prompt.
 - All confirmations are serialized process-wide (see
   [`confirmation.py`](../src/pithos/tools/confirmation.py)), so only one

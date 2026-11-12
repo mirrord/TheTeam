@@ -18,17 +18,26 @@ from .system_commands import handle_system_command
 logger = logging.getLogger(__name__)
 
 #: How long (seconds) a mid-task tool-confirmation prompt waits for the user's
-#: reply before it is treated as a denial.
+#: reaction before it is treated as a denial.
 _CONFIRM_TIMEOUT_SECONDS = 300.0
 
-#: Replies (case-insensitive, stripped) that approve a confirmation prompt.
-_AFFIRMATIVE = {"yes", "y", "yeah", "yep", "ok", "okay", "sure", "allow", "approve"}
+#: The only reaction that approves a tool call; any other reaction denies it.
+#: Approvals are given exclusively via reactions on the prompt message so a
+#: permission answer can never be mistaken for (or double-counted as) a chat
+#: message to the agent.
+_APPROVE_REACTION = "\U0001f44d"  # 👍
 
 
 @dataclass
 class _PendingConfirm:
-    """State for an outstanding tool-confirmation prompt for one user."""
+    """State for an outstanding tool-confirmation prompt.
 
+    Keyed in :attr:`TelegramInterface._pending_confirms` by the
+    ``(chat_id, message_id)`` of the prompt message, so each reaction resolves
+    exactly the prompt it was placed on.
+    """
+
+    user_id: int
     event: threading.Event = field(default_factory=threading.Event)
     approved: bool = False
 
@@ -53,10 +62,10 @@ class TelegramInterface:
         # When True, mirror the conversation to stdout and stream the agent's
         # response tokens as they are produced.
         self.show = show
-        # Outstanding tool-confirmation prompts, keyed by Telegram user id. A
-        # user's next message is interpreted as the answer to their pending
-        # prompt rather than as a new chat turn.
-        self._pending_confirms: dict[int, _PendingConfirm] = {}
+        # Outstanding tool-confirmation prompts, keyed by the prompt message's
+        # ``(chat_id, message_id)``. They are resolved only by a reaction on that
+        # exact message — never by a text message.
+        self._pending_confirms: dict[tuple[int, int], _PendingConfirm] = {}
         self._pending_lock = threading.Lock()
         # Serializes agent turns. The agent (and its single, shared
         # ``tool_confirm_callback``) can only safely run one turn at a time, so
@@ -65,9 +74,9 @@ class TelegramInterface:
         # approval prompts while an earlier one is still awaiting the user's
         # reply. Held (non-blocking) for the duration of each turn.
         self._turn_lock = threading.Lock()
-
-    # ------------------------------------------------------------------
-    # Handlers
+        # Update types requested from Telegram when polling (set by
+        # :meth:`build_application`; must include ``message_reaction``).
+        self._allowed_updates: Optional[list[str]] = None
     # ------------------------------------------------------------------
 
     def _ensure_context(self, user_id: int) -> str:
@@ -88,10 +97,33 @@ class TelegramInterface:
         text = update.message.text or ""
         if not text.strip():
             return
-        # If this user has an outstanding tool-confirmation prompt, treat their
-        # message as the answer rather than a new chat turn.
-        if self._resolve_pending_confirm(user.id, text):
+        # Tool-call approvals are given only via reactions on the prompt
+        # message. A text message while an approval is pending is never treated
+        # as the answer (nor as a new turn) — it would otherwise be ambiguous.
+        if self._has_pending_confirm(user.id):
+            await update.message.reply_text(
+                "\u23f3 I'm waiting for your permission on a tool call. React "
+                f"{_APPROVE_REACTION} to that prompt to allow it, or with any "
+                "other reaction to deny it."
+            )
             return
+        # Serialize agent turns. While a turn is in flight the agent may be
+        # paused waiting for a tool-call approval; starting a second turn (or
+        # running a system command such as "system reset" against the context
+        # mid-turn) would touch the shared agent concurrently. Refuse instead.
+        if not self._turn_lock.acquire(blocking=False):
+            await update.message.reply_text(
+                "\u23f3 I'm still working on your previous message — please wait "
+                "for it to finish."
+            )
+            return
+        try:
+            await self._run_turn(update, user, text)
+        finally:
+            self._turn_lock.release()
+
+    async def _run_turn(self, update: Any, user: Any, text: str) -> None:
+        """Handle one message while holding :attr:`_turn_lock`."""
         ctx_name = self._ensure_context(user.id)
         # Interface-level commands (e.g. "system reset") are handled locally
         # against this user's context and never forwarded to the agent.
@@ -105,25 +137,11 @@ class TelegramInterface:
             return
         if self.show:
             print(f"\n[{user.first_name} ({user.id})] {text}", flush=True)
-        # Serialize agent turns. While a turn is in flight the agent may be
-        # paused waiting for a tool-call approval; starting a second turn here
-        # would run the shared agent concurrently, clobber its tool-confirm
-        # channel, and emit further approval prompts before the first is
-        # answered. Refuse to start a concurrent turn instead. (A reply to a
-        # *pending* approval is consumed earlier by ``_resolve_pending_confirm``
-        # and never reaches this point.)
-        if not self._turn_lock.acquire(blocking=False):
-            await update.message.reply_text(
-                "\u23f3 I'm still working on your previous message — please wait "
-                "for it to finish. If I asked you to approve a tool call, reply "
-                "to that prompt first."
-            )
-            return
         loop = asyncio.get_running_loop()
         confirm_cb = self._make_confirm_callback(user.id, update, loop)
         try:
             # Run the (blocking) agent turn off the event loop so the loop stays
-            # free to receive the user's confirmation reply mid-task.
+            # free to receive the user's approval reactions mid-task.
             response = await asyncio.to_thread(
                 self._generate_response_with_confirm, text, ctx_name, confirm_cb
             )
@@ -133,8 +151,6 @@ class TelegramInterface:
                 print(f"[error] {exc}", flush=True)
             await update.message.reply_text(f"[error] {exc}")
             return
-        finally:
-            self._turn_lock.release()
         # Strip tool-call syntax so users see a clean reply.
         response = clean_agent_response(response)
         # Telegram caps messages at 4096 characters.
@@ -192,50 +208,87 @@ class TelegramInterface:
     # Tool-confirmation bridge
     # ------------------------------------------------------------------
 
-    def _resolve_pending_confirm(self, user_id: int, text: str) -> bool:
-        """If *user_id* has a pending confirmation, resolve it with *text*.
+    def _has_pending_confirm(self, user_id: int) -> bool:
+        """Return True if *user_id* has an outstanding tool-confirmation prompt."""
+        with self._pending_lock:
+            return any(p.user_id == user_id for p in self._pending_confirms.values())
 
-        Returns True when the message was consumed as a confirmation answer.
+    async def _handle_reaction(self, update: Any, _context: Any) -> None:
+        """Resolve a pending tool-confirmation prompt from a message reaction.
+
+        Only reactions placed on a prompt message, by the user who was asked,
+        count: :data:`_APPROVE_REACTION` approves, any other reaction denies.
+        Reactions on other messages, and reaction removals, are ignored.
+        """
+        reaction = getattr(update, "message_reaction", None)
+        if reaction is None:
+            return
+        user = getattr(reaction, "user", None)
+        if user is None:  # anonymous reactions can't be attributed
+            return
+        new = list(getattr(reaction, "new_reaction", None) or [])
+        if not new:  # reaction removed — not an answer
+            return
+        emojis = [getattr(r, "emoji", None) for r in new]
+        self._resolve_reaction(
+            reaction.chat.id, reaction.message_id, user.id, emojis
+        )
+
+    def _resolve_reaction(
+        self,
+        chat_id: int,
+        message_id: int,
+        user_id: int,
+        emojis: list[Optional[str]],
+    ) -> bool:
+        """Resolve the prompt at ``(chat_id, message_id)`` from *emojis*.
+
+        Returns True when a pending prompt was resolved.
         """
         with self._pending_lock:
-            pending = self._pending_confirms.get(user_id)
-        if pending is None:
-            return False
-        pending.approved = text.strip().lower() in _AFFIRMATIVE
-        pending.event.set()
+            pending = self._pending_confirms.get((chat_id, message_id))
+            if pending is None or pending.user_id != user_id or pending.event.is_set():
+                return False
+            pending.approved = _APPROVE_REACTION in emojis
+            pending.event.set()
         return True
 
     def _make_confirm_callback(self, user_id: int, update: Any, loop: Any):
         """Build a (blocking) confirm callback for one agent turn.
 
         The callback runs in the worker thread executing the agent turn. It
-        posts the exact tool call to the user, then blocks until the user's
-        reply arrives (handled on the event loop) or the prompt times out.
+        posts the exact tool call to the user, then blocks until the user
+        reacts to that prompt (handled on the event loop) or it times out.
         """
 
-        def confirm(command: str) -> bool:
-            pending = _PendingConfirm()
-            # Register before sending so a fast reply is never missed.
+        async def _send_and_register(prompt: str) -> tuple[tuple[int, int], _PendingConfirm]:
+            msg = await update.message.reply_text(prompt)
+            key = (msg.chat_id, msg.message_id)
+            pending = _PendingConfirm(user_id=user_id)
+            # Registered on the event loop, which also runs the reaction
+            # handler, so a reaction can never be processed before this.
             with self._pending_lock:
-                self._pending_confirms[user_id] = pending
+                self._pending_confirms[key] = pending
+            return key, pending
+
+        def confirm(command: str) -> bool:
             prompt = (
                 "\u26a0\ufe0f The coding agent wants to run this tool call:\n\n"
                 f"{command}\n\n"
-                "Reply 'yes' to allow, anything else to deny."
+                f"React {_APPROVE_REACTION} to this message to allow it, or with "
+                "any other reaction to deny it."
             )
             try:
                 future = asyncio.run_coroutine_threadsafe(
-                    update.message.reply_text(prompt), loop
+                    _send_and_register(prompt), loop
                 )
-                future.result(timeout=30)
+                key, pending = future.result(timeout=30)
             except Exception as exc:  # pragma: no cover - network guard
                 logger.warning("Failed to send confirmation prompt: %s", exc)
-                with self._pending_lock:
-                    self._pending_confirms.pop(user_id, None)
                 return False
             got_reply = pending.event.wait(timeout=_CONFIRM_TIMEOUT_SECONDS)
             with self._pending_lock:
-                self._pending_confirms.pop(user_id, None)
+                self._pending_confirms.pop(key, None)
             if not got_reply:
                 return False
             return pending.approved
@@ -293,10 +346,12 @@ class TelegramInterface:
     def build_application(self) -> Any:
         """Construct the python-telegram-bot :class:`Application` instance."""
         try:
+            from telegram import Update  # type: ignore
             from telegram.ext import (  # type: ignore
                 ApplicationBuilder,
                 CommandHandler,
                 MessageHandler,
+                MessageReactionHandler,
                 filters,
             )
         except ImportError as exc:
@@ -305,18 +360,32 @@ class TelegramInterface:
                 "Install with: pip install -e .[talos]"
             ) from exc
 
-        app = ApplicationBuilder().token(self.config.bot_token).build()
+        # Updates must be processed concurrently: an agent turn blocks its
+        # handler while it waits for tool-call approval, and with sequential
+        # processing the approving reaction would queue behind that very turn
+        # (until the prompt timed out). Concurrent turns are prevented
+        # separately by ``_turn_lock``.
+        app = (
+            ApplicationBuilder()
+            .token(self.config.bot_token)
+            .concurrent_updates(True)
+            .build()
+        )
         app.add_handler(CommandHandler("start", self._start))
         app.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message)
         )
+        app.add_handler(MessageReactionHandler(self._handle_reaction))
+        # Telegram only delivers ``message_reaction`` updates when explicitly
+        # requested via ``allowed_updates``.
+        self._allowed_updates = Update.ALL_TYPES
         return app
 
     def run(self) -> None:
         """Start polling. Blocks until Ctrl+C."""
         app = self.build_application()
         print("Talos telegram bot started. Press Ctrl+C to exit.")
-        app.run_polling()
+        app.run_polling(allowed_updates=self._allowed_updates)
 
 
 __all__ = ["TelegramInterface"]

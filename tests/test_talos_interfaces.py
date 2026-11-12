@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -355,40 +356,95 @@ def test_telegram_skips_missing_attachment_without_crash(tmp_path) -> None:
     update.message.reply_document.assert_not_awaited()
 
 
-def test_telegram_resolve_pending_confirm() -> None:
-    """A pending confirmation consumes the next message as its yes/no answer."""
-    agent = _make_agent()
-    iface = TelegramInterface(agent, TelegramConfig(bot_token="t"))
+def _make_prompt_message(chat_id: int, message_id: int) -> MagicMock:
+    msg = MagicMock()
+    msg.chat_id = chat_id
+    msg.message_id = message_id
+    return msg
 
-    # No pending → message is not consumed.
-    assert iface._resolve_pending_confirm(5, "hello") is False
 
+def _make_reaction_update(
+    chat_id: int, message_id: int, user_id: Optional[int], emojis: list[str]
+) -> MagicMock:
+    update = MagicMock()
+    reaction = update.message_reaction
+    reaction.chat.id = chat_id
+    reaction.message_id = message_id
+    reaction.user = None if user_id is None else MagicMock(id=user_id)
+    reaction.new_reaction = [MagicMock(emoji=e) for e in emojis]
+    return update
+
+
+def test_telegram_resolve_reaction_only_matches_its_prompt() -> None:
+    """A reaction resolves only the prompt it is on, and only for the asked user."""
     from talos.interfaces.telegram import _PendingConfirm
 
-    pending = _PendingConfirm()
-    iface._pending_confirms[5] = pending
-    assert iface._resolve_pending_confirm(5, "YES") is True
+    iface = TelegramInterface(_make_agent(), TelegramConfig(bot_token="t"))
+
+    # No pending prompt for that message → nothing resolved.
+    assert iface._resolve_reaction(1, 10, 5, ["\U0001f44d"]) is False
+
+    pending = _PendingConfirm(user_id=5)
+    iface._pending_confirms[(1, 10)] = pending
+    # Wrong user and wrong message are ignored.
+    assert iface._resolve_reaction(1, 10, 6, ["\U0001f44d"]) is False
+    assert iface._resolve_reaction(1, 11, 5, ["\U0001f44d"]) is False
+    assert not pending.event.is_set()
+
+    assert iface._resolve_reaction(1, 10, 5, ["\U0001f44d"]) is True
     assert pending.approved is True
-    assert pending.event.is_set()
-
-    pending2 = _PendingConfirm()
-    iface._pending_confirms[6] = pending2
-    assert iface._resolve_pending_confirm(6, "no thanks") is True
-    assert pending2.approved is False
+    # A second reaction on an already-answered prompt changes nothing.
+    assert iface._resolve_reaction(1, 10, 5, ["\U0001f44e"]) is False
+    assert pending.approved is True
 
 
-def test_telegram_tool_confirmation_round_trip() -> None:
-    """A mid-task tool-confirm prompt is answered by the user's next message."""
+def test_telegram_any_other_reaction_denies() -> None:
+    from talos.interfaces.telegram import _PendingConfirm
 
-    async def scenario() -> None:
+    iface = TelegramInterface(_make_agent(), TelegramConfig(bot_token="t"))
+    pending = _PendingConfirm(user_id=5)
+    iface._pending_confirms[(1, 10)] = pending
+
+    assert iface._resolve_reaction(1, 10, 5, ["\u2764"]) is True
+    assert pending.approved is False
+
+
+def test_telegram_reaction_handler_ignores_removal_and_anonymous() -> None:
+    from talos.interfaces.telegram import _PendingConfirm
+
+    iface = TelegramInterface(_make_agent(), TelegramConfig(bot_token="t"))
+    pending = _PendingConfirm(user_id=5)
+    iface._pending_confirms[(1, 10)] = pending
+
+    asyncio.run(iface._handle_reaction(_make_reaction_update(1, 10, 5, []), MagicMock()))
+    asyncio.run(
+        iface._handle_reaction(
+            _make_reaction_update(1, 10, None, ["\U0001f44d"]), MagicMock()
+        )
+    )
+    assert not pending.event.is_set()
+
+    asyncio.run(
+        iface._handle_reaction(
+            _make_reaction_update(1, 10, 5, ["\U0001f44d"]), MagicMock()
+        )
+    )
+    assert pending.event.is_set() and pending.approved is True
+
+
+def _run_confirm_scenario(user_id: int, emoji: str) -> tuple[dict, MagicMock]:
+    """Start a turn that needs approval, answer it with a reaction *emoji*."""
+    captured: dict[str, object] = {}
+
+    async def scenario() -> MagicMock:
         agent = _make_agent()
         iface = TelegramInterface(agent, TelegramConfig(bot_token="t"))
-        captured: dict[str, object] = {}
 
         def fake_send(text, context_name=None, **kwargs):
-            # The coding subagent would consult the caller's confirm channel.
-            cb = agent.tool_confirm_callback
-            captured["approved"] = cb("powershell -Command whoami")
+            captured["approved"] = agent.tool_confirm_callback(
+                "powershell -Command whoami"
+            )
+            captured["sends"] = captured.get("sends", 0) + 1  # type: ignore[operator]
             return "all done"
 
         agent.send = fake_send  # type: ignore[assignment]
@@ -396,63 +452,64 @@ def test_telegram_tool_confirmation_round_trip() -> None:
         agent._pending_report_paths = []
         agent._pending_attachment_paths = []
 
-        update1 = _make_update(100, "code do the thing")
+        update1 = _make_update(user_id, "code do the thing")
         update1.message.reply_document = AsyncMock()
+        prompt_msg = _make_prompt_message(chat_id=777, message_id=55)
+        update1.message.reply_text = AsyncMock(return_value=prompt_msg)
 
-        # Start the agent turn; it blocks in a worker thread awaiting confirm.
         task = asyncio.create_task(iface._handle_message(update1, MagicMock()))
-        for _ in range(200):
+        for _ in range(300):
             await asyncio.sleep(0.01)
-            if 100 in iface._pending_confirms:
+            if (777, 55) in iface._pending_confirms:
                 break
-        assert 100 in iface._pending_confirms  # user was prompted
+        assert (777, 55) in iface._pending_confirms  # user was prompted
 
-        # Deliver the approval as the user's next message.
-        update2 = _make_update(100, "yes")
-        await iface._handle_message(update2, MagicMock())
+        # Regression: a text "yes" while the prompt is pending must neither
+        # answer the prompt nor start a new agent turn.
+        update_yes = _make_update(user_id, "yes")
+        await iface._handle_message(update_yes, MagicMock())
+        assert not iface._pending_confirms[(777, 55)].event.is_set()
+        captured["yes_reply"] = update_yes.message.reply_text.await_args.args[0]
+
+        await iface._handle_reaction(
+            _make_reaction_update(777, 55, user_id, [emoji]), MagicMock()
+        )
         await task
+        return update1
 
-        assert captured["approved"] is True
-        # The confirm prompt included the exact command.
-        prompts = [c.args[0] for c in update1.message.reply_text.await_args_list]
-        assert any("powershell -Command whoami" in p for p in prompts)
-
-    asyncio.run(scenario())
+    update1 = asyncio.run(scenario())
+    return captured, update1
 
 
-def test_telegram_tool_confirmation_denied() -> None:
-    """Replying with anything other than yes denies the tool call."""
+def test_telegram_tool_confirmation_approved_by_thumbs_up() -> None:
+    captured, update1 = _run_confirm_scenario(100, "\U0001f44d")
 
-    async def scenario() -> None:
-        agent = _make_agent()
-        iface = TelegramInterface(agent, TelegramConfig(bot_token="t"))
-        captured: dict[str, object] = {}
+    assert captured["approved"] is True
+    assert captured["sends"] == 1  # the text "yes" never became a turn
+    assert "react" in str(captured["yes_reply"]).lower()
+    prompts = [c.args[0] for c in update1.message.reply_text.await_args_list]
+    assert any("powershell -Command whoami" in p for p in prompts)
 
-        def fake_send(text, context_name=None, **kwargs):
-            captured["approved"] = agent.tool_confirm_callback("bash -c rm")
-            return "ok"
 
-        agent.send = fake_send  # type: ignore[assignment]
-        agent._pending_image_paths = []
-        agent._pending_report_paths = []
-        agent._pending_attachment_paths = []
+def test_telegram_tool_confirmation_denied_by_other_reaction() -> None:
+    captured, _ = _run_confirm_scenario(101, "\U0001f44e")
 
-        update1 = _make_update(101, "code do the thing")
-        update1.message.reply_document = AsyncMock()
-        task = asyncio.create_task(iface._handle_message(update1, MagicMock()))
-        for _ in range(200):
-            await asyncio.sleep(0.01)
-            if 101 in iface._pending_confirms:
-                break
-        assert 101 in iface._pending_confirms
+    assert captured["approved"] is False
+    assert captured["sends"] == 1
 
-        update2 = _make_update(101, "no")
-        await iface._handle_message(update2, MagicMock())
-        await task
 
-        assert captured["approved"] is False
+def test_telegram_build_application_subscribes_to_reactions() -> None:
+    from telegram.ext import MessageReactionHandler
 
-    asyncio.run(scenario())
+    iface = TelegramInterface(_make_agent(), TelegramConfig(bot_token="123:abc"))
+    app = iface.build_application()
+
+    handlers = [h for group in app.handlers.values() for h in group]
+    assert any(isinstance(h, MessageReactionHandler) for h in handlers)
+    assert "message_reaction" in iface._allowed_updates
+    # Updates must be processed concurrently so a reaction is never queued
+    # behind the turn that is blocked waiting for it.
+    assert app.concurrent_updates > 1
 
 
 def test_telegram_refuses_concurrent_turn_while_busy() -> None:
